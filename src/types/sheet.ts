@@ -205,7 +205,7 @@ export interface AboveAverageRuleModel extends CfRuleModelBase {
 
 /**
  * A `colorScale` rule (index.d.ts `ColorScaleRuleType`): rendering requires `cfvo` and `color` (it throws without them).
- * A parsed color is `undefined` for an auto color.
+ * A parsed color is `undefined` for a `<color>` without color attribute (rendered back as `<color/>`).
  */
 export interface ColorScaleRuleModel extends CfRuleModelBase {
     type: "colorScale";

@@ -156,18 +156,18 @@ class DatabarExtXform extends CompositeXform<DatabarExtModel> {
                 model.cfvo.push(this.cfvoXform.model!);
                 break;
 
-            // color-xform is not typed yet: its model is a ColorModel (undefined for an auto color)
+            // undefined for a color element without color attribute
             case "x14:borderColor":
-                model.borderColor = this.borderColorXform.model as ColorModel | undefined;
+                model.borderColor = this.borderColorXform.model ?? undefined;
                 break;
             case "x14:negativeBorderColor":
-                model.negativeBorderColor = this.negativeBorderColorXform.model as ColorModel | undefined;
+                model.negativeBorderColor = this.negativeBorderColorXform.model ?? undefined;
                 break;
             case "x14:negativeFillColor":
-                model.negativeFillColor = this.negativeFillColorXform.model as ColorModel | undefined;
+                model.negativeFillColor = this.negativeFillColorXform.model ?? undefined;
                 break;
             case "x14:axisColor":
-                model.axisColor = this.axisColorXform.model as ColorModel | undefined;
+                model.axisColor = this.axisColorXform.model ?? undefined;
                 break;
         }
     }

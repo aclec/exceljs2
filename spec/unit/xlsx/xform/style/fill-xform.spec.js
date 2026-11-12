@@ -119,8 +119,42 @@ const expectations = [
         },
         tests: ["render", "renderIn", "parse"],
     },
+    {
+        title: "Gradient with an automatic color",
+        create() {
+            return new FillXform();
+        },
+        preparedModel: {
+            type: "gradient",
+            gradient: "angle",
+            degree: 90,
+            stops: [
+                { position: 0, color: { auto: true } },
+                { position: 1, color: { theme: 4 } },
+            ],
+        },
+        xml:
+            '<fill><gradientFill degree="90">' +
+            '<stop position="0"><color auto="1"/></stop>' +
+            '<stop position="1"><color theme="4"/></stop>' +
+            "</gradientFill></fill>",
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
 ];
 
 describe("FillXform", () => {
     testXformHelper(expectations);
+});
+
+describe("FillXform gradient stops", () => {
+    it("writes a stop without color with an empty color element (CT_GradientStop requires one)", () => {
+        const xform = new FillXform();
+        const model = { type: "gradient", gradient: "angle", degree: 0, stops: [{ position: 0 }, { position: 1, color: { theme: 1 } }] };
+        expect(xform.toXml(model)).to.equal(
+            '<fill><gradientFill degree="0"><stop position="0"><color/></stop><stop position="1"><color theme="1"/></stop></gradientFill></fill>'
+        );
+    });
 });

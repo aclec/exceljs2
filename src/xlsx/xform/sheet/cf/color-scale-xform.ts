@@ -5,7 +5,7 @@ import CompositeXform from "../../composite-xform";
 import ColorXform from "../../style/color-xform";
 import CfvoXform from "./cfvo-xform";
 
-/** The model of `<colorScale>`: the thresholds and their colors (`undefined` for an `auto` color). */
+/** The model of `<colorScale>`: the thresholds and their colors (`undefined` for a `<color>` without color attribute). */
 export interface ColorScaleModel {
     cfvo: CfvoModel[];
     color: (ColorModel | undefined)[];
@@ -34,6 +34,9 @@ class ColorScaleXform extends CompositeXform<ColorScaleModel> {
     }
 
     /**
+     * Writes the thresholds, then one `<color>` per color (`<color/>` for an `undefined` one: the colors match the
+     * thresholds by position).
+     *
      * @param model - the rule
      * @throws Error when the rule has no `cfvo` or no `color` (CT_ColorScale requires them)
      */
@@ -51,7 +54,9 @@ class ColorScaleXform extends CompositeXform<ColorScaleModel> {
             this.cfvoXform.render(xmlStream, item);
         }
         for (const item of color) {
-            this.colorXform.render(xmlStream, item);
+            if (!this.colorXform.render(xmlStream, item)) {
+                xmlStream.leafNode(this.colorXform.tag);
+            }
         }
 
         xmlStream.closeNode();
@@ -73,8 +78,8 @@ class ColorScaleXform extends CompositeXform<ColorScaleModel> {
                 model.cfvo.push(this.cfvoXform.model!);
                 break;
             case "color":
-                // color-xform is not typed yet: its model is a ColorModel (undefined for an auto color)
-                model.color.push(this.colorXform.model as ColorModel | undefined);
+                // undefined for a <color> without color attribute
+                model.color.push(this.colorXform.model ?? undefined);
                 break;
             default:
                 break;

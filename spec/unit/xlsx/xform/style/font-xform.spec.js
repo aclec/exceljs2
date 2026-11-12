@@ -52,6 +52,18 @@ const expectations = [
         parsedModel: { strike: true, outline: true, shadow: true, size: 11 },
         tests: ["parse"],
     },
+    {
+        title: "a size with decimals",
+        create() {
+            return new FontXform();
+        },
+        preparedModel: { size: 10.5, name: "Arial" },
+        xml: '<font><sz val="10.5"/><name val="Arial"/></font>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
 ];
 
 describe("FontXform", () => {

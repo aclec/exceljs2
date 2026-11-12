@@ -576,4 +576,37 @@ describe("conditional formatting", () => {
             }
         });
     });
+
+    describe("color scales", () => {
+        it("keep their automatic colors", async () => {
+            const source = await sourceWith(
+                '<conditionalFormatting sqref="A1:A5"><cfRule type="colorScale" priority="1"><colorScale>' +
+                    '<cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/>' +
+                    '<color auto="1"/><color rgb="FFFFEB84"/><color theme="4"/>' +
+                    "</colorScale></cfRule></conditionalFormatting>",
+                ""
+            );
+            const wb = await load(source);
+            const [rule] = wb.getWorksheet("Sheet1").conditionalFormattings[0].rules;
+            expect(rule.color).to.deep.equal([{ auto: true }, { argb: "FFFFEB84" }, { theme: 4 }]);
+
+            const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
+            expect(mainSection(xml)).to.include('<color auto="1"/><color rgb="FFFFEB84"/><color theme="4"/>');
+        });
+
+        it("keep one color per threshold, also for a color without color attribute", async () => {
+            const source = await sourceWith(
+                '<conditionalFormatting sqref="A1:A5"><cfRule type="colorScale" priority="1"><colorScale>' +
+                    '<cfvo type="min"/><cfvo type="max"/><color/><color rgb="FF63BE7B"/>' +
+                    "</colorScale></cfRule></conditionalFormatting>",
+                ""
+            );
+            const wb = await load(source);
+            const [rule] = wb.getWorksheet("Sheet1").conditionalFormattings[0].rules;
+            expect(rule.color).to.deep.equal([undefined, { argb: "FF63BE7B" }]);
+
+            const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
+            expect(mainSection(xml)).to.include('<cfvo type="min"/><cfvo type="max"/><color/><color rgb="FF63BE7B"/>');
+        });
+    });
 });

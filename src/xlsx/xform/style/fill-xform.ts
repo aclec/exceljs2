@@ -44,10 +44,13 @@ class StopXform extends BaseXform<GradientStopModel> {
         return "stop";
     }
 
+    /** Writes the stop and its color (CT_GradientStop requires one: `<color/>` for a stop without color). */
     override render(xmlStream: XmlStream, model: GradientStopModel): void {
         xmlStream.openNode("stop");
         xmlStream.addAttribute("position", model.position);
-        this.map.color.render(xmlStream, model.color);
+        if (!this.map.color.render(xmlStream, model.color)) {
+            xmlStream.leafNode(this.map.color.tag);
+        }
         xmlStream.closeNode();
     }
 
@@ -77,7 +80,7 @@ class StopXform extends BaseXform<GradientStopModel> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // <color> is inside <stop>, which created the model; an auto color is undefined
+                // <color> is inside <stop>, which created the model; undefined for a <color> without color attribute
                 this.model!.color = this.map.color.model ?? undefined;
                 this.parser = undefined;
             }

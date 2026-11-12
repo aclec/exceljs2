@@ -15,6 +15,7 @@ export function colorsFontsBorders(): void {
     cell.font = { color: { indexed: 64 } };
     cell.border = { top: { style: "thin" }, bottom: { style: "double" }, color: { argb: "FFFF0000" } };
     worksheet.properties.tabColor = { theme: 5, tint: 0.4 };
+    cell.font = { size: 10.5, color: { auto: true } };
     const tint: number | undefined = cell.font?.color?.tint;
     const shadow: boolean | undefined = cell.font?.shadow;
     void tint;
