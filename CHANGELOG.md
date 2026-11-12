@@ -134,6 +134,8 @@ upstream PR code was merged) and has a regression test.
   `duplicateRow` copies the single-row merges of the duplicated row.
 - Notes (comments) were dropped from the rows that `spliceRows` / `insertRow(s)` moved; they move with their cells, as `spliceColumns`
   already did.
+- Notes on cells without a value were lost on read: Excel (and ExcelJS) write no `<c>` element for such cells. The cells, and their rows
+  when missing, are now created.
 
 ### Documentation
 
