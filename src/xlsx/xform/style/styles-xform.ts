@@ -476,17 +476,21 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
      * @returns `null` when the id is not a cell format of the part (or the part was not parsed)
      */
     getStyleModel(id: number): StyleModel | null {
+        // only a parsed part has a lookup index (the style manager role has its own index)
+        const { index } = this;
+        if (!index || !("model" in index)) return null;
+        // the model of a parsed part is its JSON model
+        const json = this.model as StylesJsonModel;
+
         // if the style doesn't exist return null
-        const { model, index } = this;
-        const style = (model as StylesJsonModel | null | undefined)?.styles?.[id];
-        if (!style || !index || !("model" in index)) return null;
+        const style = json.styles?.[id];
+        if (!style) return null;
 
         // have we built this model before?
         const built = index.model[id];
         if (built) return built;
 
         // build a new model
-        const json = model as StylesJsonModel;
         const result: StyleModel = (index.model[id] = {});
 
         // -------------------------------------------------------
