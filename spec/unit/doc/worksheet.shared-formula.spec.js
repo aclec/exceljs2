@@ -165,5 +165,13 @@ describe("Worksheet", () => {
                 result: 4,
             });
         });
+
+        it("Leaves the results of the rows missing from a 2D array undefined", () => {
+            const ws = new Excel.Workbook().addWorksheet();
+            ws.fillFormula("A1:B2", "ROW()+COLUMN()", [[2, 3]]);
+            expect(ws.getCell("B1").value).to.deep.equal({ sharedFormula: "A1", result: 3 });
+            expect(ws.getCell("A2").value).to.deep.equal({ sharedFormula: "A1" });
+            expect(ws.getCell("B2").value).to.deep.equal({ sharedFormula: "A1" });
+        });
     });
 });

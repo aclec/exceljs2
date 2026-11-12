@@ -80,10 +80,17 @@ export interface EachRowOptions {
 export type RowIteratee = (row: Row, rowNumber: number) => void;
 
 /** The results of {@link Worksheet.fillFormula}: by cell, as a 2D array (rows of the range), or as a flat array. */
-export type FillFormulaResults =
-    | ((row: number, col: number) => FormulaResult | undefined)
-    | readonly (readonly (FormulaResult | undefined)[])[]
-    | readonly (FormulaResult | undefined)[];
+export type FillFormulaResults = ((row: number, col: number) => FormulaResult | undefined) | FormulaResultRows | FormulaResultCells;
+
+/** The results of {@link Worksheet.fillFormula} by row of the range, then by column. */
+type FormulaResultRows = readonly (readonly (FormulaResult | undefined)[])[];
+/** The results of {@link Worksheet.fillFormula} in a flat array, row by row. */
+type FormulaResultCells = readonly (FormulaResult | undefined)[];
+
+/** Whether fillFormula results are given by row: a formula result is never an array. */
+function isResultRows(results: FormulaResultRows | FormulaResultCells): results is FormulaResultRows {
+    return Array.isArray(results[0]);
+}
 
 /**
  * The style option of `addRow` / `insertRow`: `"i"` copies the style of the row above (`"i+"`: also its empty cells),
@@ -1222,13 +1229,12 @@ class Worksheet {
         let getResult: (row: number, col: number) => FormulaResult | undefined;
         if (typeof results === "function") {
             getResult = results;
-        } else if (Array.isArray(results)) {
-            if (Array.isArray(results[0])) {
-                const rows = results as readonly (readonly (FormulaResult | undefined)[])[];
-                getResult = (row, col) => rows[row - top]![col - left];
+        } else if (results) {
+            if (isResultRows(results)) {
+                // a row missing from the array has no results, as a missing cell
+                getResult = (row, col) => results[row - top]?.[col - left];
             } else {
-                const cells = results as readonly (FormulaResult | undefined)[];
-                getResult = (row, col) => cells[(row - top) * width + (col - left)];
+                getResult = (row, col) => results[(row - top) * width + (col - left)];
             }
         } else {
             getResult = () => undefined;
