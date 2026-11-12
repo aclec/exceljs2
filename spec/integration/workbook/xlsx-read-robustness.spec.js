@@ -184,6 +184,23 @@ describe('xlsx read robustness', function() {
       expect(ws.getCell('B2').value).to.deep.equal({formula: '1=2', result: false});
       expect(ws.getCell('C2').value).to.deep.equal({formula: '""', result: ''});
     });
+
+    it('converts only numeric formula results of date-formatted cells to dates', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('A2').value = {formula: 'TEXT(1,"x")', result: 'Foo'};
+        ws.getCell('B2').value = {formula: 'TRUE()', result: true};
+        ws.getCell('C2').value = {formula: '1/0', result: {error: '#DIV/0!'}};
+        ws.getCell('D2').value = {formula: 'DATE(2024,2,21)', result: 45343};
+        ['A2', 'B2', 'C2', 'D2'].forEach(address => {
+          ws.getCell(address).numFmt = 'yyyy-mm-dd';
+        });
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A2').result).to.equal('Foo');
+      expect(ws.getCell('B2').result).to.equal(true);
+      expect(ws.getCell('C2').result).to.deep.equal({error: '#DIV/0!'});
+      expect(ws.getCell('D2').result).to.deep.equal(new Date(Date.UTC(2024, 1, 21)));
+    });
   });
 
   describe('worksheet relationships', () => {
