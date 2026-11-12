@@ -6,7 +6,8 @@ import colCache from "../../../utils/col-cache";
 
 /**
  * A `<definedName name localSheetId>` of `xl/workbook.xml`: its ranges, comma-separated. Parsing keeps the ranges that
- * are references (`colCache.decodeEx` accepts them); a comma inside a quoted sheet name does not split a range.
+ * are references (`colCache.decodeEx` accepts them); a comma inside a quoted sheet name does not split a range. A defined
+ * name without `name` (CT_DefinedName requires it) parses as `null` (the list of the defined names skips it).
  */
 class DefinedNamesXform extends BaseXform<DefinedNameModel> {
     /** While parsing: the `name` attribute. */
@@ -47,9 +48,13 @@ class DefinedNamesXform extends BaseXform<DefinedNameModel> {
     }
 
     override parseClose(): boolean {
+        const name = this._parsedName;
+        if (name === undefined) {
+            this.model = null;
+            return false;
+        }
         const model: DefinedNameModel = {
-            // the name attribute is required (CT_DefinedName): a file without it gives an undefined name
-            name: this._parsedName!,
+            name,
             ranges: extractRanges(this._parsedText.join("")),
         };
         if (this._parsedLocalSheetId !== undefined) {

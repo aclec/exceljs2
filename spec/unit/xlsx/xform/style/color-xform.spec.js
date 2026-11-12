@@ -88,6 +88,36 @@ const expectations = [
         tests: ["parse"],
     },
     {
+        title: "RGB with Tint",
+        create: () => new ColorXform(),
+        preparedModel: { argb: "FF00FF00", tint: -0.25 },
+        xml: '<color rgb="FF00FF00" tint="-0.25"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
+        title: "Indexed with Tint",
+        create: () => new ColorXform(),
+        preparedModel: { indexed: 64, tint: 0.4 },
+        xml: '<color indexed="64" tint="0.4"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
+        title: "Auto with Tint",
+        create: () => new ColorXform(),
+        preparedModel: { auto: true, tint: 0.5 },
+        xml: '<color auto="1" tint="0.5"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
         title: "Undefined",
         create: () => new ColorXform(),
         preparedModel: undefined,

@@ -1,6 +1,6 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
-import type { FontModel, RichTextRun } from "../../../types";
+import type { RichTextRun } from "../../../types";
 import TextXform from "./text-xform";
 import FontXform from "../style/font-xform";
 
@@ -19,7 +19,8 @@ import BaseXform from "../base-xform";
 
 /**
  * A run of rich text, `<r>`: its font (`<rPr>`, a font whose name element is `rFont`) and its text. A run without text
- * is not rendered (Excel treats it as a corrupt record). A parsed `<r>` without `<t>` has no `text`.
+ * is not rendered (Excel treats it as a corrupt record). A parsed `<r>` without `<t>` (CT_RElt requires it) has the
+ * text `""`.
  */
 class RichTextXform extends BaseXform<RichTextRun> {
     /** The options of the run font xform. */
@@ -31,12 +32,8 @@ class RichTextXform extends BaseXform<RichTextRun> {
     private _textXform?: TextXform;
     private _fontXform?: FontXform;
 
-    /** @param model - the run rendered when {@link render} gets none */
-    constructor(model?: RichTextRun) {
-        super();
-
-        this.model = model;
-    }
+    /** While parsing: the parts of the run read so far (in the order of their elements). */
+    private run: Partial<RichTextRun> = {};
 
     /** The element: `r`. */
     get tag(): string {
@@ -59,8 +56,8 @@ class RichTextXform extends BaseXform<RichTextRun> {
     }
 
     /** Writes the run (nothing when it has no text). */
-    override render(xmlStream: XmlStream, model?: RichTextRun): void {
-        const run = model || this.model!;
+    override render(xmlStream: XmlStream, model: RichTextRun): void {
+        const run = model;
         if (RichTextXform.isEmpty(run)) {
             return;
         }
@@ -81,8 +78,9 @@ class RichTextXform extends BaseXform<RichTextRun> {
         }
         switch (node.name) {
             case "r":
-                // its text and font are added when their elements close (a run without <t> has no text)
-                this.model = {} as RichTextRun;
+                // its text and font are added when their elements close
+                this.run = {};
+                this.model = { text: "" };
                 return true;
             case "t":
                 this.parser = this.textXform;
@@ -112,23 +110,37 @@ class RichTextXform extends BaseXform<RichTextRun> {
                 // the text, completed by the text xform's parseClose (a <t> misplaced inside <rPr> is ignored)
                 if (this.parser && this.parser === this._textXform) {
                     this.textXform.parseClose();
-                    this.model!.text = this.textXform.model!;
+                    const text = this.textXform.model;
+                    if (typeof text === "string") {
+                        this.run.text = text;
+                        this.updateModel();
+                    }
                 }
                 this.parser = undefined;
                 return true;
-            case "rPr":
-                // the font (an <rPr> misplaced inside <t> is ignored). FontXform is not typed yet: its model is unknown
-                if (this.parser && this.parser === this._fontXform) {
-                    this.model!.font = this.fontXform.model as FontModel;
+            case "rPr": {
+                // the font (an <rPr> misplaced inside <t> is ignored)
+                const font = this.fontXform.model;
+                if (this.parser && this.parser === this._fontXform && font) {
+                    this.run.font = font;
+                    this.updateModel();
                 }
                 this.parser = undefined;
                 return true;
+            }
             default:
                 if (this.parser) {
                     this.parser.parseClose(name);
                 }
                 return true;
         }
+    }
+
+    // the model: the parts read so far (in the order of their elements), and the text "" until <t> is read. The callers
+    // that delegate <r> read it without passing its end tag
+    private updateModel(): void {
+        const { run } = this;
+        this.model = { ...run, text: run.text ?? "" };
     }
 }
 

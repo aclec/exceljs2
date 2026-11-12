@@ -8,12 +8,12 @@ import BaseXform from "../base-xform";
 /** The built-in formats by id, as a plain record (any number may be looked up). */
 const builtInFormats: Readonly<Record<number, DefaultNumFormat | undefined>> = defaultNumFormats;
 
-// keyed by format code: no prototype, so that a format such as "constructor" is not found
-function hashDefaultFormats(): Record<string, number> {
-    const hash: Record<string, number> = Object.create(null) as Record<string, number>;
+// the id of each built-in format, by format code (a Map: a format such as "constructor" is not found)
+function hashDefaultFormats(): ReadonlyMap<string, number> {
+    const hash = new Map<string, number>();
     for (const [id, dnf] of Object.entries(defaultNumFormats)) {
         if ("f" in dnf) {
-            hash[dnf.f] = parseInt(id, 10);
+            hash.set(dnf.f, parseInt(id, 10));
         }
         // at some point, add the other cultures here...
     }
@@ -77,7 +77,7 @@ class NumFmtXform extends BaseXform<NumFmtModel> {
 
     /** @returns the id of the built-in format with this code, or `undefined` when it is not a built-in one */
     static getDefaultFmtId(this: void, formatCode: string): number | undefined {
-        return defaultFmtHash[formatCode];
+        return defaultFmtHash.get(formatCode);
     }
 
     /** @returns the code of a built-in format (default locale), or `undefined` when there is none for this id */

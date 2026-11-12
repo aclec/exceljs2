@@ -1,4 +1,4 @@
-import type { CalculationProperties, WorkbookProperties, WorksheetState } from "../../../../index";
+import type { CalculationProperties, WorkbookProperties } from "../../../../index";
 import type { SaxInput, SaxTag } from "../../../utils/parse-sax";
 import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
 import type {
@@ -284,14 +284,11 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
      * ids), its print areas and titles (the other defined names stay in `definedNames`), and the index of each medium.
      */
     override reconcile(model: WorkbookReadModel): void {
-        // keyed by ids from the file: no prototype, so that an id such as "constructor" is unknown
-        const rels = (model.workbookRels || []).reduce<Record<string, RelationshipModel>>(
-            (map, rel) => {
-                map[rel.Id] = rel;
-                return map;
-            },
-            Object.create(null) as Record<string, RelationshipModel>
-        );
+        // keyed by ids from the file: a Map, so that an id such as "constructor" is unknown
+        const rels = new Map<string, RelationshipModel>();
+        for (const rel of model.workbookRels || []) {
+            rels.set(rel.Id, rel);
+        }
 
         renumberSheets(model.sheets || []);
 
@@ -301,7 +298,7 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
         let index = 0;
 
         (model.sheets || []).forEach((sheet) => {
-            const rel = sheet.rId === undefined ? undefined : rels[sheet.rId];
+            const rel = sheet.rId === undefined ? undefined : rels.get(sheet.rId);
             if (!rel || typeof rel.Target !== "string") {
                 return;
             }
@@ -316,8 +313,7 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
             if (worksheet) {
                 worksheet.name = sheet.name;
                 worksheet.id = sheet.id;
-                // unvalidated
-                worksheet.state = sheet.state as WorksheetState | undefined;
+                worksheet.state = sheet.state;
                 worksheets[index++] = worksheet;
             }
         });

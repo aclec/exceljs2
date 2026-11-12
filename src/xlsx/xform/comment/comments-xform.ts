@@ -29,10 +29,9 @@ class CommentsXform extends BaseXform<CommentsModel> {
         };
     }
 
-    /** Writes the part (for `model`, or when it is falsy, the model of this xform). */
-    override render(xmlStream: XmlStream, model: { readonly comments: readonly NoteModel[] } | undefined): void {
-        // one of them is set: xlsx.ts renders the worksheet model
-        const { comments } = (model || this.model)!;
+    /** Writes the part. */
+    override render(xmlStream: XmlStream, model: { readonly comments: readonly NoteModel[] }): void {
+        const { comments } = model;
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode("comments", CommentsXform.COMMENTS_ATTRIBUTES);
 
@@ -82,13 +81,15 @@ class CommentsXform extends BaseXform<CommentsModel> {
         switch (name) {
             case "commentList":
                 return false;
-            case "comment":
+            case "comment": {
                 // a <comment> outside <commentList> (no model) is ignored
-                if (this.parser && this.model) {
-                    this.model.comments.push(this.map.comment.model!);
+                const note = this.map.comment.model;
+                if (this.parser && this.model && note) {
+                    this.model.comments.push(note);
                 }
                 this.parser = undefined;
                 return true;
+            }
             default:
                 if (this.parser) {
                     this.parser.parseClose(name);

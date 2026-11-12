@@ -17,7 +17,7 @@ export interface TableReconcileOptions {
 /**
  * A table part, `xl/tables/tableN.xml` (CT_Table order: autoFilter, tableColumns, tableStyleInfo), see
  * {@link TableModel}. The auto filter is written only with a header row; parsing sets the `filterButton` of the columns
- * from it.
+ * from it. `totalsRowCount` and `headerRowCount` are counts (a table has a totals row when its count is not 0).
  */
 class TableXform extends BaseXform<TableModel> {
     /** The namespaces of `<table>`. */
@@ -79,13 +79,19 @@ class TableXform extends BaseXform<TableModel> {
             this.map.autoFilter.render(xmlStream, model);
         }
         this.map.tableColumns.render(xmlStream, model.columns);
-        // (the document table defaults the style of a table: see Table.validate)
-        this.map.tableStyleInfo.render(xmlStream, model.style!);
+        // tableStyleInfo is optional: a table read from a file without it has no table style (`style: null`); the
+        // document table defaults the style of the tables it creates (see Table.validate)
+        if (model.style) {
+            this.map.tableStyleInfo.render(xmlStream, model.style);
+        }
 
         xmlStream.closeNode();
     }
 
-    /** @returns `true`: every element of the part is accepted (unknown ones are skipped) */
+    /**
+     * @returns `true`: every element of the part is accepted (unknown ones are skipped)
+     * @throws Error for a table without name (CT_Table requires it)
+     */
     override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
@@ -93,20 +99,25 @@ class TableXform extends BaseXform<TableModel> {
         }
         const { name, attributes } = node;
         switch (name) {
-            case this.tag:
+            case this.tag: {
                 this.reset();
+                const { name: tableName } = attributes;
+                if (tableName === undefined) {
+                    throw new Error("Invalid table part: <table> without name");
+                }
                 this.model = {
-                    // name is required (CT_Table); the values are unvalidated
-                    name: attributes.name!,
-                    displayName: attributes.displayName || attributes.name,
+                    name: tableName,
+                    displayName: attributes.displayName || tableName,
                     tableRef: attributes.ref,
-                    totalsRow: attributes.totalsRowCount === "1",
-                    // headerRowCount defaults to 1 and Excel omits it
-                    headerRow: attributes.headerRowCount !== "0",
+                    // xsd:unsignedInt, default 0
+                    totalsRow: BaseXform.toIntValue(attributes.totalsRowCount, 0) > 0,
+                    // xsd:unsignedInt, default 1 (Excel omits it): a count that is not a number is the default
+                    headerRow: BaseXform.toIntValue(attributes.headerRowCount, 1) !== 0,
                     // set when the element closes
                     columns: [],
                 };
                 break;
+            }
             default: {
                 const parser = ownEntry(this.map, node.name);
                 this.parser = parser;
@@ -125,6 +136,7 @@ class TableXform extends BaseXform<TableModel> {
         }
     }
 
+    /** @throws Error for a table without `<tableColumns>` (CT_Table requires it) */
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
@@ -135,20 +147,26 @@ class TableXform extends BaseXform<TableModel> {
         switch (name) {
             case this.tag: {
                 // the model was created when the element opened; the children were reset then (null when absent)
-                const model = this.model!;
-                // a malformed table without <tableColumns> has null columns (see TableModel)
-                const columns = this.map.tableColumns.model as TableColumnModel[];
+                const { model } = this;
+                const columns = this.map.tableColumns.model;
+                if (!model) {
+                    // a </table> without its <table> (not well-formed XML: the parser rejects it)
+                    return false;
+                }
+                if (!columns) {
+                    throw new Error(`Invalid table ${JSON.stringify(model.name)}: no <tableColumns>`);
+                }
                 model.columns = columns;
                 const autoFilter = this.map.autoFilter.model;
                 if (autoFilter) {
                     model.autoFilterRef = autoFilter.autoFilterRef;
                     // with an autoFilter every column shows its button unless a filterColumn hides it
-                    for (const column of columns || []) {
+                    for (const column of columns) {
                         column.filterButton = true;
                     }
                     // filterColumns are sparse: match them to table columns by colId
                     for (const filterColumn of autoFilter.columns) {
-                        const column = columns && columns[BaseXform.toIntValue(filterColumn.colId, NaN)];
+                        const column = columns[BaseXform.toIntValue(filterColumn.colId, NaN)];
                         if (column) {
                             column.filterButton = filterColumn.filterButton;
                         }

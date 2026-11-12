@@ -92,10 +92,9 @@ class VmlNotesXform extends BaseXform<VmlNotesModel | VmlNotesRenderModel> {
         xmlStream.closeNode();
 
         const shapeXform = this.map["v:shape"];
-        const { comments } = model;
-        for (let index = 0; index < comments.length; index++) {
-            shapeXform.render(xmlStream, comments[index]!, VmlNotesXform.shapeIndex(firstBlock, index));
-        }
+        model.comments.forEach((comment, index) => {
+            shapeXform.render(xmlStream, comment, VmlNotesXform.shapeIndex(firstBlock, index));
+        });
 
         xmlStream.closeNode();
     }
@@ -134,10 +133,10 @@ class VmlNotesXform extends BaseXform<VmlNotesModel | VmlNotesRenderModel> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // a shape outside the root element (no model) is ignored
-                if (this.model) {
-                    // the shape has its model: its element was opened
-                    this.model.comments.push(this.map["v:shape"].model!);
+                // a shape outside the root element (no model) is ignored; the shape has its model once its element closed
+                const shape = this.map["v:shape"].model;
+                if (this.model && shape) {
+                    this.model.comments.push(shape);
                 }
                 this.parser = undefined;
             }

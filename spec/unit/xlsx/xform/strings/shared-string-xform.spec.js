@@ -164,6 +164,11 @@ describe("SharedStringXform", () => {
         }
     });
 
+    it("writes an object without richText as an empty string, not [object Object]", () => {
+        expect(new SharedStringXform().toXml({})).to.equal("<si><t></t></si>");
+        expect(new SharedStringXform().toXml({ richText: undefined })).to.equal("<si><t></t></si>");
+    });
+
     it("escapes _xHHHH_ sequences in linear time", () => {
         ["_", "_x", "_x0041", "_x0041_", "_x00_"].forEach((unit) => {
             const text = unit.repeat(10000);

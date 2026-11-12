@@ -115,8 +115,8 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
         switch (name) {
             case this.tag:
                 // the model was created when the element opened
-                if (this.map.customFilters.model) {
-                    this.model!.customFilters = this.map.customFilters.model;
+                if (this.model && this.map.customFilters.model) {
+                    this.model.customFilters = this.map.customFilters.model;
                 }
                 return false;
             default:

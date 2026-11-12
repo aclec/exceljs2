@@ -66,9 +66,12 @@ class RelationshipsXform extends BaseXform<RelationshipModel[]> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // <Relationships> opened the list before its items; RelationshipXform has its model once open
-                this.model!.push(this.map.Relationship.model!);
                 this.parser = undefined;
+                // an invalid relationship (no model), or one outside <Relationships>, is skipped
+                const relationship = this.map.Relationship.model;
+                if (this.model && relationship) {
+                    this.model.push(relationship);
+                }
             }
             return true;
         }

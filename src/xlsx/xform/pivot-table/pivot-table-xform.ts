@@ -33,10 +33,15 @@ class PivotTableXform extends BaseXform<PivotTableModel> {
         return "pivotTableDefinition";
     }
 
+    /** @throws Error for a pivot table without value field (makePivotTable validates it) */
     override render(xmlStream: XmlStream, model: PivotTableModel): void {
         const { rows, columns, values, cacheFields, cacheId } = model;
-        // the one value field (validated by makePivotTable)
-        const valueField = values[0]!;
+        // the one value field
+        const [valueField] = values;
+        const valueCacheField = valueField === undefined ? undefined : cacheFields[valueField];
+        if (valueField === undefined || !valueCacheField) {
+            throw new Error("A pivot table needs a value field, one of its cache fields");
+        }
 
         // Examples
         // --------
@@ -98,7 +103,7 @@ class PivotTableXform extends BaseXform<PivotTableModel> {
       </colItems>
       <dataFields count="${values.length}">
         <dataField
-          name="Sum of ${xmlEncode(String(cacheFields[valueField]!.name))}"
+          name="Sum of ${xmlEncode(String(valueCacheField.name))}"
           fld="${valueField}"
           baseField="0"
           baseItem="0"

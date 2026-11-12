@@ -49,9 +49,10 @@ class PhoneticTextXform extends BaseXform<PhoneticTextModel> {
             for (const text of model.richText) {
                 r.render(xmlStream, text);
             }
+        } else if (model.text !== undefined) {
+            this.map.t.render(xmlStream, model.text);
         } else {
-            // a model without text throws (TextXform.render), as it always did
-            this.map.t.render(xmlStream, model.text!);
+            throw new Error("A phonetic run (<rPh>) needs its text or its rich text");
         }
         xmlStream.closeNode();
     }
@@ -88,17 +89,21 @@ class PhoneticTextXform extends BaseXform<PhoneticTextModel> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // a run closed (<rPh> created the model before its runs; a closed run has its model). An element nested
-                // in a run that ends it early (e.g. <t>a<x/></t>) is ignored, as it always was
-                const model = this.model!;
-                if (name === "r" && this.parser === this.map.r) {
+                // a run closed (a closed run has its model). An element nested in a run that ends it early (e.g.
+                // <t>a<x/></t>) is ignored, as it always was; a run outside <rPh> (no model) too
+                const { model } = this;
+                const run = this.map.r.model;
+                const text = this.map.t.model;
+                if (!model) {
+                    // outside <rPh>
+                } else if (name === "r" && this.parser === this.map.r && run) {
                     let rt = model.richText;
                     if (!rt) {
                         rt = model.richText = [];
                     }
-                    rt.push(this.map.r.model!);
-                } else if (name === "t" && this.parser === this.map.t) {
-                    model.text = this.map.t.model!;
+                    rt.push(run);
+                } else if (name === "t" && this.parser === this.map.t && typeof text === "string") {
+                    model.text = text;
                 }
                 this.parser = undefined;
             }

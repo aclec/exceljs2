@@ -1,15 +1,16 @@
 import type XmlStream from "../../../utils/xml-stream";
-import type { AnchorModel, DrawingAnchorModel, DrawingReconcileOptions } from "../../../types";
+import type { DrawingAnchorModel, DrawingReconcileOptions } from "../../../types";
 import BaseCellAnchorXform from "./base-cell-anchor-xform";
 import StaticXform from "../static-xform";
 
 import CellPositionXform from "./cell-position-xform";
-import ExtXform, { type ExtModel } from "./ext-xform";
+import ExtXform from "./ext-xform";
 import PicXform, { type PicPrepareOptions } from "./pic-xform";
 
 /**
  * A picture anchored by one cell, `<xdr:oneCellAnchor>` (CT_OneCellAnchor order: from, ext, pic, clientData): its range
- * is `{ editAs, tl, ext }` (`ext` in pixels).
+ * is `{ editAs, tl, ext }` (`ext` in pixels). Parsing gives no model (`null`) for an anchor without `<xdr:from>` or
+ * `<xdr:ext>`.
  */
 class OneCellAnchorXform extends BaseCellAnchorXform {
     declare map: {
@@ -37,17 +38,26 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
     /** Prepares the picture (its index and creation id). */
     override prepare(model: DrawingAnchorModel, options: PicPrepareOptions): void {
         // the anchors of a drawing are built with their picture (worksheet-xform prepare)
-        this.map["xdr:pic"].prepare(model.picture!, options);
+        if (model.picture) {
+            this.map["xdr:pic"].prepare(model.picture, options);
+        }
     }
 
-    /** Writes the anchor, with an `editAs` attribute as for a two-cell anchor (CT_OneCellAnchor declares none). */
+    /**
+     * Writes the anchor, with an `editAs` attribute as for a two-cell anchor (CT_OneCellAnchor declares none).
+     *
+     * @throws Error for an anchor without size (`range.ext`) or picture
+     */
     override render(xmlStream: XmlStream, model: DrawingAnchorModel): void {
-        xmlStream.openNode(this.tag, { editAs: model.range.editAs || "oneCell" });
+        const { range, picture } = model;
+        if (!range.ext || !picture) {
+            throw new Error("An image anchored by one cell needs its size (range.ext: width and height) and its picture");
+        }
+        xmlStream.openNode(this.tag, { editAs: range.editAs || "oneCell" });
 
-        this.map["xdr:from"].render(xmlStream, model.range.tl);
-        // a one-cell anchor has its size
-        this.map["xdr:ext"].render(xmlStream, model.range.ext!);
-        this.map["xdr:pic"].render(xmlStream, model.picture!);
+        this.map["xdr:from"].render(xmlStream, range.tl);
+        this.map["xdr:ext"].render(xmlStream, range.ext);
+        this.map["xdr:pic"].render(xmlStream, picture);
         this.map["xdr:clientData"].render(xmlStream);
 
         xmlStream.closeNode();
@@ -61,18 +71,15 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
             return true;
         }
         switch (name) {
-            case this.tag:
-                // the children were reset when the element opened: an element absent from the anchor leaves null in
-                // its place (unvalidated, see DrawingAnchorModel)
-                this.model = {
-                    range: {
-                        editAs: this.parsedEditAs,
-                        tl: this.map["xdr:from"].model as AnchorModel,
-                        ext: this.map["xdr:ext"].model as ExtModel,
-                    },
-                    picture: this.map["xdr:pic"].model as DrawingAnchorModel["picture"],
-                };
+            case this.tag: {
+                // the children were reset when the element opened (null when absent): an anchor without its corner or its
+                // size (CT_OneCellAnchor requires them) has no model; one without picture (a chart, a shape) has no picture
+                const tl = this.map["xdr:from"].model;
+                const ext = this.map["xdr:ext"].model;
+                const picture = this.map["xdr:pic"].model;
+                this.model = tl && ext ? { range: { editAs: this.parsedEditAs, tl, ext }, ...(picture ? { picture } : {}) } : null;
                 return false;
+            }
             default:
                 // could be some unrecognised tags
                 return true;

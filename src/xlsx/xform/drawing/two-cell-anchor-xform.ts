@@ -1,5 +1,5 @@
 import type XmlStream from "../../../utils/xml-stream";
-import type { AnchorModel, DrawingAnchorModel, DrawingReconcileOptions } from "../../../types";
+import type { DrawingAnchorModel, DrawingReconcileOptions } from "../../../types";
 import BaseCellAnchorXform from "./base-cell-anchor-xform";
 import StaticXform from "../static-xform";
 
@@ -8,7 +8,7 @@ import PicXform, { type PicPrepareOptions } from "./pic-xform";
 
 /**
  * A picture anchored by two cells, `<xdr:twoCellAnchor editAs>` (CT_TwoCellAnchor order: from, to, pic, clientData):
- * its range is `{ editAs, tl, br }`.
+ * its range is `{ editAs, tl, br }`. Parsing gives no model (`null`) for an anchor without `<xdr:from>` or `<xdr:to>`.
  */
 class TwoCellAnchorXform extends BaseCellAnchorXform {
     declare map: {
@@ -36,16 +36,23 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     /** Prepares the picture (its index and creation id). */
     override prepare(model: DrawingAnchorModel, options: PicPrepareOptions): void {
         // the anchors of a drawing are built with their picture (worksheet-xform prepare)
-        this.map["xdr:pic"].prepare(model.picture!, options);
+        if (model.picture) {
+            this.map["xdr:pic"].prepare(model.picture, options);
+        }
     }
 
+    /** @throws Error for an anchor without bottom-right corner (`range.br`) or picture */
     override render(xmlStream: XmlStream, model: DrawingAnchorModel): void {
-        xmlStream.openNode(this.tag, { editAs: model.range.editAs || "oneCell" });
+        const { range, picture } = model;
+        // DrawingXform chose the anchor type by the bottom-right corner
+        if (!range.br || !picture) {
+            throw new Error("An image anchored by two cells needs its bottom-right corner (range.br) and its picture");
+        }
+        xmlStream.openNode(this.tag, { editAs: range.editAs || "oneCell" });
 
-        this.map["xdr:from"].render(xmlStream, model.range.tl);
-        // a two-cell anchor has its bottom-right corner (DrawingXform.prepare chose the anchor type by it)
-        this.map["xdr:to"].render(xmlStream, model.range.br!);
-        this.map["xdr:pic"].render(xmlStream, model.picture!);
+        this.map["xdr:from"].render(xmlStream, range.tl);
+        this.map["xdr:to"].render(xmlStream, range.br);
+        this.map["xdr:pic"].render(xmlStream, picture);
         this.map["xdr:clientData"].render(xmlStream);
 
         xmlStream.closeNode();
@@ -59,18 +66,15 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
             return true;
         }
         switch (name) {
-            case this.tag:
-                // the children were reset when the element opened: an element absent from the anchor leaves null in
-                // its place (unvalidated, see DrawingAnchorModel)
-                this.model = {
-                    range: {
-                        editAs: this.parsedEditAs,
-                        tl: this.map["xdr:from"].model as AnchorModel,
-                        br: this.map["xdr:to"].model as AnchorModel,
-                    },
-                    picture: this.map["xdr:pic"].model as DrawingAnchorModel["picture"],
-                };
+            case this.tag: {
+                // the children were reset when the element opened (null when absent): an anchor without its corners
+                // (CT_TwoCellAnchor requires them) has no model; one without picture (a chart, a shape) has no picture
+                const tl = this.map["xdr:from"].model;
+                const br = this.map["xdr:to"].model;
+                const picture = this.map["xdr:pic"].model;
+                this.model = tl && br ? { range: { editAs: this.parsedEditAs, tl, br }, ...(picture ? { picture } : {}) } : null;
                 return false;
+            }
             default:
                 // could be some unrecognised tags
                 return true;

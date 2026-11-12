@@ -1,4 +1,5 @@
 import parseSax, { type SaxEvent, type SaxInput, type SaxTag } from "../../utils/parse-sax";
+import { parseBoolean } from "../../utils/utils";
 import XmlStream, { type XmlAttributes, type XmlValue } from "../../utils/xml-stream";
 
 /** Any xform, whatever its model: the type of child xforms held without their precise type (`parser`, maps). */
@@ -36,6 +37,18 @@ export interface ValueXformOptions {
  */
 export function ownEntry<T>(map: Readonly<Record<string, T>>, key: string): T | undefined {
     return Object.hasOwn(map, key) ? map[key] : undefined;
+}
+
+/**
+ * Whether a string read from a file is one of the members of a union of string literals, given as the keys of a record
+ * (an object literal typed `Record<T, true>` lists every member of `T`, and only them: the compiler checks both).
+ *
+ * @example
+ * const EDIT_AS: Record<ImageEditAs, true> = { twoCell: true, oneCell: true, absolute: true };
+ * const editAs = isOneOf(EDIT_AS, node.attributes.editAs) ? node.attributes.editAs : "oneCell";
+ */
+export function isOneOf<T extends string>(members: Readonly<Record<T, true>>, value: string | undefined): value is T {
+    return value !== undefined && Object.hasOwn(members, value);
 }
 
 /** Batches of SAX events, as yielded by `parseSax()`. */
@@ -176,9 +189,7 @@ class BaseXform<TModel = unknown> {
         // if we have a map - reset them too
         const { map } = this;
         if (map) {
-            const entries = Object.values(map);
-            for (let i = 0; i < entries.length; i++) {
-                const entry = entries[i]!;
+            for (const entry of Object.values(map)) {
                 if (entry instanceof BaseXform) {
                     entry.reset();
                 } else if (entry.xform) {
@@ -186,13 +197,6 @@ class BaseXform<TModel = unknown> {
                 }
             }
         }
-    }
-
-    /** Copies the properties of `obj` onto {@link model} (created as `{}` if missing). */
-    mergeModel(obj: Partial<TModel>): void {
-        // set obj's props to this.model
-        // the caller merges the parts of the model one by one: the result is the model once the last one is merged
-        this.model = Object.assign(this.model || {}, obj) as TModel;
     }
 
     /**
@@ -227,16 +231,6 @@ class BaseXform<TModel = unknown> {
      */
     async parseStream(stream: SaxInput): Promise<TModel | null | undefined> {
         return this.parse(parseSax(stream));
-    }
-
-    /**
-     * The XML of {@link model}: for the "manager" xforms whose model is built during the prepare phase (shared strings,
-     * styles).
-     */
-    get xml(): string {
-        // convenience function to get the xml of this.model
-        // render() of these xforms accepts the model they hold (they fall back to their own state when it is missing)
-        return this.toXml(this.model as TModel);
     }
 
     /**
@@ -294,12 +288,15 @@ class BaseXform<TModel = unknown> {
         return undefined;
     }
 
-    /** @returns `true` for `"1"` (any other value is `false`), or `undefined` when the attribute is absent */
+    /**
+     * @returns `true` for the xsd:boolean `"1"` or `"true"` (any other value is `false`), or `undefined` when the attribute is
+     *   absent
+     */
     static toBoolValue(attr: string | undefined): boolean | undefined;
-    /** @returns `true` for `"1"` (any other value is `false`), or `dflt` when the attribute is absent */
+    /** @returns `true` for the xsd:boolean `"1"` or `"true"` (any other value is `false`), or `dflt` when the attribute is absent */
     static toBoolValue<D>(attr: string | undefined, dflt: D): boolean | D;
     static toBoolValue<D>(attr: string | undefined, dflt?: D): boolean | D | undefined {
-        return attr === undefined ? dflt : attr === "1";
+        return attr === undefined ? dflt : parseBoolean(attr);
     }
 
     /** {@link toAttribute} for an integer value. */

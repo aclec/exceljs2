@@ -1,7 +1,10 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type { ImageEditAs } from "../../../../index";
 import type { DrawingAnchorModel, DrawingPictureModel, DrawingReconcileOptions, MediaModel } from "../../../types";
-import BaseXform, { ownEntry, type AnyXform } from "../base-xform";
+import BaseXform, { isOneOf, ownEntry, type AnyXform } from "../base-xform";
+
+// ECMA-376 ST_EditAs
+const EDIT_AS: Readonly<Record<ImageEditAs, true>> = { twoCell: true, oneCell: true, absolute: true };
 
 /**
  * The base of the anchors of a drawing (two-cell and one-cell): parsing of the element and its children, and the
@@ -14,7 +17,7 @@ abstract class BaseCellAnchorXform extends BaseXform<DrawingAnchorModel> {
 
     declare map: Readonly<Record<string, AnyXform>>;
 
-    /** While parsing: the `editAs` attribute of the anchor (default `oneCell`; unvalidated). */
+    /** While parsing: the `editAs` attribute of the anchor (`oneCell` when it is absent or invalid). */
     protected parsedEditAs: ImageEditAs = "oneCell";
 
     /** @returns `true`: every element inside the anchor is accepted (unknown ones are skipped) */
@@ -24,11 +27,13 @@ abstract class BaseCellAnchorXform extends BaseXform<DrawingAnchorModel> {
             return true;
         }
         switch (node.name) {
-            case this.tag:
+            case this.tag: {
                 this.reset();
                 // the model is built when the element closes
-                this.parsedEditAs = (node.attributes.editAs || "oneCell") as ImageEditAs;
+                const { editAs } = node.attributes;
+                this.parsedEditAs = isOneOf(EDIT_AS, editAs) ? editAs : "oneCell";
                 break;
+            }
             default: {
                 const parser = ownEntry(this.map, node.name);
                 this.parser = parser;
@@ -58,10 +63,9 @@ abstract class BaseCellAnchorXform extends BaseXform<DrawingAnchorModel> {
             // take the part after the last '/media/' without a backtracking regex
             // (/.*\/media\/(.+)/ was cubic on Targets like '/media//media//media/...')
             const mediaPos = target ? target.lastIndexOf("/media/") : -1;
-            const match = target && mediaPos !== -1 && target.slice(mediaPos + 7).match(/^(.+[.][a-zA-Z]{3,4})/);
+            const match = target && mediaPos !== -1 && target.slice(mediaPos + 7).match(/^.+[.][a-zA-Z]{3,4}/);
             if (match) {
-                // the group of a match
-                const name = match[1]!;
+                const [name] = match;
                 const mediaId = ownEntry(options.mediaIndex, name);
                 return mediaId === undefined ? undefined : options.media[mediaId];
             }

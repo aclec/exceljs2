@@ -20,6 +20,16 @@ export function colorsFontsBorders(): void {
     const shadow: boolean | undefined = cell.font?.shadow;
     void tint;
     void shadow;
+    // tint applies to any color (CT_Color)
+    cell.font = { color: { argb: "FF00FF00", tint: -0.25 } };
+    cell.font = { color: { indexed: 64, tint: 0.4 } };
+    cell.font = { color: { auto: true, tint: 0.5 } };
+    // ST_VerticalAlignRun: baseline is read from a file that sets it
+    cell.font = { vertAlign: "baseline" };
+    const vertAlign: true = {} as Equals<ExcelJS.Font["vertAlign"], "superscript" | "subscript" | "baseline">;
+    void vertAlign;
+    // @ts-expect-error not a vertical alignment
+    cell.font = { vertAlign: "top" };
 }
 
 // --- fills ---------------------------------------------------------------------------------------
@@ -135,6 +145,11 @@ export function tablesAndValidations(): void {
         // @ts-expect-error a table row holds cell values
         rows: [[Symbol("not a value")]],
     });
+    // a built-in table style, or the name of a custom one (a table read from a file keeps it)
+    worksheet.addTable({ name: "V", ref: "A1", style: { theme: "TableStyleMedium9" }, columns: [{ name: "A" }], rows: [] });
+    worksheet.addTable({ name: "W", ref: "A1", style: { theme: "My Table Style" }, columns: [{ name: "A" }], rows: [] });
+    const theme: string | null | undefined = worksheet.getTable("V")?.theme;
+    void theme;
     cell.dataValidation = { type: "whole", operator: "between", formulae: [1, 10], errorStyle: "warning", showErrorMessage: true };
     cell.dataValidation = { type: "date", operator: "greaterThan", formulae: ["TODAY()"] };
 }

@@ -90,11 +90,11 @@ class PicXform extends BaseXform<DrawingPictureModel> {
                 // the static <xdr:spPr> has no model; a child without its element's content has a null model
                 const { parser } = this;
                 if (parser === this.map["xdr:nvPicPr"]) {
-                    this.mergeModel(this.map["xdr:nvPicPr"].model ?? {});
+                    this.merge(this.map["xdr:nvPicPr"].model);
                 } else if (parser === this.map["xdr:blipFill"]) {
-                    this.mergeModel(this.map["xdr:blipFill"].model ?? {});
+                    this.merge(this.map["xdr:blipFill"].model);
                 } else {
-                    this.mergeModel({});
+                    this.merge(undefined);
                 }
                 this.parser = undefined;
             }
@@ -107,6 +107,11 @@ class PicXform extends BaseXform<DrawingPictureModel> {
                 // not quite sure how we get here!
                 return true;
         }
+    }
+
+    /** Adds the properties of the model of a child to {@link model} (created when the first child closes). */
+    private merge(part: DrawingPictureModel | null | undefined): void {
+        this.model = { ...this.model, ...part };
     }
 }
 

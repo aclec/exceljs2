@@ -68,12 +68,8 @@ class VmlClientDataXform extends BaseXform<VmlClientDataModel | VmlClientDataRen
     override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
+                // the model is built when the element closes
                 this.reset();
-                this.model = {
-                    anchor: undefined,
-                    protection: {},
-                    editAs: "",
-                };
                 break;
             default: {
                 const parser = ownEntry(this.map, node.name);
@@ -109,16 +105,18 @@ class VmlClientDataXform extends BaseXform<VmlClientDataModel | VmlClientDataRen
         }
     }
 
-    /** Completes the model from the children, at the end of the element. */
+    /** Builds the model from the children, at the end of the element. */
     normalizeModel(): void {
-        // the model was created when the element opened
-        const model = this.model!;
         const position = Object.assign({}, this.map["x:MoveWithCells"].model, this.map["x:SizeWithCells"].model);
         const len = Object.keys(position).length;
-        model.editAs = POSITION_TYPE[len];
-        model.anchor = this.map["x:Anchor"].text;
-        model.protection.locked = this.map["x:Locked"].text;
-        model.protection.lockText = this.map["x:LockText"].text;
+        this.model = {
+            anchor: this.map["x:Anchor"].text,
+            protection: {
+                locked: this.map["x:Locked"].text,
+                lockText: this.map["x:LockText"].text,
+            },
+            editAs: POSITION_TYPE[len],
+        };
     }
 }
 

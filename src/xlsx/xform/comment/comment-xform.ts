@@ -1,6 +1,6 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
-import type { NoteModel } from "../../../types";
+import type { NoteModel, RichTextRun } from "../../../types";
 import RichTextXform from "../strings/rich-text-xform";
 import BaseXform from "../base-xform";
 
@@ -36,11 +36,8 @@ import BaseXform from "../base-xform";
 class CommentXform extends BaseXform<NoteModel> {
     private _richTextXform?: RichTextXform;
 
-    /** @param model - the note rendered when {@link render} gets none */
-    constructor(model?: NoteModel) {
-        super();
-        this.model = model;
-    }
+    /** While parsing: the runs of the note (the `texts` of its model). */
+    private texts: RichTextRun[] = [];
 
     /** The element of the items parsed by this xform: `r` (it is delegated `<comment>` by its parent). */
     get tag(): string {
@@ -55,11 +52,8 @@ class CommentXform extends BaseXform<NoteModel> {
         return this._richTextXform;
     }
 
-    /** Writes the note (or, when `model` is falsy, the model of this xform). */
-    override render(xmlStream: XmlStream, model: NoteModel | undefined): void {
-        // one of them is set: the comments part renders its notes
-        const note = (model || this.model)!;
-
+    /** Writes the note. */
+    override render(xmlStream: XmlStream, note: NoteModel): void {
         xmlStream.openNode("comment", {
             ref: note.ref,
             authorId: 0,
@@ -81,16 +75,19 @@ class CommentXform extends BaseXform<NoteModel> {
             return true;
         }
         switch (node.name) {
-            case "comment":
+            case "comment": {
                 // the attributes (ref, authorId...) first: an attribute named "type" or "note" must not replace them
+                const texts: RichTextRun[] = [];
+                this.texts = texts;
                 this.model = {
                     ...node.attributes,
                     type: "note",
                     note: {
-                        texts: [],
+                        texts,
                     },
                 };
                 return true;
+            }
             case "r":
                 this.parser = this.richTextXform;
                 this.parser.parseOpen(node);
@@ -110,13 +107,15 @@ class CommentXform extends BaseXform<NoteModel> {
         switch (name) {
             case "comment":
                 return false;
-            case "r":
-                // a run of a <comment>, which created the model (texts is the array created then)
-                if (this.parser) {
-                    this.model!.note.texts!.push(this.richTextXform.model!);
+            case "r": {
+                // a run of a <comment> (texts is the array of its model)
+                const run = this.richTextXform.model;
+                if (this.parser && run) {
+                    this.texts.push(run);
                 }
                 this.parser = undefined;
                 return true;
+            }
             default:
                 if (this.parser) {
                     this.parser.parseClose(name);

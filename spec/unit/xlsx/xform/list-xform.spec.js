@@ -39,4 +39,12 @@ const expectations = [
 
 describe("ListXform", () => {
     testXformHelper(expectations);
+
+    it("skips an item whose xform gives no model", async () => {
+        const parseSax = verquire("utils/parse-sax");
+        const MergeCellXform = verquire("xlsx/xform/sheet/merge-cell-xform");
+        const list = new ListXform({ tag: "mergeCells", childXform: new MergeCellXform() });
+        const model = await list.parse(parseSax(['<mergeCells><mergeCell ref="A1:B2"/><mergeCell/><mergeCell ref="C3:D4"/></mergeCells>']));
+        expect(model).to.deep.equal(["A1:B2", "C3:D4"]);
+    });
 });
