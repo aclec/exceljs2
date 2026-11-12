@@ -136,6 +136,44 @@ describe('xlsx read robustness', function() {
     });
   });
 
+  describe('cell values', () => {
+    it('reads ISO 8601 date cells (t="d") as UTC dates', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        [SHEET]: replaceSheetData(
+          '<row r="1">' +
+            '<c r="A1" t="d"><v>2024-02-21T13:14:15</v></c>' +
+            '<c r="B1" t="d"><v>2024-02-21</v></c>' +
+            '<c r="C1" t="d"><v>2024-02-21T13:14:15.250+02:00</v></c>' +
+            '<c r="D1" t="d"><v>2024-02-21T13:14Z</v></c>' +
+            '<c r="E1" t="d"><f>A1</f><v>2024-02-21T13:14:15</v></c>' +
+            '</row>'
+        ),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21, 13, 14, 15)));
+      expect(ws.getCell('B1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21)));
+      expect(ws.getCell('C1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21, 11, 14, 15, 250)));
+      expect(ws.getCell('D1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21, 13, 14)));
+      expect(ws.getCell('E1').value).to.deep.equal({
+        formula: 'A1',
+        result: new Date(Date.UTC(2024, 1, 21, 13, 14, 15)),
+      });
+    });
+
+    it('keeps invalid t="d" values as strings', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        [SHEET]: replaceSheetData(
+          '<row r="1"><c r="A1" t="d"><v>not a date</v></c><c r="B1" t="d"><v>2024-02-30</v></c>' +
+            '<c r="C1" t="d"><f>A1</f><v>soon</v></c></row>'
+        ),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.equal('not a date');
+      expect(ws.getCell('B1').value).to.equal('2024-02-30');
+      expect(ws.getCell('C1').value).to.deep.equal({formula: 'A1', result: 'soon'});
+    });
+  });
+
   describe('worksheet relationships', () => {
     const RELS = 'xl/worksheets/_rels/sheet1.xml.rels';
     // 1x1 transparent png
