@@ -19,7 +19,7 @@ const isRow = (number: number): boolean => number >= 1 && number <= colCache.MAX
  * @returns the rectangle; null for whole columns / rows outside the grid (`'A:XFE'`, `'0:0'`); any other address
  *   unchanged
  */
-function wholeRangeAddress(address: string): string | null {
+export function wholeRangeAddress(address: string): string | null {
     let match = wholeColumnsRegex.exec(address);
     if (match) {
         // both groups are not optional

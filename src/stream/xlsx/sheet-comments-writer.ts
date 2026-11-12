@@ -1,24 +1,13 @@
 import XmlStream from "../../utils/xml-stream";
 import RelType from "../../xlsx/rel-type";
 import colCache from "../../utils/col-cache";
-import CommentXformJs from "../../xlsx/xform/comment/comment-xform";
+import CommentXform from "../../xlsx/xform/comment/comment-xform";
 import VmlShapeXform from "../../xlsx/xform/comment/vml-shape-xform";
-import VmlNotesXformJs from "../../xlsx/xform/comment/vml-notes-xform";
+import VmlNotesXform from "../../xlsx/xform/comment/vml-notes-xform";
 import type { ZipEntry } from "../../utils/zip-stream";
 import type { CommentRefModel, CommentRefsEntry, NoteModel } from "../../types";
 import type SheetRelsWriter from "./sheet-rels-writer";
 import type { SheetPartsWorkbook } from "./sheet-rels-writer";
-
-// TS-WAVE2: the comment xforms are typed in parallel; their APIs as used here, asserted once (guide rule 15)
-const CommentXform = CommentXformJs as unknown as new () => { render(xmlStream: XmlStream, model: CommentRefModel): void };
-const VmlNotesXform = VmlNotesXformJs as unknown as {
-    /** the number of blocks of VML shape ids that `count` notes take */
-    blockCount(this: void, count: number): number;
-    /** the `idmap` data of a worksheet whose `count` notes use the blocks from `firstBlock` */
-    idmap(this: void, firstBlock: number, count: number): string;
-    /** the index of the VML shape of the note at `index` */
-    shapeIndex(this: void, firstBlock: number, index: number): number;
-};
 
 /** What the comments writer needs from the workbook writer. */
 export interface CommentsWorkbook extends SheetPartsWorkbook {

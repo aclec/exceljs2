@@ -12,7 +12,7 @@ import WorkbookXform from "../../xlsx/xform/book/workbook-xform";
 import RelationshipsXform from "../../xlsx/xform/core/relationships-xform";
 import SharedStringXform from "../../xlsx/xform/strings/shared-string-xform";
 import type { WorkbookProperties, stream as publicStream } from "../../../index";
-import type { RelationshipModel, SharedStringValue, SheetDefModel, StyleLookup, WorkbookPartModel } from "../../types";
+import type { RelationshipModel, SharedStringValue, SheetDefModel, WorkbookPartModel } from "../../types";
 
 import WorksheetReader from "./worksheet-reader";
 import HyperlinkReader from "./hyperlink-reader";
@@ -69,17 +69,8 @@ interface WorkbookReaderEvents {
     error: [error: unknown];
 }
 
-/**
- * The styles manager of the reader (StylesXform). TS-WAVE2: styles-xform.ts is typed in parallel; the API used by the
- * stream reader.
- */
-export interface ReaderStyles extends StyleLookup {
-    init(): void;
-    parseStream(stream: SaxInput): Promise<unknown>;
-}
-
-// TS-WAVE2: styles-xform.ts is typed in parallel; its constructor as used here, asserted once (guide rule 15)
-const StyleManager = StylesXform as unknown as new () => ReaderStyles;
+/** The styles manager of the reader. */
+export type ReaderStyles = StylesXform;
 
 // workbook.xml.rels targets are relative to xl/ or absolute from the package root (openpyxl)
 function workbookPartPath(target: unknown): string | undefined {
@@ -256,7 +247,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
 
         this.options = { ...DEFAULT_OPTIONS, ...options };
 
-        this.styles = new StyleManager();
+        this.styles = new StylesXform();
         this.styles.init();
     }
 
@@ -436,8 +427,8 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         const workbook = new WorkbookXform();
         await workbook.parseStream(entry);
 
-        // TS-WAVE2: workbook-xform.ts is typed in parallel; its workbookPr child and its model
-        this.properties = (workbook.map as unknown as { workbookPr: { model?: Partial<WorkbookProperties> | null } }).workbookPr;
+        // the <workbookPr> xform itself, whose `model` is the parsed properties (the shape the reader always exposed)
+        this.properties = workbook.map.workbookPr;
         this.model = workbook.model;
         this._sheetIndex = null;
     }
@@ -506,7 +497,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
     private async _parseStyles(entry: ZipStreamEntry): Promise<void> {
         this._emitEntry({ type: "styles" });
         if (this.options.styles === "cache") {
-            this.styles = new StyleManager();
+            this.styles = new StylesXform();
             await this.styles.parseStream(entry);
             this._stylesParsed = true;
         }

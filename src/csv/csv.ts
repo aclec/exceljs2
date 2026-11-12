@@ -186,7 +186,7 @@ class CSV {
                     guard(() => {
                         // the header names become the first row, and the column keys (the parser emits 'headers' only
                         // with the headers option, which setHeaders handles)
-                        // TS-WAVE2 / index.d.ts: a null header name is kept as is (Column.header is typed string)
+                        // a null header name is kept as is (index.d.ts types Column.header as string)
                         worksheet.columns = headers!.map((header) => (header ? { header: header[0] as string, key: header[1] } : {}));
                     })
                 )
@@ -240,7 +240,7 @@ class CSV {
 
             const worksheet = this.workbook.getWorksheet(writeOptions.sheetName || writeOptions.sheetId);
 
-            // TS-WAVE2 / index.d.ts: FastCsvFormatterOptionsArgs.transform is typed apart from fast-csv's own
+            // index.d.ts FastCsvFormatterOptionsArgs.transform is typed apart from fast-csv's own
             const csvStream = fastCsv.format(
                 writeOptions.formatterOptions as fastCsv.FormatterOptionsArgs<fastCsv.FormatterRow, fastCsv.FormatterRow>
             );

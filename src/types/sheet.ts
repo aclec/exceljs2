@@ -349,8 +349,8 @@ export type PageSetupModel = Partial<Omit<PageSetup, "margins">> & {
     copies?: number;
 };
 
-/** Header and footer (header-footer-xform): index.d.ts `HeaderFooter` (the document defaults are `null` strings). */
-export type HeaderFooterModel = { [K in keyof HeaderFooter]?: HeaderFooter[K] | (HeaderFooter[K] extends string ? null : never) };
+/** Header and footer (header-footer-xform): index.d.ts `HeaderFooter`; the defaults of the document and stream worksheets are `null`. */
+export type HeaderFooterModel = { [K in keyof HeaderFooter]?: HeaderFooter[K] | null };
 
 /**
  * `<outlinePr>` (outline-properties-xform): index.d.ts `WorksheetProperties.outlineProperties`; a parsed attribute that is

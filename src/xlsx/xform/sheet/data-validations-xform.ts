@@ -6,13 +6,7 @@ import utils from "../../../utils/utils";
 import colCache from "../../../utils/col-cache";
 import BaseXform from "../base-xform";
 import Range from "../../../doc/range";
-import DataValidations from "../../../doc/data-validations";
-
-// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
-const RangeOf = Range as unknown as new (range: string) => Range;
-
-// doc/data-validations.ts is not typed yet: wholeRangeAddress is assigned to the class after its declaration
-const { wholeRangeAddress } = DataValidations as unknown as { wholeRangeAddress(this: void, address: string): string | null };
+import { wholeRangeAddress } from "../../../doc/data-validations";
 
 const addressRegex = /^[A-Z]{1,3}\d+$/;
 const rangeRegex = /^[A-Z]{1,3}\d+:[A-Z]{1,3}\d+$/;
@@ -340,7 +334,7 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
                     // (null), they are ignored like the other tokens that are not cell references
                     const addr = wholeRangeAddress(token.replace(/\$/g, "")) || "";
                     if (rangeRegex.test(addr)) {
-                        const range = new RangeOf(addr);
+                        const range = new Range(addr);
                         if (range.count <= budget.dataValidationCells) {
                             budget.dataValidationCells -= range.count;
                             range.forEachAddress((address: string) => {

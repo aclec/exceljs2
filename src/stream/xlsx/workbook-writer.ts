@@ -4,9 +4,9 @@ import StreamBuf from "../../utils/stream-buf";
 import { ZipWriter, type ZipEntry, type ZipWriterOptions } from "../../utils/zip-stream";
 
 import RelType from "../../xlsx/rel-type";
-import StylesXformJs from "../../xlsx/xform/style/styles-xform";
+import StylesXform from "../../xlsx/xform/style/styles-xform";
 import SharedStrings from "../../utils/shared-strings";
-import DefinedNamesJs from "../../doc/defined-names";
+import DefinedNames from "../../doc/defined-names";
 import { DEFAULT_MAX_MERGED_CELLS, checkMaxMergedCells } from "../../utils/merge-limits";
 
 import CoreXform from "../../xlsx/xform/core/core-xform";
@@ -19,22 +19,11 @@ import SharedStringsXform from "../../xlsx/xform/strings/shared-strings-xform";
 import WorksheetWriter from "./worksheet-writer";
 
 import theme1Xml from "../../xlsx/xml/theme1";
-import type { AddWorksheetOptions, AutoFilter, Color, DefinedNames, Image, WorkbookView } from "../../../index";
-import type { CommentRefsEntry, RelationshipModel, StyleRegistry } from "../../types";
+import type { AddWorksheetOptions, AutoFilter, Color, Image, WorkbookView } from "../../../index";
+import type { CommentRefsEntry, RelationshipModel } from "../../types";
 
 /** The styles manager of the writer: StylesXform (`useStyles`) or its mock (no styles), and the styles part. */
-export interface WriterStyles extends StyleRegistry {
-    /** the XML of the styles part */
-    readonly xml: string;
-}
-
-// TS-WAVE2: styles-xform.ts and doc/defined-names.ts are typed in parallel; their APIs as used here, asserted once
-// (guide rule 15)
-const StylesXform = StylesXformJs as unknown as {
-    new (initialise?: boolean): WriterStyles;
-    Mock: new (initialise?: boolean) => WriterStyles;
-};
-const DefinedNamesClass = DefinedNamesJs as unknown as new () => DefinedNames;
+export type WriterStyles = StylesXform;
 
 // the extension of an image ends up in a zip entry name and in XML: alphanumeric only
 const IMAGE_EXTENSION = /^[a-z0-9]{1,5}$/i;
@@ -125,7 +114,7 @@ class WorkbookWriter {
         this.styles = options.useStyles ? new StylesXform(true) : new StylesXform.Mock(true);
 
         // defined names
-        this._definedNames = new DefinedNamesClass();
+        this._definedNames = new DefinedNames();
 
         this._worksheets = [];
         this.views = [];

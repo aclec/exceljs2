@@ -1,9 +1,6 @@
 import type { MergeCellModel } from "../../../types";
 import Range from "../../../doc/range";
 
-// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
-const RangeOf = Range as unknown as new (range: string) => Range;
-
 /**
  * The merged ranges of a worksheet being written, collected from its merged cells (worksheet-xform prepare passes it as
  * `options.merges` to the cell xforms): each merged cell expands the range of its master.
@@ -24,7 +21,7 @@ class Merges {
         if (range) {
             range.expandToAddress(merge.address);
         } else {
-            this.merges.set(master, new RangeOf(`${master}:${merge.address}`));
+            this.merges.set(master, new Range(`${master}:${merge.address}`));
         }
     }
 

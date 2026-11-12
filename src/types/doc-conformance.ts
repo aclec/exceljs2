@@ -143,6 +143,7 @@ export type WorkbookConforms = Conforms<
         | "subject"
         | "title"
         | "calcProperties"
+        // their read methods resolve with this Workbook, whose document properties may be undefined (see above)
         | "xlsx"
         | "csv"
         | "definedNames"

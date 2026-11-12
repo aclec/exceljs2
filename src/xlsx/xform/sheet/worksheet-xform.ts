@@ -68,9 +68,6 @@ import type { ConditionalFormattingExtModel } from "./cf-ext/conditional-formatt
 /** The steps of prepare / render / reconcile: one per row (the caller may pause between them). */
 type Steps = Generator<void, void, undefined>;
 
-// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
-const RangeOf = Range as unknown as new (range: string) => Range;
-
 /** `<legacyDrawing r:id="…"/>`: the VML drawing of the notes of a worksheet. */
 class LegacyDrawingXform extends DrawingXform {
     override get tag(): string {
@@ -177,7 +174,7 @@ function addNoteCells(rows: RowModel<ParsedCellModel>[], comments: readonly Note
 function spendMergedCells(loadBudget: WorksheetLoadBudget, mergeCells: readonly string[] | null | undefined): void {
     let sheetCount = 0;
     for (const ref of mergeCells || []) {
-        const { count } = new RangeOf(ref);
+        const { count } = new Range(ref);
         sheetCount += count;
         loadBudget.mergedCells += count;
         checkMergedCells(`Cannot merge ${ref}`, sheetCount, loadBudget.mergedCells, loadBudget.maxMergedCells);

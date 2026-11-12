@@ -8,14 +8,14 @@ class ModelContainer {
     /** The workbook model: what `xlsx` writes, and what it sets when reading. */
     model: WorkbookModel;
     /** Created on first use. */
-    declare private _xlsx?: XLSX;
+    declare private _xlsx?: XLSX<ModelContainer>;
 
     constructor(model: WorkbookModel) {
         this.model = model;
     }
 
     /** The xlsx reader / writer of the model (created on first use). */
-    get xlsx(): XLSX {
+    get xlsx(): XLSX<ModelContainer> {
         if (!this._xlsx) {
             this._xlsx = new XLSX(this);
         }

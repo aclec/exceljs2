@@ -4,32 +4,20 @@ import parseSax, { type SaxInput } from "../../utils/parse-sax";
 import { excelToDate, isDateFmt, parseBoolean, xmlDecode } from "../../utils/utils";
 import colCache from "../../utils/col-cache";
 import { parseIsoDate as parseIsoDateOrUndefined } from "../../utils/iso-date";
-import RangeJs from "../../doc/range";
+import Range from "../../doc/range";
 
-import RowJs from "../../doc/row";
-import ColumnJs from "../../doc/column";
+import Row, { type RowWorksheet } from "../../doc/row";
+import Column, { type ColumnRanges, type ColumnWorksheet } from "../../doc/column";
+import type { CellValue } from "../../doc/cell";
 import ColXform from "../../xlsx/xform/sheet/col-xform";
 import RowXform from "../../xlsx/xform/sheet/row-xform";
 import SheetFormatPropertiesXform from "../../xlsx/xform/sheet/sheet-format-properties-xform";
-import type { CellFormulaValue, Column, WorksheetProperties, WorksheetState } from "../../../index";
+import type { CellFormulaValue, WorksheetProperties, WorksheetState } from "../../../index";
 import type { ColModel } from "../../types";
-import type {
-    ColumnRanges,
-    DocColumnConstructor,
-    DocRange,
-    DocRangeConstructor,
-    DocRow,
-    DocRowConstructor,
-    ReadCellValue,
-} from "../../types/io";
 import type WorkbookReader from "./workbook-reader";
 import type { WorkbookReaderOptions } from "./workbook-reader";
 
-// TS-WAVE2: src/doc and the sheet xforms are typed in parallel; their APIs as used here, asserted once (guide rule 15)
-const Row = RowJs as unknown as DocRowConstructor;
-const Column = ColumnJs as unknown as DocColumnConstructor;
-const Dimensions = RangeJs as unknown as DocRangeConstructor;
-const { parseRowNumber } = RowXform as unknown as { parseRowNumber(this: void, r: string | undefined): number };
+const { parseRowNumber } = RowXform;
 
 /**
  * The column number of a cell reference (the `r` of a `<c>`), as `colCache.decodeAddress(r).col`. A canonical
@@ -86,11 +74,11 @@ export interface WorksheetReaderOptions {
 
 /** An event of the worksheet: a row, or a hyperlink (`hyperlinks: "emit"`). */
 export type WorksheetReaderEvent =
-    { readonly eventType: "row"; readonly value: DocRow } | { readonly eventType: "hyperlink"; readonly value: WorksheetHyperlink };
+    { readonly eventType: "row"; readonly value: Row } | { readonly eventType: "hyperlink"; readonly value: WorksheetHyperlink };
 
 /** The events of a {@link WorksheetReader}. */
 interface WorksheetReaderEvents {
-    row: [row: DocRow];
+    row: [row: Row];
     hyperlink: [hyperlink: WorksheetHyperlink];
     finished: [];
     error: [error: unknown];
@@ -148,7 +136,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
     private _columnsSparse: boolean;
     // no prototype: keys come from data (e.g. CSV headers) and may be '__proto__' or 'constructor'
     private _keys: Record<string, Column>;
-    private _dimensions: DocRange;
+    private _dimensions: Range;
 
     constructor({ workbook, id, iterator, options }: WorksheetReaderOptions) {
         super();
@@ -167,7 +155,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         this._keys = Object.create(null) as Record<string, Column>;
 
         // keep a record of dimensions
-        this._dimensions = new Dimensions();
+        this._dimensions = new Range();
 
         // sheet format properties (outline levels, default sizes), read from <sheetFormatPr>
         this.properties = { outlineLevelCol: 0, outlineLevelRow: 0 };
@@ -183,7 +171,16 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
     }
 
     /** The dimensions of the rows read so far. */
-    get dimensions(): DocRange {
+    /**
+     * This reader as the worksheet of its rows and columns. A read row or column is read-only: the members of a document
+     * worksheet that the reader lacks (`getCell`, `findCell`, `eachRow`, `dataValidations`, `rowBreaks`, `_commitRow`)
+     * are only reached by the Row / Column / Cell methods that change or commit them (and throw on a read one, as always).
+     */
+    private get _host(): RowWorksheet & ColumnWorksheet {
+        return this as unknown as RowWorksheet & ColumnWorksheet;
+    }
+
+    get dimensions(): Range {
         return this._dimensions;
     }
 
@@ -198,7 +195,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                 const columns = this._columns || (this._columns = []);
                 for (let n = 1; n <= length; n++) {
                     if (!columns[n - 1]) {
-                        columns[n - 1] = new Column(this, n, Column.defnInRanges(this._colRanges, n));
+                        columns[n - 1] = new Column(this._host, n, Column.defnInRanges(this._colRanges, n));
                     }
                 }
             }
@@ -236,7 +233,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
             if (c - 1 !== this._columns.length) {
                 this._columnsSparse = true;
             }
-            column = this._columns[c - 1] = new Column(this, c, Column.defnInRanges(this._colRanges, c));
+            column = this._columns[c - 1] = new Column(this._host, c, Column.defnInRanges(this._colRanges, c));
         }
         return column;
     }
@@ -286,7 +283,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
     }
 
     /** The rows of the worksheet. */
-    async *[Symbol.asyncIterator](): AsyncGenerator<DocRow, void, undefined> {
+    async *[Symbol.asyncIterator](): AsyncGenerator<Row, void, undefined> {
         for await (const events of this.parse()) {
             for (const event of events) {
                 if (event.eventType === "row") {
@@ -328,7 +325,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         const colXform = new ColXform();
         const sheetFormatXform = new SheetFormatPropertiesXform();
         let cols: ColModel[] = [];
-        let row: DocRow | null = null;
+        let row: Row | null = null;
         let c: CellBeingParsed | null = null;
         let current: { text: string } | null = null;
         let rowNumber = 0;
@@ -343,8 +340,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                         switch (node.name) {
                             case "sheetFormatPr":
                                 sheetFormatXform.parseOpen(node);
-                                // TS-WAVE2: the model of SheetFormatPropertiesXform (typed in parallel)
-                                Object.assign(this.properties, sheetFormatXform.model as Partial<WorksheetProperties> | undefined);
+                                Object.assign(this.properties, sheetFormatXform.model);
                                 break;
                             case "cols":
                                 inCols = true;
@@ -358,8 +354,8 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                                 if (inCols) {
                                     // same parsing (and grid clamping) as the document reader
                                     colXform.parseOpen(node);
-                                    // TS-WAVE2: the model of ColXform (typed in parallel)
-                                    const col = colXform.model as ColModel;
+                                    // set by parseOpen of a <col>
+                                    const col = colXform.model!;
                                     colXform.reconcile(col, { styles });
                                     cols.push(col);
                                 }
@@ -371,7 +367,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                                     const r = parseRowNumber(attributes.r);
                                     rowNumber = r > 0 ? r : rowNumber + 1;
                                     colNumber = 0;
-                                    row = new Row(this, rowNumber);
+                                    row = new Row(this._host, rowNumber);
                                     if (attributes.ht) {
                                         row.height = parseFloat(attributes.ht);
                                     }
@@ -487,7 +483,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
 
     // sets the value and style of the cell of a <c> read
     private _reconcileCell(
-        row: DocRow,
+        row: Row,
         c: CellBeingParsed,
         sharedStrings: WorkbookReader["sharedStrings"],
         styles: WorkbookReader["styles"],
@@ -501,7 +497,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
             }
         }
 
-        let value: ReadCellValue;
+        let value: CellValue;
         if (c.f) {
             const cellValue: CellFormulaValue = {
                 formula: c.f.text,
@@ -525,7 +521,8 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
             switch (c.t) {
                 case "s": {
                     const index = parseInt(c.v.text, 10);
-                    value = sharedStrings ? sharedStrings[index] : { sharedString: index };
+                    // an index outside the table (malformed file) gives an empty cell
+                    value = sharedStrings ? (sharedStrings[index] ?? null) : { sharedString: index };
                     break;
                 }
 
@@ -535,7 +532,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                     break;
 
                 case "e":
-                    value = { error: c.v.text } as ReadCellValue;
+                    value = { error: c.v.text };
                     break;
 
                 case "b":
@@ -554,8 +551,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         } else {
             return;
         }
-        // TS-WAVE2: the Cell value setter also takes a shared string index (index.d.ts CellValue does not)
-        (cell as { value: ReadCellValue }).value = value;
+        cell.value = value;
     }
 }
 

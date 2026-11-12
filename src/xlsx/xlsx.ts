@@ -12,7 +12,7 @@ import { checkMaxMergedCells } from "../utils/merge-limits";
 import Pacer, { nextTurn, runSteps } from "../utils/pacer";
 import type { SaxInput } from "../utils/parse-sax";
 
-import StylesXformJs from "./xform/style/styles-xform";
+import StylesXform from "./xform/style/styles-xform";
 
 import CoreXform from "./xform/core/core-xform";
 import SharedStringsXform from "./xform/strings/shared-strings-xform";
@@ -20,13 +20,13 @@ import RelationshipsXform from "./xform/core/relationships-xform";
 import ContentTypesXform from "./xform/core/content-types-xform";
 import AppXform from "./xform/core/app-xform";
 import WorkbookXform from "./xform/book/workbook-xform";
-import WorksheetXformJs from "./xform/sheet/worksheet-xform";
+import WorksheetXform from "./xform/sheet/worksheet-xform";
 import DrawingXform from "./xform/drawing/drawing-xform";
 import TableXform from "./xform/table/table-xform";
 import PivotCacheRecordsXform from "./xform/pivot-table/pivot-cache-records-xform";
 import PivotCacheDefinitionXform from "./xform/pivot-table/pivot-cache-definition-xform";
 import PivotTableXform from "./xform/pivot-table/pivot-table-xform";
-import CommentsXformJs from "./xform/comment/comments-xform";
+import CommentsXform from "./xform/comment/comments-xform";
 import VmlNotesXform from "./xform/comment/vml-notes-xform";
 
 import theme1Xml from "./xml/theme1";
@@ -35,11 +35,7 @@ import type {
     DrawingModel,
     DrawingReconcileOptions,
     MediaModel,
-    NoteModel,
-    ParsedWorksheetModel,
     RelationshipModel,
-    StyleLookup,
-    StyleRegistry,
     TableModel,
     WorkbookModel,
     WorkbookPartModel,
@@ -47,49 +43,13 @@ import type {
     WorkbookReadModel,
     WorkbookReconcileOptions,
     WorkbookWriteModel,
-    WorksheetModel,
+    WorksheetLoadBudget,
 } from "../types";
 
 // ---------------------------------------------------------------------------------------------------------------------
-// TS-WAVE2: the xforms below and src/doc/workbook.ts are typed in parallel; their APIs as used here, asserted once
-// (guide rule 15)
 
 /** The styles manager: StylesXform (a parsed or a new style sheet) or its mock (no styles). */
-export interface XlsxStyles extends StyleRegistry, StyleLookup {
-    /** the XML of the styles part */
-    readonly xml: string;
-    parseStream(stream: SaxInput): Promise<unknown>;
-}
-
-const StylesXform = StylesXformJs as unknown as {
-    /** @param initialise - add the default styles */
-    new (initialise?: boolean): XlsxStyles;
-    Mock: new () => XlsxStyles;
-};
-
-/** The budget of a load shared by the worksheets (merged cells...), from WorksheetXform.createLoadBudget. */
-type LoadBudget = object;
-
-/** Steps of a generator method of an xform: one per row (utils/pacer). */
-type XformSteps = Generator<unknown, unknown, undefined>;
-
-interface XlsxWorksheetXform {
-    parseStream(stream: SaxInput): Promise<unknown>;
-    reconcileSteps(model: ParsedWorksheetModel, options: WorkbookReconcileOptions): XformSteps;
-    prepareSteps(model: WorksheetModel, options: WorkbookPrepareOptions): XformSteps;
-    renderSteps(xmlStream: XmlStream, model: WorksheetModel): XformSteps;
-}
-
-const WorksheetXform = WorksheetXformJs as unknown as {
-    /** @param options - the read options and the load budget (parse) */
-    new (options?: object): XlsxWorksheetXform;
-    createLoadBudget(this: void, maxMergedCells?: number): LoadBudget;
-};
-
-const CommentsXform = CommentsXformJs as unknown as new () => {
-    parseStream(stream: SaxInput): Promise<unknown>;
-    render(xmlStream: XmlStream, model: WorksheetModel): void;
-};
+export type XlsxStyles = StylesXform;
 
 /** What xlsx.ts needs from the workbook (src/doc/workbook.ts). */
 export interface XlsxWorkbook {
@@ -105,7 +65,7 @@ export interface XlsxWorkbook {
 export type XlsxReadModel = Omit<WorkbookReadModel, "sharedStrings"> & {
     styles?: XlsxStyles;
     sharedStrings?: SharedStringsXform;
-    loadBudget?: LoadBudget;
+    loadBudget?: WorksheetLoadBudget;
 };
 
 /** The write model of {@link XLSX.write}: the document model prepared, with the managers of the styles and shared strings. */
@@ -228,13 +188,14 @@ const isBrowser = Boolean((process as { browser?: boolean }).browser);
  * Reads and writes the xlsx file of a workbook (`workbook.xlsx`): the zip parts and their XML, through the xforms.
  * Works in browsers too, except {@link readFile} / {@link writeFile}.
  */
-class XLSX {
+class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
     /** The relationship types (rel-type.ts). */
     static readonly RelType = RelType;
 
-    readonly workbook: XlsxWorkbook;
+    /** The workbook read into and written from (a Workbook or a ModelContainer): what the read methods resolve with. */
+    readonly workbook: TWorkbook;
 
-    constructor(workbook: XlsxWorkbook) {
+    constructor(workbook: TWorkbook) {
         this.workbook = workbook;
     }
 
@@ -248,7 +209,7 @@ class XLSX {
      *
      * @throws (rejects) when the file does not exist, or as {@link load}
      */
-    async readFile(filename: string, options?: XlsxLoadOptions): Promise<XlsxWorkbook> {
+    async readFile(filename: string, options?: XlsxLoadOptions): Promise<TWorkbook> {
         if (!(await exists(filename))) {
             throw new Error(`File not found: ${filename}`);
         }
@@ -269,11 +230,18 @@ class XLSX {
         return xform.parseStream(stream);
     }
 
-    /** Parses the workbook part. */
+    /**
+     * Parses the workbook part.
+     * @throws Error when the part has no `<workbook>` element
+     */
     async parseWorkbook(stream: SaxInput): Promise<WorkbookPartModel> {
         const xform = new WorkbookXform();
-        // TS-WAVE2: the model of WorkbookXform (typed in parallel)
-        return (await xform.parseStream(stream)) as WorkbookPartModel;
+        const workbook = await xform.parseStream(stream);
+        if (!workbook) {
+            // it used to be a TypeError on the missing model
+            throw new Error("Invalid xl/workbook.xml: no <workbook> element");
+        }
+        return workbook;
     }
 
     /** Parses the shared strings part. */
@@ -378,8 +346,12 @@ class XLSX {
         path: string
     ): Promise<void> {
         const xform = new WorksheetXform({ ...options, loadBudget: model.loadBudget });
-        // TS-WAVE2: the model of WorksheetXform (typed in parallel); a part without <worksheet> fails below, as before
-        const worksheet = (await xform.parseStream(stream)) as ParsedWorksheetModel;
+        await xform.parseStream(stream);
+        const worksheet = xform.model;
+        if (!worksheet) {
+            // it used to be a TypeError on the missing model
+            throw new Error(`Invalid worksheet part ${path}: no <worksheet> element`);
+        }
         worksheet.sheetNo = sheetNo;
         model.worksheetHash[path] = worksheet;
         model.worksheets.push(worksheet);
@@ -387,14 +359,16 @@ class XLSX {
 
     async _processCommentEntry(stream: SaxInput, model: XlsxReadModel, entryName: string): Promise<void> {
         const xform = new CommentsXform();
-        // TS-WAVE2: the model of CommentsXform (typed in parallel)
-        model.comments[entryName] = (await xform.parseStream(stream)) as { comments: NoteModel[] };
+        const comments = await xform.parseStream(stream);
+        // a part without <comments> parses to nothing: no entry (a lookup gives undefined, as the stored undefined did)
+        if (comments) model.comments[entryName] = comments;
     }
 
     async _processTableEntry(stream: SaxInput, model: XlsxReadModel, entryName: string): Promise<void> {
         const xform = new TableXform();
-        // TS-WAVE2: the model of TableXform (typed in parallel)
-        model.tables[entryName] = (await xform.parseStream(stream)) as TableModel;
+        const table = await xform.parseStream(stream);
+        // a part without <table> parses to nothing: no entry (a lookup gives undefined, as the stored undefined did)
+        if (table) model.tables[entryName] = table;
     }
 
     async _processWorksheetRelsEntry(stream: SaxInput, model: XlsxReadModel, sheetNo: string): Promise<void> {
@@ -479,7 +453,7 @@ class XLSX {
      *
      * @throws (rejects) on an error of the stream, or as {@link load}
      */
-    async read(stream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream, options?: XlsxLoadOptions): Promise<XlsxWorkbook> {
+    async read(stream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream, options?: XlsxLoadOptions): Promise<TWorkbook> {
         // TODO: Remove once node v8 is deprecated
         // Detect and upgrade old streams
         let input = stream as Partial<AsyncIterable<Uint8Array>> & Partial<NodeJS.ReadableStream>;
@@ -502,7 +476,7 @@ class XLSX {
      * @throws (rejects) on an invalid zip or XML, a decompression limit or a limit of the worksheets exceeded
      * (rows, columns, merged cells...: see the invariants of CLAUDE.md)
      */
-    async load(data: XlsxLoadData, options?: XlsxLoadOptions): Promise<XlsxWorkbook> {
+    async load(data: XlsxLoadData, options?: XlsxLoadOptions): Promise<TWorkbook> {
         let buffer: XlsxLoadData;
         if (options && options.base64) {
             // eslint-disable-next-line @typescript-eslint/no-base-to-string -- a base64 string (or its Buffer), as it always was
@@ -876,8 +850,7 @@ class XLSX {
             });
         }
         if ((model.pivotTables || []).length) {
-            // TS-WAVE2: src/doc/pivot-table.ts is typed in parallel
-            const pivotTable = model.pivotTables[0] as { rId?: string };
+            const pivotTable = model.pivotTables[0]!; // length checked above
             const rId = (pivotTable.rId = `rId${count++}`);
             relationships.push({
                 Id: rId,
@@ -949,7 +922,7 @@ class XLSX {
             const comments = worksheet.comments!;
             if (comments.length > 0) {
                 xmlStream = new XmlStream();
-                commentsXform.render(xmlStream, worksheet);
+                commentsXform.render(xmlStream, { comments });
                 zip.append(xmlStream.xml, { name: `xl/comments${worksheet.id}.xml` });
 
                 xmlStream = new XmlStream();

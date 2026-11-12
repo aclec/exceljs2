@@ -63,7 +63,7 @@ class Workbook {
     declare contentStatus?: string | undefined;
     /** The themes read from a file (theme part name → XML), written back as they are. */
     declare _themes?: Record<string, string> | undefined;
-    declare _xlsx?: XLSX;
+    declare _xlsx?: XLSX<Workbook>;
     declare _csv?: CSV;
 
     constructor() {
@@ -90,7 +90,7 @@ class Workbook {
     }
 
     /** The xlsx reader / writer (created on first use). */
-    get xlsx(): XLSX {
+    get xlsx(): XLSX<Workbook> {
         if (!this._xlsx) this._xlsx = new XLSX(this);
         return this._xlsx;
     }

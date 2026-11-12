@@ -239,8 +239,12 @@ class BaseXform<TModel = unknown> {
         return this.toXml(this.model as TModel);
     }
 
-    /** Renders a model to an XML string (without XML declaration, unless the xform writes one). */
-    toXml(model: NoInfer<TModel>): string {
+    /**
+     * Renders a model to an XML string (without XML declaration, unless the xform writes one).
+     *
+     * @param model - what the {@link render} of the xform accepts (many accept a missing model and write nothing)
+     */
+    toXml(model: Parameters<this["render"]>[1]): string {
         const xmlStream = new XmlStream();
         this.render(xmlStream, model);
         return xmlStream.xml;

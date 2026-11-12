@@ -20,9 +20,6 @@ import { ValueType } from "../../../doc/enums";
 
 import RichTextXform from "../strings/rich-text-xform";
 
-// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
-const RangeOf = Range as unknown as new (tl: string, br: string) => Range;
-
 /**
  * The type of a value (of a formula result): Null for null / undefined.
  *
@@ -188,7 +185,7 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                     if (master.si === undefined) {
                         master.shareType = "shared";
                         master.si = options.siFormulae++;
-                        master.range = new RangeOf(master.address, model.address);
+                        master.range = new Range(master.address, model.address);
                     } else if (master.range) {
                         master.range.expandToAddress(model.address);
                     }

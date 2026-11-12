@@ -26,9 +26,6 @@ import FormulaXform from "./formula-xform";
 import ColorScaleXform from "./color-scale-xform";
 import IconSetXform from "./icon-set-xform";
 
-// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
-const RangeOf = Range as unknown as new (range: string | undefined) => Range;
-
 // the icon sets of Excel 2010+, written in the x14 extension only
 const EXT_ICONS: ReadonlySet<string | undefined> = new Set(["3Triangles", "3Stars", "5Boxes"]);
 
@@ -53,6 +50,17 @@ function textOperatorAttribute(type: string): string | undefined {
 const textLiteral = (text: string | undefined): string => `"${String(text === undefined ? "" : text).replace(/"/g, '""')}"`;
 
 /**
+ * The range of a conditional formatting rule (its `sqref`).
+ * @throws Error for a rule without range (a malformed file); it used to be a TypeError
+ */
+function rangeOfRule(ref: string | undefined): Range {
+    if (ref === undefined) {
+        throw new Error("Conditional formatting rule without range (sqref)");
+    }
+    return new Range(ref);
+}
+
+/**
  * The formula of a text rule: its first formula, else the one derived from its operator and text for the top left cell
  * of its range (`ref`, set by render).
  *
@@ -63,7 +71,7 @@ function getTextFormula(this: void, model: ContainsTextRuleModel): CfFormula | u
         return model.formulae[0];
     }
 
-    const range = new RangeOf(model.ref);
+    const range = rangeOfRule(model.ref);
     const { tl } = range;
     const text = textLiteral(model.text);
     switch (model.operator || "containsText") {
@@ -99,7 +107,7 @@ function getTimePeriodFormula(this: void, model: TimePeriodRuleModel): CfFormula
         return model.formulae[0];
     }
 
-    const range = new RangeOf(model.ref);
+    const range = rangeOfRule(model.ref);
     const { tl } = range;
     switch (model.timePeriod) {
         case "thisWeek":

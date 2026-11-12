@@ -49,6 +49,8 @@ export interface PivotTable {
     cacheFields: PivotCacheField[];
     /** Defined in `<pivotTableDefinition>` of xl/pivotTables/pivotTable1.xml; also used in xl/workbook.xml. */
     cacheId: string;
+    /** Set when the workbook is written (xlsx.ts): the relationship id of the pivot cache definition from the workbook. */
+    rId?: string;
 }
 
 /**
