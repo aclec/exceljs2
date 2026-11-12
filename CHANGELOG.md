@@ -125,6 +125,27 @@ upstream PR code was merged) and has a regression test.
     - Streaming readers: optional `WorkbookReader` options (#1922), `WorksheetReader` properties and getters (#1901, #3097), EventEmitter
       methods.
     - The `csv.createInputStream()` typing was removed (it has thrown since 4.0). Comment typos (#3003, #3081).
+- Data validations on whole columns or rows (`dataValidations.add("A:A", ...)`, `"1:3"`, `sqref="D:E"` in a file) crashed the writers, were
+  ignored by `find()` and were dropped on read; they are kept as the rectangle they cover (`A1:A1048576`), never expanded per cell.
+- Merged cells after `spliceRows` / `insertRow(s)` / `duplicateRow` / `spliceColumns`: the merge index used by the writers was not moved
+  with the cells (merges written at their old place), `spliceRows` with deletions and insertions shifted merges by the number of inserted
+  rows instead of the net offset, and slaves could point at a replaced master. Merges now move as rectangles: they shrink when some of their
+  rows / columns are removed, widen when rows / columns are inserted inside them (as in Excel), disappear when reduced to one cell, and
+  `duplicateRow` copies the single-row merges of the duplicated row.
+- Notes (comments) were dropped from the rows that `spliceRows` / `insertRow(s)` moved; they move with their cells, as `spliceColumns`
+  already did.
+- Notes on cells without a value were lost on read: Excel (and ExcelJS) write no `<c>` element for such cells. The cells, and their rows
+  when missing, are now created.
+- Streaming writer: notes on the cells of a row without values were dropped (the row was skipped).
+- Hyperlink tooltips were lost on read (document reader). The streaming reader's `hyperlink` events now carry `location`, `tooltip` and
+  `display` too (an internal link was an event without target).
+- Streaming writer: memory grew with the number of rows (about 0.5 KB per row: 170 MB for 300,000 rows) because rows were committed faster
+  than they were compressed and written, with no way to wait. `row.commit()` and `worksheet.commit()` now return a promise that resolves
+  once the output has drained; awaiting it keeps memory bounded (about 7 MB of live memory whatever the number of rows). Not awaiting it
+  keeps the previous behaviour.
+- Streaming reader: the temp file of a worksheet spooled before the shared strings stayed open for the life of the process when the consumer
+  skipped that worksheet (or with `worksheets: 'ignore'`); it is closed once its reader is garbage collected. Removing the temp dir no
+  longer waits forever for a spooled file that was closed before it opened.
 
 ### Documentation
 

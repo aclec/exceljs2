@@ -22,7 +22,7 @@ const fakeStyles = {
 };
 
 const fakeHyperlinkMap = {
-    H1: "http://www.foo.com",
+    H1: { target: "http://www.foo.com" },
 };
 
 const expectations = [

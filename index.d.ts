@@ -542,7 +542,7 @@ export interface Cell extends Style, Address {
     addMergeRef(): void;
     releaseMergeRef(): void;
     merge(master: Cell, ignoreStyle?: boolean): void;
-    unmerge(): void;
+    unmerge(ignoreStyle?: boolean): void;
     isMergedTo(master: Cell): boolean;
     toString(): string;
 }
@@ -638,9 +638,10 @@ export interface Row extends Style {
     splice(start: number, count: number, ...insert: any[]): void;
 
     /**
-     * Commit a completed row to stream
+     * Commit a completed row (and the rows before it) to stream. In the streaming writer, returns a promise that resolves
+     * once the output can take more data: awaiting it keeps memory bounded (backpressure). No effect on a document worksheet.
      */
-    commit(): void;
+    commit(): void | Promise<void>;
     destroy(): void;
     addPageBreak(lft?: number, rght?: number): void;
 }
@@ -1493,7 +1494,11 @@ export interface Worksheet {
         range: ImageRange;
     }>;
 
-    commit(): void;
+    /**
+     * Streaming writer: writes the rest of the worksheet, and returns a promise that resolves once the output can take more
+     * data. No effect on a document worksheet.
+     */
+    commit(): void | Promise<void>;
 
     model: WorksheetModel;
 

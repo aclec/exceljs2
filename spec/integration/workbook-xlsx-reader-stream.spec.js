@@ -1,6 +1,8 @@
 // Streaming reader (ExcelJS.stream.xlsx.WorkbookReader) robustness tests.
 // Fixtures are built in-test with ExcelJS + fflate so they stay reviewable.
 const fs = require("fs");
+const v8 = require("v8");
+const vm = require("vm");
 const { Readable } = require("stream");
 const { baseWorkbookBuffer, tamper, unzipParts, zipParts } = require("../utils/xlsx-tamper");
 
@@ -55,6 +57,18 @@ async function readError(input) {
 }
 
 const isWorksheet = (name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name);
+
+// a function that runs a full garbage collection (Bun, or Node.js with V8's gc exposed at run time)
+function exposeGc() {
+    if (typeof Bun !== "undefined") {
+        return () => Bun.gc(true); // eslint-disable-line no-undef
+    }
+    if (typeof global.gc === "function") {
+        return global.gc;
+    }
+    v8.setFlagsFromString("--expose-gc");
+    return vm.runInNewContext("gc");
+}
 
 // records every temp dir the reader creates (spy on the lookup done at call time)
 function trackTempDirs() {
@@ -168,6 +182,38 @@ describe("WorkbookReader (stream)", () => {
             await readAll(chunkedStream(buffer), { worksheets: "ignore" });
             expect(tracker.created).to.have.length(2);
             tracker.created.forEach((dir) => expect(fs.existsSync(dir)).to.equal(false));
+        });
+
+        it("closes the file of a spooled worksheet that the consumer skipped once its reader is collected", async function () {
+            this.timeout(10000);
+            const gc = exposeGc();
+            const opened = [];
+            const original = fs.createReadStream;
+            fs.createReadStream = (...args) => {
+                const stream = original.apply(fs, args);
+                opened.push(stream);
+                return stream;
+            };
+            try {
+                const buffer = await bigSheetFirstBuffer();
+                for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                    if (worksheet.name !== "Second") continue;
+                    // eslint-disable-next-line no-unused-vars
+                    for await (const row of worksheet) {
+                        // read
+                    }
+                }
+            } finally {
+                fs.createReadStream = original;
+            }
+            expect(opened).to.have.length(2);
+            expect(opened[1].closed).to.equal(true);
+            // the skipped worksheet can never be read: its file descriptor must not stay open for the life of the process
+            for (let i = 0; i < 50 && !opened[0].closed; i++) {
+                gc();
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            expect(opened[0].closed).to.equal(true);
         });
 
         it("closes the spooled worksheet files read to the end before removing the temp dir", async () => {

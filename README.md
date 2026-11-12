@@ -2506,6 +2506,27 @@ As each worksheet is completed, it must also be committed:
 worksheet.commit();
 ```
 
+**Backpressure**
+
+The zip is compressed asynchronously, and the output stream may be slower than the rows are produced. A loop that commits rows
+ without ever waiting keeps all the written data in memory until it returns to the event loop: memory grows with the number of
+ rows (hundreds of MB for a few hundred thousand rows). `row.commit()` and `worksheet.commit()` return a promise that resolves
+ once the output can take more data (the output stream has drained and no more than a few MB are being compressed): await it
+ to keep memory bounded, whatever the size of the sheet.
+
+```javascript
+for await (const record of records) {
+  await worksheet.addRow(record).commit();
+}
+await worksheet.commit();
+await workbook.commit();
+```
+
+Not awaiting these promises keeps the 4.x behaviour. They reject only when the output fails (the same error rejects
+ `workbook.commit()`), and never raise an unhandled rejection when ignored. Awaiting them needs a consumer of the output: with
+ `options.stream`, read it while writing. Data of a worksheet written while an earlier worksheet is still uncommitted stays in
+ memory until that worksheet is committed.
+
 To complete the XLSX document, the workbook must be committed. If any worksheet in a workbook are uncommitted,
  they will be committed automatically as part of the workbook commit.
 
@@ -2549,7 +2570,9 @@ If worksheets come before the shared strings in the zip file, the reader spools 
 
 ###### Iterating over all events(#contents)<!-- Link generated with jump2header -->
 
-Events on workbook are 'worksheet', 'shared-strings' and 'hyperlinks'. Events on worksheet are 'row' and 'hyperlinks'.
+Events on workbook are 'worksheet', 'shared-strings' and 'hyperlinks'. Events on worksheet are 'row' and 'hyperlink'. A 'hyperlink'
+ value holds the attributes of the sheet's `<hyperlink>` element that are present: `{ref, rId, location, tooltip, display}` (an
+ internal link has a `location` and no `rId`; the target of an `rId` is in the sheet relationships that the hyperlinks reader emits).
 
 ```js
 const options = {

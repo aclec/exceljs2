@@ -190,6 +190,10 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
 - **Object keys `__proto__`, `constructor` and `prototype`** in objects given to ExcelJS (for example `cell.note = JSON.parse(...)`) are
   ignored when they are merged into internal models.
 - **Pivot tables** (experimental): field names and values are XML-escaped.
+- **Streaming writer backpressure.** `row.commit()` and `worksheet.commit()` of the streaming `WorkbookWriter` return a promise (4.x:
+  `undefined`) that resolves once the output can take more data. `await worksheet.addRow(values).commit()` keeps memory bounded on large
+  sheets; code that ignores the promise works as before (and keeps all the pending data in memory until it yields to the event loop). See
+  the [README](README.md#streaming-xlsx). In TypeScript, `commit()` is typed `void | Promise<void>`.
 
 ## TypeScript
 

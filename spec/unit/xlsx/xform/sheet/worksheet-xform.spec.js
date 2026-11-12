@@ -262,7 +262,7 @@ describe("WorksheetXform", () => {
         const model = {
             hyperlinks: [
                 { address: "__proto__", rId: "rId1" },
-                { address: "B2", target: "Sheet2!A1" },
+                { address: "B2", target: "Sheet2!A1", tooltip: "tip" },
             ],
             relationships: [{ Id: "rId1", Type: RelType.Hyperlink, Target: "http://example.com/", TargetMode: "External" }],
             rows: [],
@@ -272,8 +272,11 @@ describe("WorksheetXform", () => {
         xform.reconcile(model, options);
 
         const { hyperlinkMap } = options;
-        expect(Object.getOwnPropertyDescriptor(hyperlinkMap, "__proto__").value).to.equal("http://example.com/");
-        expect(hyperlinkMap.B2).to.equal("#Sheet2!A1");
+        expect(Object.getOwnPropertyDescriptor(hyperlinkMap, "__proto__").value).to.deep.equal({
+            target: "http://example.com/",
+            tooltip: undefined,
+        });
+        expect(hyperlinkMap.B2).to.deep.equal({ target: "#Sheet2!A1", tooltip: "tip" });
         expect(hyperlinkMap.toString).to.equal(undefined);
         expect(hyperlinkMap.constructor).to.equal(undefined);
     });
