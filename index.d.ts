@@ -411,6 +411,10 @@ export interface CellErrorValue {
     error: "#N/A" | "#REF!" | "#NAME?" | "#DIV/0!" | "#NULL!" | "#VALUE!" | "#NUM!";
 }
 
+/**
+ * A run of rich text: its text and its font. A run read from a malformed file (`<r>` without its required `<t>`) has no
+ * `text`; a run without text is not written.
+ */
 export interface RichText {
     text: string;
     font?: Partial<Font>;
@@ -420,8 +424,17 @@ export interface CellRichTextValue {
     richText: RichText[];
 }
 
+/**
+ * The value of a hyperlink cell: the value shown (`text`), the link target (`hyperlink`: a URL, or a place in the
+ * workbook such as `"#Sheet1!A1"`) and an optional tooltip.
+ */
 export interface CellHyperlinkValue {
-    text: string;
+    /**
+     * The value shown: any value of a cell, such as a number or a rich text (a hyperlink read from a file shows the value
+     * of its cell, whatever its type). It must be truthy: a value with an empty or zero `text` is not a hyperlink (it is
+     * held as a JSON value, see {@link CellValue}).
+     */
+    text: string | number | boolean | Date | CellErrorValue | CellRichTextValue;
     hyperlink: string;
     tooltip?: string;
 }
@@ -429,17 +442,30 @@ export interface CellHyperlinkValue {
 /** The cached result of a formula. */
 export type CellFormulaResult = number | string | boolean | Date | CellErrorValue;
 
+/**
+ * The value of a formula cell that has a formula of its own: a single formula, the master of shared formulas
+ * (`shareType: "shared"`) or an array formula (`shareType: "array"`), with its cached result.
+ */
 export interface CellFormulaValue {
+    /** The formula, without `=`. */
     formula: string;
     result?: CellFormulaResult;
-    date1904?: boolean;
+    /** The master of shared formulas (`"shared"`) or an array formula (`"array"`); absent for a single formula. */
+    shareType?: "shared" | "array";
+    /** The range of a shared or array formula master (`"A1:A10"`). */
+    ref?: string;
 }
 
+/**
+ * The value of a clone of a shared formula: the address of its master (`sharedFormula`) and its cached result. The
+ * formula translated to the cell is `cell.formula`.
+ */
 export interface CellSharedFormulaValue {
+    /** The address of the master of the shared formula (`"A1"`). */
     sharedFormula: string;
+    /** Absent from the value of a clone: `cell.formula` gives the master's formula translated to the cell. */
     readonly formula?: string;
-    result?: number | string | boolean | Date | CellErrorValue;
-    date1904?: boolean;
+    result?: CellFormulaResult;
 }
 
 export declare enum ValueType {
@@ -470,6 +496,15 @@ export interface CellSharedStringValue {
     readonly sharedString: number;
 }
 
+/**
+ * The value of a cell. Reading gives `null` for an empty cell (never `undefined`); setting `undefined` or `null` empties
+ * the cell.
+ *
+ * The kind of an object value is told by its truthy marker properties, in this order: `text` and `hyperlink`
+ * (hyperlink), `formula` or `sharedFormula` (formula), `richText`, `sharedString`, `error`. Any other object (outside
+ * this type: an untyped value, such as one returned by the CSV `map` option) is held as a JSON value: its type is
+ * String, it is returned as is, and it is written as its JSON text (read back as a string).
+ */
 export type CellValue =
     | null
     | number
@@ -484,9 +519,14 @@ export type CellValue =
     | CellSharedFormulaValue
     | CellSharedStringValue;
 
+/** The margins of the box of a note. */
 export interface CommentMargins {
     insetmode: "auto" | "custom";
-    inset: Number[];
+    /**
+     * The margins in cm: left, top, right, bottom. A note read from a file without (or with invalid) margins has none:
+     * the VML defaults apply.
+     */
+    inset: number[];
 }
 
 export interface CommentProtection {
@@ -498,11 +538,20 @@ export type CommentEditAs = "twoCells" | "oneCells" | "absolute";
 
 export type ImageEditAs = "twoCell" | "oneCell" | "absolute";
 
+/**
+ * A note (comment) of a cell: its rich text, the margins and protection of its box, and how the box moves with the
+ * cells. A note read from a file has all of them, and its VML `anchor`.
+ */
 export interface Comment {
     texts?: RichText[];
     margins?: Partial<CommentMargins>;
     protection?: Partial<CommentProtection>;
     editAs?: CommentEditAs;
+    /**
+     * Read from a file: the text of the VML `<x:Anchor>` of the box (`"col, dx, row, dy, col, dx, row, dy"`, 0-based
+     * columns and rows). Informational: a note is always written with its box next to its cell.
+     */
+    readonly anchor?: string;
 }
 
 /** The note of a cell in its model (`cellModel.comment`). */
@@ -566,6 +615,8 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     /** The target of a hyperlink cell, `undefined` for other cells. */
     readonly hyperlink: string | undefined;
     readonly text: string;
+    /** The text of the cell ({@link text}), HTML-escaped. */
+    readonly html: string;
     readonly fullAddress: {
         sheetName: string;
         address: string;
@@ -580,9 +631,11 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     set name(value: string);
 
     /**
-     * Assign (or get) an array of names for a cell (cells can have more than one name)
+     * Assign (or get) an array of names for a cell (cells can have more than one name): setting them replaces the names
+     * of the cell.
      */
-    names: string[];
+    get names(): string[];
+    set names(value: readonly string[]);
 
     /**
      * Cells can define what values are valid or not and provide prompting to the user to help guide them; `undefined`
@@ -592,7 +645,8 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     set dataValidation(value: DataValidation);
 
     /**
-     * Value of the cell
+     * Value of the cell (see {@link CellValue}): a merged cell gives and sets the value of its master. Any other object
+     * than a CellValue is held as a JSON value, returned as is.
      */
     value: CellValue;
 
@@ -618,7 +672,8 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     readonly type: ValueType;
 
     /**
-     * The type of the cell's formula: Master or Shared for a formula cell, `undefined` for other cells
+     * The type of the cell's formula: Master or Shared for a formula cell (None for a formula read from a malformed file
+     * with neither formula nor master), `undefined` for other cells
      */
     readonly formulaType: FormulaType | undefined;
 
@@ -638,8 +693,14 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     destroy(): void;
     /** The value as written to CSV: a number for a boolean (1 / 0). */
     toCsvString(): string | number;
+    /**
+     * Merges this cell into `master`: its value is dropped, and it takes the master's style unless `ignoreStyle`. Low
+     * level: the merge is not recorded in the worksheet (not written); use `worksheet.mergeCells`.
+     */
     merge(master: Cell, ignoreStyle?: boolean): void;
+    /** Unmerges a merged cell: it becomes empty, and its style is reset from its row and column unless `ignoreStyle`. */
     unmerge(ignoreStyle?: boolean): void;
+    /** Whether this cell is merged into `master`. */
     isMergedTo(master: Cell): boolean;
     toString(): string;
 }
@@ -658,6 +719,7 @@ export interface RowModel {
     collapsed?: boolean;
 }
 
+/** A row of a worksheet. Its cells are created on demand (`getCell`); a new cell takes the style of the row. */
 export interface Row extends StyleProperties {
     readonly worksheet: Worksheet;
     readonly hasValues: boolean;
@@ -665,31 +727,44 @@ export interface Row extends StyleProperties {
      * The min and max column numbers of the non-empty cells, or null if the row is empty
      */
     readonly dimensions: { min: number; max: number } | null;
-    /** The model of the row; `null` for a row without height and without cell. */
-    model: RowModel | null;
+    /**
+     * The model of the row; `null` for a row without height and without cell. Setting it replaces the cells, height,
+     * hidden state, outline level and style; it throws for the model of another row number.
+     */
+    get model(): RowModel | null;
+    set model(value: RowModel);
     /**
      * Set a specific row height; `undefined` when the row has the default height
      */
     height: number | undefined;
 
     /**
-     * Make row hidden
+     * Make row hidden (`undefined`: not hidden)
      */
-    hidden: boolean;
+    get hidden(): boolean;
+    set hidden(value: boolean | undefined);
+
+    /**
+     * The style of the row: the style of the cells created in it. Setting a style property (`row.font = ...`) also sets
+     * it on the existing cells.
+     */
+    style: Partial<Style>;
 
     /**
      * Get a row as a sparse array (index 0 is unused: column A is at index 1)
      */
     get values(): CellValue[];
     /**
-     * Set the row's values from a contiguous or sparse array, or from an object keyed by column key
+     * Set the row's values from a contiguous or sparse array, or from an object keyed by column key. The existing cells
+     * are removed first; `null` / `undefined` empty the row.
      */
-    set values(value: CellValue[] | { [key: string]: CellValue });
+    set values(value: RowValues);
 
     /**
-     * Set an outline level for rows
+     * The outline level of the row: 0 when not set (setting `undefined` clears it)
      */
-    outlineLevel?: number;
+    get outlineLevel(): number;
+    set outlineLevel(value: number | undefined);
 
     /**
      * The row number
@@ -716,9 +791,14 @@ export interface Row extends StyleProperties {
      */
     getCell(indexOrKey: number | string): Cell;
 
+    /** The cell of a column (1-based number) if it exists, without creating it. */
     findCell(colNumber: number): Cell | undefined;
 
-    getCellEx(address: Address): Cell;
+    /**
+     * The cell at a location of this row, created if needed: `address` is its address (`"B2"`) and `col` its 1-based
+     * column number (`row` is not read).
+     */
+    getCellEx(address: { readonly address: string; readonly col: number; readonly row?: number }): Cell;
 
     /**
      * Iterate over all non-null cells in a row
@@ -726,16 +806,18 @@ export interface Row extends StyleProperties {
     eachCell(callback: (cell: Cell, colNumber: number) => void): void;
 
     /**
-     * Iterate over all cells in a row (including empty cells)
+     * Iterate over the non-null cells in a row; with `includeEmpty: true`, over all the cells up to the last one
+     * (creating the missing ones)
      */
-    eachCell(opt: { includeEmpty: boolean }, callback: (cell: Cell, colNumber: number) => void): void;
+    eachCell(opt: { readonly includeEmpty?: boolean } | null | undefined, callback: (cell: Cell, colNumber: number) => void): void;
 
     /**
-     * Cut one or more cells (cells to the right are shifted left)
+     * Removes `count` cells from column `start` (1-based) and inserts the `insert` values there: the cells to the right
+     * are shifted (left or right)
      *
      * Note: this operation will not affect other rows
      */
-    splice(start: number, count: number, ...insert: any[]): void;
+    splice(start: number, count: number, ...insert: CellValue[]): void;
 
     /**
      * Commit a completed row (and the rows before it) to stream. In the streaming writer, returns a promise that resolves
@@ -746,7 +828,8 @@ export interface Row extends StyleProperties {
     addPageBreak(lft?: number, rght?: number): void;
 }
 
-export interface Column {
+/** A column of a worksheet: its header, key, width, style, outline level. */
+export interface Column extends StyleProperties {
     /**
      * Can be a string to set one row high header or an array to set multi-row high header
      */
@@ -763,9 +846,10 @@ export interface Column {
     width?: number;
 
     /**
-     * Set an outline level for columns
+     * The outline level of the column: 0 when not set (setting `undefined` clears it)
      */
-    outlineLevel: number;
+    get outlineLevel(): number;
+    set outlineLevel(value: number | undefined);
 
     /**
      * Hides the column
@@ -778,9 +862,14 @@ export interface Column {
     style: Partial<Style>;
 
     /**
-     * The cell values in the column, as a sparse array indexed by row number
+     * The cell values in the column, as a sparse array indexed by row number (index 0 unused)
      */
-    values: CellValue[];
+    get values(): CellValue[];
+    /**
+     * Set the values of the column from a sparse array indexed by row number, or a contiguous array (index 0 set) for
+     * rows 1, 2...; `null` / `undefined` change nothing.
+     */
+    set values(value: readonly CellValue[] | null | undefined);
 
     /**
      * Column letter key
@@ -793,16 +882,6 @@ export interface Column {
     readonly headers: readonly (string | undefined)[];
     readonly isDefault: boolean;
     readonly headerCount: number;
-
-    /**
-     * Below properties read from style
-     */
-    border?: Partial<Borders>;
-    fill?: Fill;
-    numFmt?: string;
-    font?: Partial<Font>;
-    alignment?: Partial<Alignment>;
-    protection?: Partial<Protection>;
 
     toString(): string;
     equivalentTo(other: Column): boolean;
@@ -818,13 +897,15 @@ export interface Column {
     eachCell(callback: (cell: Cell, rowNumber: number) => void): void;
 
     /**
-     * Iterate over all current cells in this column including empty cells
+     * Iterate over the cells of this column in the rows that have values; with `includeEmpty: true`, in every row up to
+     * the last one (creating the missing rows and cells)
      */
-    eachCell(opt: { includeEmpty: boolean }, callback: (cell: Cell, rowNumber: number) => void): void;
+    eachCell(opt: { readonly includeEmpty?: boolean } | null | undefined, callback: (cell: Cell, rowNumber: number) => void): void;
 
     /**
      * The definition of the column (what `worksheet.columns = [...]` sets): setting it sets the key, width (default 9),
-     * outline level, style, header and hidden state; `null` / `undefined` reset nothing.
+     * outline level, style, header and hidden state; `null` / `undefined` reset the column (no header, key, width, style
+     * nor outline level).
      */
     get defn(): ColumnDefinition;
     set defn(value: ColumnDefinition | null | undefined);
@@ -1355,7 +1436,11 @@ export type ConditionalFormattingRule =
     | TimePeriodRuleType
     | DataBarRuleType;
 
-export type RowValues = CellValue[] | { [key: string]: CellValue } | undefined | null;
+/**
+ * The values of a row: a sparse array indexed by column number (index 0 unused), a contiguous array (index 0 set: the
+ * values of columns 1, 2...), or an object keyed by column key; `null` / `undefined`: no value.
+ */
+export type RowValues = readonly CellValue[] | { readonly [key: string]: CellValue } | undefined | null;
 
 export interface ConditionalFormattingOptions {
     ref: string;
