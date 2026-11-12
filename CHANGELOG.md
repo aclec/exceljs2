@@ -272,6 +272,26 @@ Found while aligning the typings with the runtime (each with a regression test t
 - Tables: a row longer than the columns threw a `TypeError` and left a half-written table; a second `commit()` after a move cleared the
   wrong cells; tables read from a file threw `TypeError`s from `height`, their mutators and style setters.
 - Streaming reader: `hyperlinks: "cache"` never read the hyperlink targets.
+- xsd:boolean attributes written `"true"` / `"false"` (valid, written by other tools) were read as false in the workbook properties, page
+  setup, print options, sheet views, sheet protection, cell protection, outline properties, header / footer, table styles and conditional
+  formatting (`reverse`, `showValue`, `custom`...).
+- A table without `<tableStyleInfo>` loaded but could not be written back (`TypeError`); it round-trips without style. Tables read from a
+  file are edited with the table API like created ones. `totalsRowCount` / `headerRowCount` are read as counts.
+- `tint` is read and written with any colour (rgb, indexed, auto), not only theme colours.
+- Conditional formatting rules of an unsupported type (`duplicateValues`, `uniqueValues`...) were kept and written back as an empty
+  `<conditionalFormatting>` (a corrupt file); they are not read. A hyperlink whose text is an error value was written as the shared string
+  `[object Object]`; it is written as an error cell. A formula cell without formula text (an orphan shared-formula clone) was written with
+  an empty `<f/>`; it is written as its cached value.
+- Data validation dates follow the 1904 date system of the workbook, on read and write; `type="time"` rules are kept.
+- Streaming reader: shared-formula clones get the formula of their master, translated as `workbook.xlsx.load` does (they had an empty
+  formula).
+- `spliceColumns` dropped the values inserted for rows past the last one, and inserted `0`, `false` and `""` as empty cells.
+- `<formula1>` outside `<dataValidation>`, a `<sheet>` or table without name, a table without `<tableColumns>` and other malformed parts
+  threw `TypeError`s: they are skipped or throw a clear `Error`. Invalid enumerated attribute values (page orientation, pane, view style,
+  validation type or operator, cfvo type, data bar axis, border style, pattern type, underline, image `editAs`, sheet state...) read as the
+  schema default instead of being kept as is.
+- Internal: no type assertion is left to silence the compiler in `src/` (`no-non-null-assertion` and `no-unsafe-type-assertion` are lint
+  errors); the 410 assertions were replaced by checks, which turned several `TypeError`s on invalid input into clear errors.
 
 ### Performance
 

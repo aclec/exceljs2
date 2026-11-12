@@ -305,6 +305,14 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
   values than columns, ...) without writing any cell; `getColumn(index)` out of range throws. A table read from a file without style returns
   `null` / `undefined` for `theme` and the `show*` properties.
 - **Streaming reader hyperlinks.** With `hyperlinks: "cache"`, `worksheetReader.hyperlinks` entries have their `target` and `targetMode`.
+- **Cell values are checked.** Setting `cell.value` to an object that is not a cell value of its kind throws a clear `Error` and leaves the
+  cell unchanged: a hyperlink whose text is not a cell value or whose tooltip is not a string, a formula with a wrong-typed `formula`,
+  `sharedFormula`, `ref`, `shareType` or `result`, rich text runs that are not `{ text, font? }`, an `{ error }` that is not an error code,
+  a bigint, a symbol or a function. A `null` formula result or tooltip counts as absent. Other objects are still stored as JSON values.
+- **Malformed files.** Invalid values of enumerated attributes read as the schema default (for example an unknown `orientation` is
+  `portrait`); conditional formatting rules of a type ExcelJS does not model are dropped; a table or sheet without name throws a clear
+  `Error`. Valid files read as before.
+- **Shared formulas in the streaming reader.** A clone has the formula of its master, translated to its cell (4.x: an empty formula).
 
 ## TypeScript
 
@@ -381,6 +389,9 @@ Corrected signatures:
   `shareType`.
 - `mergeCells` / `unMergeCells` take the range arguments the runtime accepts (`RangeArguments`).
 - `Range.containsEx()` needs `row` and `col`.
+- `CellErrorValue.error` admits any error code (Excel writes `#SPILL!`, `#CALC!`...); `Font.vertAlign` admits `"baseline"`,
+  `PageSetup.orientation` `"default"`, `DataValidationType` `"time"`, and `TableStyleProperties.theme` a custom style name: code that
+  switches exhaustively on them needs a default branch.
 - `mergeCells()` / `unMergeCells()` without arguments no longer compile (they merged A1 or threw); `IconSetRuleType.iconSet` no longer
   accepts `"3TrafficLights"` (not a schema value; still written as the default at run time); new `Color.auto`.
 - `addRow` / `insertRow` / `addRows` take `RowValues` and a `RowStyleOption` (`"n" | "i" | "i+" | "o" | "o+"`); `row.splice()` takes
