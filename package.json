@@ -18,35 +18,55 @@
   "main": "./excel.js",
   "browser": "./dist/exceljs.min.js",
   "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "browser": "./dist/exceljs.min.js",
+      "default": "./excel.js"
+    },
+    "./package.json": "./package.json",
+    "./excel": "./excel.js",
+    "./excel.js": "./excel.js",
+    "./dist/*": "./dist/*",
+    "./lib/*.js": "./lib/*.js",
+    "./lib/*": "./lib/*.js"
+  },
   "files": [
     "dist",
     "lib",
     "excel.js",
+    "index.d.ts",
     "LICENSE",
     "README.md",
-    "README_zh.md",
-    "index.ts",
-    "index.d.ts"
+    "README_zh.md"
   ],
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "bun run test:unit && bun run test:integration && bun run test:end-to-end",
-    "test:unit": "mocha --require spec/config/setup --require spec/config/setup-unit spec/unit --recursive",
-    "test:integration": "mocha --require spec/config/setup spec/integration --recursive",
-    "test:end-to-end": "mocha --require spec/config/setup spec/end-to-end --recursive",
-    "test:dist": "mocha --require spec/config/setup spec/dist --recursive",
-    "test:manual": "node spec/manual/app.js",
-    "test:typescript": "mocha -r tsx spec/typescript/**/*.spec.ts",
-    "lint": "eslint --format node_modules/eslint-friendly-formatter .",
-    "clean": "rm -rf build/ && rm -rf dist",
-    "benchmark": "node --expose-gc benchmark",
-    "build": "grunt build"
+    "test:unit": "mocha --require spec/config/setup.js --require spec/config/setup-unit.js spec/unit --recursive",
+    "test:integration": "mocha --require spec/config/setup.js spec/integration --recursive",
+    "test:end-to-end": "mocha --require spec/config/setup.js spec/end-to-end --recursive",
+    "test:bun": "bun --bun mocha --require spec/config/setup.js --require spec/config/setup-unit.js spec/unit --recursive && bun --bun mocha --require spec/config/setup.js spec/integration --recursive && bun --bun mocha --require spec/config/setup.js spec/end-to-end --recursive",
+    "test:browser": "mocha --require spec/config/setup.js spec/browser",
+    "test:dist": "mocha --require spec/config/setup.js spec/dist",
+    "test:typescript": "mocha --require spec/config/setup.js --import=tsx 'spec/typescript/**/*.spec.ts'",
+    "test:types": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "audit": "bun audit",
+    "benchmark": "node --expose-gc benchmark.js",
+    "check:install-scripts": "node scripts/check-install-scripts.mjs",
+    "prepublishOnly": "bun run build && bun run test:dist",
+    "prepare": "husky"
   },
   "lint-staged": {
-    "*.js": [
-      "prettier-eslint --write",
-      "eslint --format node_modules/eslint-friendly-formatter",
-      "git add"
-    ]
+    "*.{js,cjs,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{ts,json,md,yml,yaml}": "prettier --write"
   },
   "keywords": [
     "xlsx",
@@ -114,5 +134,6 @@
   "overrides": {
     "glob": "^14.0.5",
     "minimatch": "^11.0.8"
-  }
+  },
+  "trustedDependencies": []
 }
