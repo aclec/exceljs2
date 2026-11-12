@@ -66,4 +66,18 @@ describe('utils', () => {
       expect(dateConverted).to.deep.equal(myDate);
     });
   });
+
+  describe('parseBoolean', () => {
+    it('reads xsd:boolean values', () => {
+      ['1', 'true', 1, true].forEach(value => expect(utils.parseBoolean(value)).to.equal(true));
+      ['0', 'false', 0, false].forEach(value => expect(utils.parseBoolean(value)).to.equal(false));
+    });
+
+    it('returns the given default for an absent attribute', () => {
+      expect(utils.parseBoolean(undefined)).to.equal(false);
+      expect(utils.parseBoolean(undefined, true)).to.equal(true);
+      expect(utils.parseBoolean('0', true)).to.equal(false);
+      expect(utils.parseBoolean('false', true)).to.equal(false);
+    });
+  });
 });

@@ -1,0 +1,446 @@
+// Reading xlsx files written by other producers (Excel, LibreOffice, openpyxl, POI, hand-edited):
+// legal-but-unusual XML must load, malformed parts must not crash with a TypeError.
+// Fixtures are built with ExcelJS and patched with xlsx-tamper so they stay readable.
+const JSZip = require('jszip');
+const {baseWorkbookBuffer, tamper, readPart} = require('../../utils/xlsx-tamper');
+
+const ExcelJS = verquire('exceljs');
+
+const SHEET = 'xl/worksheets/sheet1.xml';
+
+const replaceSheetData = sheetData => xml =>
+  xml.replace(/<sheetData>.*<\/sheetData>|<sheetData\/>/s, `<sheetData>${sheetData}</sheetData>`);
+
+async function load(buffer) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+  return wb;
+}
+
+describe('xlsx read robustness', function() {
+  this.timeout(20000);
+
+  describe('rows and cells without an r attribute', () => {
+    it('infers row numbers and cell addresses from their position', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        [SHEET]: replaceSheetData(
+          '<row><c t="inlineStr"><is><t>a1</t></is></c><c><v>2</v></c></row>' +
+            '<row r="4"><c r="C4"><v>3</v></c><c><v>4</v></c></row>' +
+            '<row><c><v>5</v></c></row>'
+        ),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.equal('a1');
+      expect(ws.getCell('B1').value).to.equal(2);
+      expect(ws.getCell('C4').value).to.equal(3);
+      expect(ws.getCell('D4').value).to.equal(4);
+      expect(ws.getCell('A5').value).to.equal(5);
+      expect(ws.rowCount).to.equal(5);
+    });
+
+    it('takes the row number from the cells when only the row omits r', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        [SHEET]: replaceSheetData('<row><c r="B3"><v>7</v></c></row>'),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('B3').value).to.equal(7);
+      expect(ws.rowCount).to.equal(3);
+    });
+  });
+
+  describe('table autoFilter content that is not modelled', () => {
+    const TABLE = 'xl/tables/table1.xml';
+    const tableBuffer = () =>
+      baseWorkbookBuffer((wb, ws) => {
+        ws.addTable({
+          name: 'T1',
+          ref: 'A3',
+          headerRow: true,
+          columns: [
+            {name: 'a', filterButton: true},
+            {name: 'b', filterButton: true},
+          ],
+          rows: [[1, 2]],
+        });
+      });
+    const withAutoFilterContent = content => xml =>
+      xml.replace(/<autoFilter ref="([^"]+)">.*<\/autoFilter>/, `<autoFilter ref="$1">${content}</autoFilter>`);
+
+    const filters = {
+      dynamicFilter: '<dynamicFilter type="today"/>',
+      top10: '<top10 top="1" val="5"/>',
+      colorFilter: '<colorFilter dxfId="0"/>',
+      iconFilter: '<iconFilter iconSet="3Arrows" iconId="1"/>',
+      extLst:
+        '<extLst><ext uri="{0}"><x14:filter val="x"/><customFilters><customFilter val="no"/></customFilters></ext></extLst>',
+    };
+    Object.entries(filters).forEach(([name, filter]) => {
+      it(`ignores ${name} in a filterColumn`, async () => {
+        const buffer = await tamper(await tableBuffer(), {
+          [TABLE]: withAutoFilterContent(
+            `<filterColumn colId="0" hiddenButton="0">${filter}</filterColumn><filterColumn colId="1" hiddenButton="0"/>`
+          ),
+        });
+        const table = (await load(buffer)).getWorksheet('Sheet1').getTable('T1');
+        expect(table.table.columns.map(column => column.name)).to.deep.equal(['a', 'b']);
+        expect(table.table.columns[0].filterButton).to.equal(true);
+        expect(table.table.columns[0].customFilters).to.equal(undefined);
+      });
+    });
+
+    it('ignores sortState inside the autoFilter', async () => {
+      const buffer = await tamper(await tableBuffer(), {
+        [TABLE]: withAutoFilterContent(
+          '<filterColumn colId="0" hiddenButton="0"/><sortState ref="A4:B4"><sortCondition ref="A4"/></sortState>'
+        ),
+      });
+      const table = (await load(buffer)).getWorksheet('Sheet1').getTable('T1');
+      expect(table.table.autoFilterRef).to.equal('A3:B4');
+    });
+  });
+
+  describe('document properties', () => {
+    it('loads when docProps/app.xml uses a prefixed root element', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'docProps/app.xml': () =>
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<ep:Properties xmlns:ep="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">' +
+          '<ep:Application>Other</ep:Application></ep:Properties>',
+      });
+      const wb = await load(buffer);
+      expect(wb.getWorksheet('Sheet1').getCell('A1').value).to.equal('hello');
+      expect(wb.company).to.equal(undefined);
+      expect(wb.manager).to.equal(undefined);
+    });
+
+    it('loads when docProps/app.xml has no root element', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'docProps/app.xml': () => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Other/>',
+      });
+      const wb = await load(buffer);
+      expect(wb.getWorksheet('Sheet1').getCell('A1').value).to.equal('hello');
+    });
+
+    it('ignores core properties it does not model', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(wb => {
+        wb.creator = 'me';
+      }), {
+        'docProps/core.xml': xml =>
+          xml.replace(
+            '</cp:coreProperties>',
+            '<dc:contributor>x</dc:contributor><dcterms:available><b>y</b></dcterms:available></cp:coreProperties>'
+          ),
+      });
+      const wb = await load(buffer);
+      expect(wb.creator).to.equal('me');
+    });
+  });
+
+  describe('worksheet names', () => {
+    it('loads a sheet whose name is longer than 31 characters', async () => {
+      const longName = 'A sheet name that is much longer than Excel allows';
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'xl/workbook.xml': xml => xml.replace('name="Sheet1"', `name="${longName}"`),
+      });
+      const {warn} = console;
+      const warnings = [];
+      console.warn = message => warnings.push(message);
+      let wb;
+      try {
+        wb = await load(buffer);
+      } finally {
+        console.warn = warn;
+      }
+      expect(wb.worksheets.map(ws => ws.name)).to.deep.equal([longName.substring(0, 31)]);
+      expect(warnings).to.not.be.empty();
+    });
+
+    it('allows renaming a sheet to a different case of its own name', () => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Sheet1');
+      ws.name = 'SHEET1';
+      expect(ws.name).to.equal('SHEET1');
+      expect(() => wb.addWorksheet('sheet1')).to.throw(/already exists/);
+    });
+  });
+
+  describe('hyperlinks', () => {
+    const linkBuffer = () =>
+      baseWorkbookBuffer((wb, ws) => {
+        wb.addWorksheet('Sheet2');
+        ws.getCell('B1').value = {text: 'internal', hyperlink: "#'Sheet2'!A1"};
+        ws.getCell('C1').value = {text: 'external', hyperlink: 'https://example.com/page'};
+        ws.getCell('D1').value = {text: 'anchor', hyperlink: 'https://example.com/doc'};
+        ws.getCell('E1').value = {text: 'location only', hyperlink: 'https://example.com/x'};
+        ws.getCell('F1').value = {text: 'no hash', hyperlink: 'Sheet2!D3'};
+      });
+    // what Excel writes: an anchor in an external target, and an internal link without r:id
+    const excelStyle = xml =>
+      xml
+        .replace('<hyperlink ref="D1" r:id="rId3"/>', '<hyperlink ref="D1" r:id="rId3" location="part2"/>')
+        .replace('<hyperlink ref="E1" r:id="rId4"/>', '<hyperlink ref="E1" location="Sheet2!B3" display="x"/>');
+    const expectLinks = ws => {
+      expect(ws.getCell('B1').hyperlink).to.equal("#'Sheet2'!A1");
+      expect(ws.getCell('C1').hyperlink).to.equal('https://example.com/page');
+      expect(ws.getCell('D1').hyperlink).to.equal('https://example.com/doc#part2');
+      expect(ws.getCell('E1').hyperlink).to.equal('#Sheet2!B3');
+      expect(ws.getCell('E1').text).to.equal('location only');
+      expect(ws.getCell('F1').hyperlink).to.equal('Sheet2!D3');
+    };
+
+    it('reads the location of internal and external links', async () => {
+      const buffer = await tamper(await linkBuffer(), {[SHEET]: excelStyle});
+      expectLinks((await load(buffer)).getWorksheet('Sheet1'));
+    });
+
+    it('round-trips internal, external and anchored links', async () => {
+      const buffer = await tamper(await linkBuffer(), {[SHEET]: excelStyle});
+      const wb = await load(buffer);
+      expectLinks((await load(await wb.xlsx.writeBuffer())).getWorksheet('Sheet1'));
+    });
+  });
+
+  describe('column widths', () => {
+    it('keeps a width of 9 when the sheet default column width differs', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.properties.defaultColWidth = 20;
+        ws.getColumn(2).width = 9;
+        ws.getColumn(3).width = 20;
+        ws.getColumn(4).width = 12;
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.properties.defaultColWidth).to.equal(20);
+      expect(ws.getColumn(2).width).to.equal(9);
+      expect(ws.getColumn(3).width).to.equal(20);
+      expect(ws.getColumn(4).width).to.equal(12);
+    });
+
+    it('does not give columns defined without a width an explicit width', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.properties.defaultColWidth = 20;
+        ws.columns = [{header: 'Id', key: 'id'}, {header: 'Name', key: 'name', width: 9}];
+      });
+      expect(await readPart(buffer, SHEET)).to.not.match(/<col min="1"/);
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getColumn(2).width).to.equal(9);
+    });
+
+    it('keeps image anchors positioned as before', async () => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Sheet1');
+      ws.properties.defaultColWidth = 20;
+      ws.getColumn(2).width = 9;
+      ws.getColumn(3).width = 20;
+      const imageId = wb.addImage({buffer: Buffer.alloc(8), extension: 'png'});
+      ws.addImage(imageId, {tl: {col: 1.5, row: 0}, br: {col: 2.5, row: 1}});
+      const {range} = ws.getImages()[0];
+      expect(range.tl.nativeColOff).to.equal(320000);
+      expect(range.br.nativeColOff).to.equal(100000);
+    });
+  });
+
+  describe('cell values', () => {
+    it('reads ISO 8601 date cells (t="d") as UTC dates', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        [SHEET]: replaceSheetData(
+          '<row r="1">' +
+            '<c r="A1" t="d"><v>2024-02-21T13:14:15</v></c>' +
+            '<c r="B1" t="d"><v>2024-02-21</v></c>' +
+            '<c r="C1" t="d"><v>2024-02-21T13:14:15.250+02:00</v></c>' +
+            '<c r="D1" t="d"><v>2024-02-21T13:14Z</v></c>' +
+            '<c r="E1" t="d"><f>A1</f><v>2024-02-21T13:14:15</v></c>' +
+            '<c r="F1" t="d"><v>0099-12-31</v></c>' +
+            '</row>'
+        ),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21, 13, 14, 15)));
+      expect(ws.getCell('B1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21)));
+      expect(ws.getCell('C1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21, 11, 14, 15, 250)));
+      expect(ws.getCell('D1').value).to.deep.equal(new Date(Date.UTC(2024, 1, 21, 13, 14)));
+      expect(ws.getCell('E1').value).to.deep.equal({
+        formula: 'A1',
+        result: new Date(Date.UTC(2024, 1, 21, 13, 14, 15)),
+      });
+      expect(ws.getCell('F1').value.toISOString()).to.equal('0099-12-31T00:00:00.000Z');
+    });
+
+    it('keeps invalid t="d" values as strings', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        [SHEET]: replaceSheetData(
+          '<row r="1"><c r="A1" t="d"><v>not a date</v></c><c r="B1" t="d"><v>2024-02-30</v></c>' +
+            '<c r="C1" t="d"><f>A1</f><v>soon</v></c></row>'
+        ),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.equal('not a date');
+      expect(ws.getCell('B1').value).to.equal('2024-02-30');
+      expect(ws.getCell('C1').value).to.deep.equal({formula: 'A1', result: 'soon'});
+    });
+
+    it('keeps falsy formula results', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('A2').value = {formula: '1-1', result: 0};
+        ws.getCell('B2').value = {formula: '1=2', result: false};
+        ws.getCell('C2').value = {formula: '""', result: ''};
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A2').value).to.deep.equal({formula: '1-1', result: 0});
+      expect(ws.getCell('B2').value).to.deep.equal({formula: '1=2', result: false});
+      expect(ws.getCell('C2').value).to.deep.equal({formula: '""', result: ''});
+    });
+
+    it('converts only numeric formula results of date-formatted cells to dates', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('A2').value = {formula: 'TEXT(1,"x")', result: 'Foo'};
+        ws.getCell('B2').value = {formula: 'TRUE()', result: true};
+        ws.getCell('C2').value = {formula: '1/0', result: {error: '#DIV/0!'}};
+        ws.getCell('D2').value = {formula: 'DATE(2024,2,21)', result: 45343};
+        ['A2', 'B2', 'C2', 'D2'].forEach(address => {
+          ws.getCell(address).numFmt = 'yyyy-mm-dd';
+        });
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A2').result).to.equal('Foo');
+      expect(ws.getCell('B2').result).to.equal(true);
+      expect(ws.getCell('C2').result).to.deep.equal({error: '#DIV/0!'});
+      expect(ws.getCell('D2').result).to.deep.equal(new Date(Date.UTC(2024, 1, 21)));
+    });
+  });
+
+  describe('worksheet relationships', () => {
+    const RELS = 'xl/worksheets/_rels/sheet1.xml.rels';
+    // 1x1 transparent png
+    const PNG = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    const richBuffer = () =>
+      baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('B1').value = 'noted';
+        ws.getCell('B1').note = {
+          texts: [{text: 'a '}, {text: 'note'}],
+          margins: {insetmode: 'custom', inset: [0.25, 0.25, 0.35, 0.35]},
+        };
+        ws.getCell('C1').value = {text: 'link', hyperlink: 'https://example.com/'};
+        ws.addTable({name: 'T1', ref: 'A3', columns: [{name: 'a'}], rows: [[1]]});
+        ws.addImage(wb.addImage({buffer: PNG, extension: 'png'}), 'E5:F6');
+      });
+    const setTarget = (type, target) => xml =>
+      xml.replace(new RegExp(`(relationships/${type}" Target=")[^"]+"`), `$1${target}"`);
+    const moveParts = async (buffer, moves) => {
+      const zip = await JSZip.loadAsync(buffer);
+      for (const [from, to] of Object.entries(moves)) {
+        zip.file(to, await zip.file(from).async('nodebuffer'));
+        zip.remove(from);
+      }
+      return zip.generateAsync({type: 'nodebuffer', compression: 'DEFLATE'});
+    };
+    const expectEverything = ws => {
+      expect(ws.getCell('B1').note.texts).to.deep.equal([{text: 'a '}, {text: 'note'}]);
+      expect(ws.getCell('B1').note.margins.inset).to.deep.equal([0.25, 0.25, 0.35, 0.35]);
+      expect(ws.getCell('C1').hyperlink).to.equal('https://example.com/');
+      expect(ws.getTable('T1').table.name).to.equal('T1');
+      expect(ws.getImages()).to.have.length(1);
+    };
+
+    it('reads every part of the reference workbook', async () => {
+      expectEverything((await load(await richBuffer())).getWorksheet('Sheet1'));
+    });
+
+    it('ignores relationships to parts that do not exist', async () => {
+      const buffer = await tamper(await richBuffer(), {
+        [RELS]: xml =>
+          [
+            setTarget('comments', '../missing.xml'),
+            setTarget('vmlDrawing', '../drawings/missing.vml'),
+            setTarget('drawing', '../drawings/missing.xml'),
+            setTarget('table', '../tables/missing.xml'),
+          ].reduce((x, patch) => patch(x), xml),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.equal('hello');
+      expect(ws.getCell('B1').note).to.equal(undefined);
+      expect(ws.getTables()).to.have.length(0);
+      expect(ws.getImages()).to.have.length(0);
+    });
+
+    it('ignores references to relationships that do not exist', async () => {
+      const buffer = await tamper(await richBuffer(), {
+        [SHEET]: xml =>
+          xml
+            .replace('<hyperlink ref="C1" r:id="rId1"/>', '<hyperlink ref="C1" r:id="rId91"/>')
+            .replace('<drawing r:id="rId4"/>', '<drawing r:id="rId94"/>')
+            .replace('<tablePart r:id="rId5"/>', '<tablePart r:id="rId95"/>'),
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('C1').value).to.equal('link');
+      expect(ws.getTables()).to.have.length(0);
+      expect(ws.getImages()).to.have.length(0);
+    });
+
+    it('ignores a drawing part that is not a spreadsheet drawing', async () => {
+      const buffer = await tamper(await richBuffer(), {
+        'xl/drawings/drawing1.xml': () =>
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<c:userShapes xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>',
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A1').value).to.equal('hello');
+      expect(ws.getImages()).to.have.length(0);
+    });
+
+    it('resolves absolute relationship targets', async () => {
+      const buffer = await tamper(await richBuffer(), {
+        [RELS]: xml => xml.replace(/Target="\.\.\//g, 'Target="/xl/'),
+      });
+      expectEverything((await load(buffer)).getWorksheet('Sheet1'));
+    });
+
+    it('reads comments at the paths used by openpyxl', async () => {
+      let buffer = await moveParts(await richBuffer(), {
+        'xl/comments1.xml': 'xl/comments/comment1.xml',
+        'xl/drawings/vmlDrawing1.vml': 'xl/drawings/commentsDrawing1.vml',
+      });
+      buffer = await tamper(buffer, {
+        [RELS]: xml =>
+          setTarget('vmlDrawing', '/xl/drawings/commentsDrawing1.vml')(
+            setTarget('comments', '/xl/comments/comment1.xml')(xml)
+          ),
+      });
+      expectEverything((await load(buffer)).getWorksheet('Sheet1'));
+    });
+
+    it('merges the vml note properties whatever the relationship order', async () => {
+      const buffer = await tamper(await richBuffer(), {
+        [RELS]: xml => {
+          const comments = xml.match(/<Relationship [^>]*relationships\/comments"[^>]*\/>/)[0];
+          return xml.replace(comments, '').replace('</Relationships>', `${comments}</Relationships>`);
+        },
+      });
+      expectEverything((await load(buffer)).getWorksheet('Sheet1'));
+    });
+
+    it('takes the note properties from the legacyDrawing, not a header/footer vml', async () => {
+      const zip = await JSZip.loadAsync(await richBuffer());
+      zip.file(
+        'xl/drawings/vmlDrawing2.vml',
+        '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">' +
+          '<v:shape id="LH" type="#_x0000_t75" style="position:absolute;width:10pt;height:10pt">' +
+          '<v:imagedata o:relid="rId1" o:title="img"/></v:shape></xml>'
+      );
+      const buffer = await tamper(await zip.generateAsync({type: 'nodebuffer'}), {
+        [RELS]: xml =>
+          xml.replace(
+            /(<Relationships[^>]*>)/,
+            '$1<Relationship Id="rId9" Target="../drawings/vmlDrawing2.vml" ' +
+              'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing"/>'
+          ),
+        [SHEET]: xml => xml.replace('</worksheet>', '<legacyDrawingHF r:id="rId9"/></worksheet>'),
+      });
+      const wb = await load(buffer);
+      expectEverything(wb.getWorksheet('Sheet1'));
+      await wb.xlsx.writeBuffer();
+    });
+  });
+});
