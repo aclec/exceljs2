@@ -269,3 +269,10 @@ Both writers now take the same options, and the old shapes keep working:
   XML) makes `writeBuffer` / `write` reject and `WorkbookWriter.addImage` throw.
 - A failing output stream (or an unreadable image file) now rejects `write` / `writeFile` / `WorkbookWriter.commit()` instead of leaving the
   promise pending or raising an unhandled rejection.
+
+## Images do not create rows or columns
+
+In 4.x, `ws.addImage(id, 'B2:D5')` (or reading `getImages()[i].range.tl.col` / `.row`) created empty rows and columns up to the anchor, so
+`ws.addRow()` after `addImage` started below the image and `ws.rowCount` counted those rows. Anchors no longer create anything: add the rows
+first, or use `ws.getRow(n)` / `ws.insertRow(n, values)` to place them. Anchors read from a file are clamped to the grid (column XFD, row
+1,048,576).
