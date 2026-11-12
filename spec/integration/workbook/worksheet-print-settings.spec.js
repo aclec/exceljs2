@@ -63,26 +63,43 @@ describe("Worksheet print settings round trip", () => {
             expect(wb.getWorksheet("Sheet1").rowBreaks).to.deep.equal([]);
         });
 
-        it("reads up to 1023 breaks (the limit of Excel), and rejects more", async () => {
+        it("reads more than 1023 breaks (the limit of Excel), and writes at most 1023", async () => {
             const breaks = (n) => Array.from({ length: n }, (_, i) => `<brk id="${i + 1}" max="16383" man="1"/>`).join("");
-            const wb = await load(await withRowBreaks(`<rowBreaks>${breaks(1023)}</rowBreaks>`));
-            expect(wb.getWorksheet("Sheet1").rowBreaks).to.have.length(1023);
+            const wb = await load(await withRowBreaks(`<rowBreaks>${breaks(1100)}</rowBreaks>`));
+            const ws = wb.getWorksheet("Sheet1");
+            expect(ws.rowBreaks).to.have.length(1100);
 
             let error;
-            await load(await withRowBreaks(`<rowBreaks>${breaks(1024)}</rowBreaks>`)).catch((e) => {
+            await wb.xlsx.writeBuffer().catch((e) => {
                 error = e;
             });
             expect(error).to.be.an("error");
-            expect(error.message).to.equal("Max brk count (1023) exceeded");
+            expect(error.message).to.equal("Too many row breaks in a worksheet: 1100 (Excel allows at most 1023)");
+
+            ws.rowBreaks.length = 1023;
+            const reloaded = await load(await wb.xlsx.writeBuffer());
+            expect(reloaded.getWorksheet("Sheet1").rowBreaks).to.have.length(1023);
         });
 
-        it("rejects a break whose attributes are not unsigned integers in bounds", async () => {
+        it("reads the breaks written by 4.x (max 16838) and other values beyond the worksheet as its last row or column", async () => {
+            const wb = await load(
+                await withRowBreaks(
+                    '<rowBreaks><brk id="10" max="16838" man="1"/><brk id="2000000" min="20000" max="4294967295"/></rowBreaks>'
+                )
+            );
+            expect(wb.getWorksheet("Sheet1").rowBreaks).to.deep.equal([
+                { id: 10, max: 16383, man: 1 },
+                { id: 1048576, max: 16383, man: 0, min: 16383 },
+            ]);
+        });
+
+        it("rejects a break whose attributes are not unsigned integers", async () => {
             for (const brk of [
                 '<brk id="-1"/>',
                 '<brk id="x"/>',
-                '<brk id="1048577"/>',
-                '<brk id="1" max="16384"/>',
+                '<brk id="1" max="1.5"/>',
                 '<brk id="1" min="1e3"/>',
+                '<brk id="99999999999"/>',
             ]) {
                 let error;
                 await load(await withRowBreaks(`<rowBreaks>${brk}</rowBreaks>`)).catch((e) => {

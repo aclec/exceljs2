@@ -11,22 +11,20 @@ const unsignedIntRegex = /^[0-9]{1,10}$/;
 const MAX_QUOTED = 32;
 
 /**
- * An unsigned integer attribute of a `<brk>`, or its default.
- * @param max - the largest valid value
- * @throws Error for anything but decimal digits, or a value above `max`
+ * An unsigned integer attribute of a `<brk>` (xsd:unsignedInt), or its default: a value beyond the worksheet is its
+ * last row or column (`max` is the last column, 16383, in Excel's files; 4.x wrote 16838).
+ * @param last - the last row or 0-based column of a worksheet
+ * @throws Error for anything but decimal digits
  */
-function unsignedAttribute(node: SaxTag, name: "id" | "min" | "max", max: number): number | undefined {
+function unsignedAttribute(node: SaxTag, name: "id" | "min" | "max", last: number): number | undefined {
     const value = node.attributes[name];
     if (value === undefined) {
         return undefined;
     }
-    const n = unsignedIntRegex.test(value) ? Number(value) : Number.NaN;
-    if (!(n <= max)) {
-        throw new Error(
-            `Invalid page break <brk ${name}=${JSON.stringify(value.slice(0, MAX_QUOTED))}>: an integer from 0 to ${max} is expected`
-        );
+    if (!unsignedIntRegex.test(value)) {
+        throw new Error(`Invalid page break <brk ${name}=${JSON.stringify(value.slice(0, MAX_QUOTED))}>: an unsigned integer is expected`);
     }
-    return n;
+    return Math.min(Number(value), last);
 }
 
 /**
@@ -65,8 +63,8 @@ class PageBreaksXform extends BaseXform<RowBreakModel> {
 
     /**
      * @returns `true` for `<brk>`
-     * @throws Error for an attribute that is not of its xsd type, or out of the worksheet: `id` (the row) from 0 to
-     * 1,048,576, `min` and `max` (0-based columns) from 0 to 16,383
+     * @throws Error for an attribute that is not of its xsd type (`id` above the last row, 1,048,576, and `min` / `max`
+     * above the last 0-based column, 16,383, are read as these)
      */
     override parseOpen(node: SaxTag): boolean {
         if (node.name !== "brk") {

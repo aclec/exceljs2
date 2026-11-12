@@ -1,12 +1,14 @@
 import type XmlStream from "../../../utils/xml-stream";
 import type { RowBreakModel } from "../../../types";
+import colCache from "../../../utils/col-cache";
 import PageBreaksXform from "./page-breaks-xform";
 
 import ListXform from "../list-xform";
 
 /**
  * `<rowBreaks count="n" manualBreakCount="m"><brk …/>…</rowBreaks>`: the page breaks between rows (see
- * PageBreaksXform). Nothing is rendered without a break. Parsing fails beyond {@link RowBreaksXform.MAX_BREAKS} breaks.
+ * PageBreaksXform). Nothing is rendered without a break. Rendering fails beyond {@link RowBreaksXform.MAX_BREAKS} breaks
+ * (Excel's limit); parsing reads up to one break per row (a bound on hostile input), more fail.
  */
 class RowBreaksXform extends ListXform<RowBreakModel> {
     /**
@@ -20,11 +22,15 @@ class RowBreaksXform extends ListXform<RowBreakModel> {
             tag: "rowBreaks",
             count: true,
             childXform: new PageBreaksXform(),
-            maxItems: RowBreaksXform.MAX_BREAKS,
+            maxItems: colCache.MAX_ROWS,
         });
     }
 
+    /** @throws Error for more than {@link RowBreaksXform.MAX_BREAKS} breaks, which Excel does not open */
     override render(xmlStream: XmlStream, model: readonly RowBreakModel[] | null | undefined): void {
+        if (model && model.length > RowBreaksXform.MAX_BREAKS) {
+            throw new Error(`Too many row breaks in a worksheet: ${model.length} (Excel allows at most ${RowBreaksXform.MAX_BREAKS})`);
+        }
         if (model && model.length) {
             xmlStream.openNode(this.tag, this.$);
             if (this.count) {
