@@ -169,7 +169,8 @@ export type WorksheetViewModel = Partial<WorksheetViewCommon & Omit<WorksheetVie
 
 /**
  * The style option of `addRow` / `insertRow` and their plural forms: `"i"` copies the style of the row above (`"i+"`:
- * also its empty cells), `"o"` the style of the row below (`"o+"`, `insertRow` only), `"n"` (the default) none.
+ * also its empty cells), `"o"` the style of the row below (`"o+"`; `insertRow` / `insertRows` only, ignored by
+ * `addRow`), `"n"` (the default) none.
  */
 export type RowStyleOption = "n" | "i" | "i+" | "o" | "o+";
 
@@ -1133,23 +1134,30 @@ export interface Range extends Location {
 
     expand(top: number, left: number, bottom: number, right: number): void;
 
-    expandRow(row: Row): void;
+    /** Grows the range to include the non-empty cells of a row (nothing for an empty row or no row). */
+    expandRow(row: Row | null | undefined): void;
 
     expandToAddress(addressStr: string): void;
 
     toString(): string;
 
-    intersects(other: Range): boolean;
+    /** Whether the ranges share a cell (ranges of two different named sheets never do). */
+    intersects(other: Range | (Location & { sheetName?: string })): boolean;
 
     contains(addressStr: string): boolean;
 
-    containsEx(
-        address: Partial<{
-            sheetName: string;
-            row: number;
-            col: number;
-        }>
-    ): boolean;
+    /** Whether the range contains a cell (1-based numbers; a cell of another named sheet is not contained). */
+    containsEx(address: { row: number; col: number; sheetName?: string }): boolean;
+
+    /**
+     * Sets the bounds from two addresses (`setTLBR("B2", "A1")`; the third argument is ignored), or from four numbers and
+     * a sheet name. The bounds are normalised (top <= bottom, left <= right).
+     */
+    setTLBR(tl: string, br: string, sheetName?: string): void;
+    setTLBR(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
+
+    /** Calls `callback` for each cell of the range, column by column (top to bottom in each column). */
+    forEachAddress(callback: (address: string, row: number, col: number) => void): void;
 }
 
 /** The header and footer of a worksheet: a {@link HeaderFooter} whose fields may also be `null` (the defaults). */
@@ -1439,31 +1447,32 @@ export interface Worksheet {
     eachColumnKey(callback: (col: Column, key: string) => void): void;
 
     /**
-     * Access an individual columns by key, letter and 1-based column number
+     * A column by key (`column.key`), letters (`"B"`) or 1-based number, created if needed.
+     *
+     * Returns `undefined` for a number that is not an integer >= 1 (an invalid argument: the type does not say so).
+     *
+     * @throws Error for a string that is neither a column key nor valid column letters (`"A"` to `"XFD"`)
      */
     getColumn(indexOrKey: number | string): Column;
 
     /**
-     * Cut one or more columns (columns to the right are shifted left)
-     * and optionally insert more
+     * Removes `count` columns from column `start` (1-based; the columns to the right shift left) and inserts columns
+     * there. The cells, column definitions, merges and defined names move; a merge spanning the inserted columns widens.
      *
-     * If column properties have been defined, they will be cut or moved accordingly
-     *
-     * Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
-     *
-     * Also: If the worksheet has more rows than values in the colulmn inserts,
-     * the rows will still be shifted as if the values existed
+     * @param insert - the values of each inserted column, indexed by row number - 1
+     * @throws Error when a value would be inserted inside a merge, or the merges would exceed the cap
      */
-    spliceColumns(start: number, count: number, ...insert: CellValue[][]): void;
+    spliceColumns(start: number, count: number, ...insert: (readonly CellValue[])[]): void;
 
     /**
-     * Add column headers and define column keys and widths.
-     *
-     * Note: these column structures are a workbook-building convenience only,
-     * apart from the column width, they will not be fully persisted.
+     * The columns up to the last one defined or created (all of them created by this getter); `null` when there are none.
      */
     get columns(): Column[] | null;
-    set columns(value: ColumnDefinition[]);
+    /**
+     * Replaces the columns: defines their headers (written in the first rows, over the existing values), keys, widths and
+     * styles. Keys are a workbook-building convenience: they are not saved in the file.
+     */
+    set columns(value: readonly ColumnDefinition[]);
 
     /**
      * The total row size of the document. Equal to the row number of the last row that has values.
@@ -1491,40 +1500,46 @@ export interface Worksheet {
     findRows(start: number, length: number): (Row | undefined)[];
 
     /**
-     * Cut one or more rows (rows below are shifted up)
-     * and optionally insert more
+     * Removes `count` rows from row `start` (1-based; the rows below shift up) and inserts rows with the `insert` values
+     * there. The cells (values, styles, notes), merges and defined names move; a merge spanning the inserted rows widens.
      *
-     * Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
+     * @throws Error when a value would be inserted inside a merge, or the merges would exceed the cap
      */
     spliceRows(start: number, count: number, ...insert: RowValues[]): void;
 
     /**
-     * Add a row by key-value, after the last current row, using the column keys,
-     * or add a row by contiguous Array (assign to columns A, B & C)
+     * Adds a row after the last one: values by column key (`{ id: 1 }`, see `columns`), or by column (`[1, "a"]` from
+     * column A; a sparse array `[, 1, "a"]` is indexed by column number).
+     *
+     * @param style - `"i"` / `"i+"` copies the style of the row above (`"o"` / `"o+"` are ignored here)
      */
     addRow(data: RowValues, style?: RowStyleOption): Row;
 
-    /**
-     * Add multiple rows by providing an array of arrays or key-value pairs
-     */
-    addRows(rows: RowValues[], style?: RowStyleOption): Row[];
+    /** Adds rows after the last one (see `addRow`). */
+    addRows(rows: readonly RowValues[], style?: RowStyleOption): Row[];
 
     /**
-     * Insert a Row by key-value, at the position (shifiting down all rows from position),
-     * using the column keys, or add a row by contiguous Array (assign to columns A, B & C)
+     * Inserts a row at `pos` (1-based), shifting the rows below down (values as for `addRow`; see {@link RowStyleOption}).
+     *
+     * @throws Error when a value would be inserted inside a merge, or the merges would exceed the cap
      */
     insertRow(pos: number, value: RowValues, style?: RowStyleOption): Row;
 
     /**
-     * Insert multiple rows at position (shifiting down all rows from position)
-     * by providing an array of arrays or key-value pairs
+     * Inserts rows at `pos` (1-based), shifting the rows below down (see `insertRow`).
+     *
+     * @returns the inserted rows; `undefined` when `values` is empty
+     * @throws Error when a value would be inserted inside a merge, or the merges would exceed the cap
      */
-    insertRows(pos: number, values: RowValues[], style?: RowStyleOption): Row[] | undefined;
+    insertRows(pos: number, values: readonly RowValues[], style?: RowStyleOption): Row[] | undefined;
 
     /**
-     * Duplicate rows and insert new rows
+     * Duplicates row `rowNum` `count` times below it (values, styles, height and its single-row merges): the copies are
+     * inserted (`insert`) or overwrite the rows below (the default).
+     *
+     * @throws Error when the merges would exceed the cap
      */
-    duplicateRow(rowNum: number, count: number, insert: boolean): void;
+    duplicateRow(rowNum: number, count: number, insert?: boolean): void;
 
     /**
      * Get or create row by 1-based index
@@ -1532,7 +1547,9 @@ export interface Worksheet {
     getRow(index: number): Row;
 
     /**
-     * Get or create rows by 1-based index
+     * The rows `start`..`start + length - 1` (1-based), created if needed.
+     *
+     * @returns `undefined` when `length` < 1
      */
     getRows(start: number, length: number): Row[] | undefined;
 
@@ -1542,74 +1559,78 @@ export interface Worksheet {
     eachRow(callback: (row: Row, rowNumber: number) => void): void;
 
     /**
-     * Iterate over all rows (including empty rows) in a worksheet
+     * Iterates over the rows that have values; with `{ includeEmpty: true }`, over every row up to the last one (creating
+     * the missing ones).
      */
-    eachRow(opt: { includeEmpty: boolean }, callback: (row: Row, rowNumber: number) => void): void;
+    eachRow(options: { includeEmpty?: boolean } | null | undefined, callback: (row: Row, rowNumber: number) => void): void;
 
     /**
-     * return all rows as sparse array
+     * The values of the rows (each one is `row.values`), as a sparse array indexed by row number: `undefined` at index 0
+     * and for the rows that do not exist.
      */
-    /** The values of the rows (sparse: indexed by row number, then by column number; index 0 unused). */
-    getSheetValues(): CellValue[][];
+    getSheetValues(): (CellValue[] | undefined)[];
 
+    /** The cell at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`) if it exists. */
+    findCell(address: string): Cell | undefined;
     /**
-     * returns the cell at [r,c] or address given by r. If not found, return undefined
-     */
-    findCell(r: number | string, c: number | string): Cell | undefined;
-
-    /**
-     * Get or create cell
-     */
-    getCell(r: number | string, c?: number | string): Cell;
-
-    /**
-     * Merge cells, either:
+     * The cell at (row, col) (1-based numbers) if it exists.
      *
-     * tlbr string, e.g. `'A4:B5'`
-     *
-     * tl string, br string, e.g. `'G10', 'H11'`
-     *
-     * t, l, b, r numbers, e.g. `10,11,12,13`
+     * @throws Error for a column out of bounds
      */
-    mergeCells(): void;
-    mergeCells(v: Range): void;
-    mergeCells(v: string): void;
-    mergeCells(v: Location): void;
-    mergeCells(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
-    mergeCells(tl: string, br: string, sheetName?: string): void;
-    mergeCells(v: [string, string]): void;
-    mergeCells(v: [string, string, string]): void;
-    mergeCells(v: [number, number, number, number]): void;
-    mergeCells(v: [number, number, number, number, string]): void;
-    mergeCellsWithoutStyle(): void;
-    mergeCellsWithoutStyle(v: Range): void;
-    mergeCellsWithoutStyle(v: string): void;
-    mergeCellsWithoutStyle(v: Location): void;
-    mergeCellsWithoutStyle(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
-    mergeCellsWithoutStyle(tl: string, br: string, sheetName?: string): void;
-    mergeCellsWithoutStyle(v: [string, string]): void;
-    mergeCellsWithoutStyle(v: [string, string, string]): void;
-    mergeCellsWithoutStyle(v: [number, number, number, number]): void;
-    mergeCellsWithoutStyle(v: [number, number, number, number, string]): void;
+    findCell(row: number, col: number): Cell | undefined;
 
     /**
-     * unmerging the cells breaks the style links
+     * The cell at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`), created if needed.
+     *
+     * @throws Error for an invalid address, or a row or a column out of bounds
      */
-    unMergeCells(): void;
-    unMergeCells(v: Range): void;
-    unMergeCells(v: string): void;
-    unMergeCells(v: Location): void;
-    unMergeCells(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
-    unMergeCells(tl: string, br: string, sheetName?: string): void;
-    unMergeCells(v: [string, string]): void;
-    unMergeCells(v: [string, string, string]): void;
-    unMergeCells(v: [number, number, number, number]): void;
-    unMergeCells(v: [number, number, number, number, string]): void;
+    getCell(address: string): Cell;
+    /**
+     * The cell at (row, col) (1-based numbers), created if needed.
+     *
+     * @throws Error for a row or a column out of bounds
+     */
+    getCell(row: number, col: number): Cell;
 
+    /**
+     * Merges a range into its top-left cell, which gives its style to the other cells. The range is given as for a
+     * {@link Range} (see {@link RangeArguments}): `"A4:B5"`, `"G10", "H11"`, `10, 11, 12, 13` (top, left, bottom, right),
+     * a {@link Location} or a Range.
+     *
+     * @throws Error when a cell is already merged, or the merges would exceed the cap
+     */
+    mergeCells(...cells: RangeArguments): void;
+    /**
+     * Merges a range into its top-left cell, the cells keeping their own style (see `mergeCells`).
+     *
+     * @throws Error when a cell is already merged, or the merges would exceed the cap
+     */
+    mergeCellsWithoutStyle(...cells: RangeArguments): void;
+
+    /**
+     * Unmerges the merges that have a cell in the range (given as for `mergeCells`): a merge is unmerged as a whole.
+     * Unmerging breaks the style links.
+     */
+    unMergeCells(...cells: RangeArguments): void;
+
+    /**
+     * Sets a formula on a range (`"A1:B3"`): the top-left cell gets it (a shared formula, or an array formula with
+     * `shareType` `"array"`), the other cells are its clones (shared formula) or get their result (array formula). A
+     * single cell (`"A1"`), or a string that is not a range, fills nothing.
+     *
+     * @param results - the cached results of the cells: by cell (1-based row and column), by row then column of the
+     *   range, or flat (row by row)
+     * @param shareType - `"shared"` (the default) or `"array"`
+     * @throws Error for a range out of bounds
+     */
     fillFormula(
-        range: Range | string | Location,
+        range: string,
         formula: string,
-        results?: ((r: number, c: number) => string | number) | number[] | number[][]
+        results?:
+            | ((row: number, col: number) => CellFormulaResult | undefined)
+            | readonly (CellFormulaResult | undefined)[]
+            | readonly (readonly (CellFormulaResult | undefined)[])[],
+        shareType?: "shared" | "array"
     ): void;
 
     /**
@@ -1977,6 +1998,7 @@ export type RangeArguments =
     | [tl: string, br: string, sheetName?: string]
     | [top: number, left: number, bottom: number, right: number, sheetName?: string];
 
+/** The bounds of a rectangle of cells (1-based row and column numbers). */
 export interface Location {
     top: number;
     left: number;
