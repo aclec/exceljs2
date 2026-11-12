@@ -48,6 +48,15 @@ Done = all of the above green. CI (`.github/workflows/tests.yml`) runs the same 
 - Supply chain: no install lifecycle scripts, `trustedDependencies` stays `[]`, actions pinned by SHA, `bunfig.toml` minimumReleaseAge.
   Never add a dependency without asking the maintainer.
 
+## Repository scope — we work for this fork only
+
+- **Our repository is `origin` = `git@github.com:aclec/exceljs2.git`; default branch `master`.** All work, branches, commits, pushes, issues
+  and releases happen there, for this project only.
+- The original `exceljs/exceljs` is **unmaintained and is not our project**: never push, open issues/PRs, comment, or send anything to it.
+  The `upstream` remote is **read-only** (its push URL is set to `no_push_to_upstream`); it exists only to read old bug reports.
+- Publishing: npm package `@aclec/exceljs2` (never `exceljs`). No GitHub CLI is used: integrate with plain git (`git merge --no-ff` into
+  `master`, `git push origin`).
+
 ## Upstream PRs policy
 
 Upstream PR heads can be fetched as `upstream-pr/<N>` (`git fetch upstream '+refs/pull/*/head:refs/remotes/upstream-pr/*'`). They are **bug
