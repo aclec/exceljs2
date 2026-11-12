@@ -13,8 +13,9 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
 
 - Requires Node.js >= 22.12. Bun >= 1.4 is supported.
 - The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles target ES2020 and need no polyfills.
-- Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet, and large
-  data-validation and defined-name ranges are kept as ranges. See [UPGRADE-5.0.md](UPGRADE-5.0.md#limits-when-reading-files).
+- Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet and per
+  loaded workbook, large data-validation and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
+  [UPGRADE-5.0.md](UPGRADE-5.0.md#limits-when-reading-files).
 - TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers). See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#typescript).
 
@@ -43,6 +44,18 @@ All fixes have regression tests in `spec/integration/security`.
 - Pivot tables: field names and values were written into XML without escaping (#2996).
 - Streaming reader: temporary files (and their file descriptors) of deferred worksheets leaked when the iteration stopped early; the
   temporary directory is now always removed.
+- Conditional formatting: an `<x14:cfRule id="__proto__">` polluted `Object.prototype` with attacker-chosen `type`, `operator`, `formulae`
+  and `style` for the life of the process. Other maps keyed by ids read from the file (relationships, shared formulas, media, streamed
+  hyperlinks) are prototype-less too, so ids such as `constructor` are treated as unknown instead of throwing.
+- CSV: with `parserOptions.headers`, a header row of more than 16,384 names threw an uncaught exception that crashed the process.
+- Number formats: `isDateFmt`, run for every numeric cell, was quadratic on `[[[[...` (ReDoS); it is linear and cached, and format codes
+  over Excel's 255-character limit are ignored.
+- A huge `sheetId` or `<row r>` made every traversal of the worksheets or rows take minutes. Sheet ids are renumbered unless they are unique
+  integers from 1 to 65,535, and row numbers beyond 1,048,576 are rejected (document and streaming readers).
+- The merged-cell, data-validation and defined-name caps applied per worksheet, element or range and were multiplied by the number of sheets
+  or names; they are now shared by the whole workbook being loaded.
+- Shared-formula translation was quadratic per clone; `DataValidations.find` and `DefinedNames.model` / `cell.names` were quadratic in the
+  number of validations or names. All are linear.
 
 ### Dependencies
 

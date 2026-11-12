@@ -57,7 +57,19 @@ differently. See also the [Security & limits](README.md#security--limits) sectio
 
 Cell references must be within rows 1 to 1,048,576 and columns A to XFD (16,384), the size of an Excel worksheet. A reference with a larger
 row (for example `A1048577`) now throws `Out of bounds. Excel supports rows from 1 to 1048576`; 4.x only checked the column. `<col min max>`
-definitions read from a file are clamped to column 16,384.
+definitions read from a file are clamped to column 16,384, and a `<row r>` outside 1 to 1,048,576 rejects the file (document and streaming
+readers).
+
+### Sheet ids are renumbered when out of range
+
+Worksheets are stored by `sheetId`. A `sheetId` read from a file is kept when it is an integer from 1 to 65,535 that no earlier sheet uses;
+otherwise (a huge, zero, non-numeric or duplicate id) the sheet gets the lowest free id. 4.x kept huge ids, which made `workbook.worksheets`
+and `getWorksheet()` slow, and a duplicate id replaced the earlier worksheet.
+
+### Long number formats are ignored
+
+Excel limits number format codes to 255 characters. A custom `formatCode` longer than that is ignored when a file is read: its cells read as
+General (`cell.numFmt` is `undefined`).
 
 ### Merged cells are capped
 

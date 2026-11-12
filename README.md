@@ -52,7 +52,10 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 
 * **Grid bounds.** Cell references must lie within the Excel grid: rows 1 to 1,048,576 and columns
  A to XFD (1 to 16,384). References outside it throw an error, and the `min`/`max` of `<col>`
- definitions read from a file are clamped to the last column.
+ definitions read from a file are clamped to the last column. A `<row r>` outside the grid rejects
+ the file, and a `sheetId` that is not a unique integer from 1 to 65,535 is renumbered.
+* **Number formats.** Custom number formats longer than Excel's limit of 255 characters are
+ ignored when a file is read.
 * **Merged cells.** At most 1,048,576 cells (one full column) can be covered by merges in one
  worksheet, and in a whole workbook loaded from a file. `mergeCells` throws beyond that, and so
  does loading a file that exceeds it.
