@@ -87,8 +87,9 @@ upstream PR code was merged) and has a regression test.
     - worksheet elements written in `CT_Worksheet` order, by both writers (`legacyDrawing` #2079; streaming writer #2685, #2803); `sheetPr`
       children order (#2807); data bar extension colour order (#2651);
     - multiple print areas written as one `_xlnm.Print_Area` name, whole-column/row print areas, apostrophes in sheet names (#1516, #3071);
-    - `theme1.xml` always written (#2009); comment VML shape ids unique per sheet, both writers (#3070); unique picture `creationId`
-      (#3092); the right image when pictures repeat (#3094);
+    - `theme1.xml` always written (#2009); comment VML shape ids unique across the workbook, both writers, also for worksheets with more
+      than 1,023 notes, which claim several id blocks (#3070; the streaming writer writes the notes VML when the worksheet is committed);
+      unique picture `creationId` (#3092); the right image when pictures repeat (#3094);
     - empty rich-text runs (#2737); distinct rich-text shared strings in the streaming writer (#2588); dxf number format written as
       `[object Object]` (#2698);
     - internal hyperlinks (`#Sheet!A1`, `#DefinedName`) written as a `location` without an external relationship, by both writers (#2002);
