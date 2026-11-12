@@ -86,10 +86,22 @@ General (`cell.numFmt` is `undefined`).
 
 ### Merged cells are capped
 
-A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()` throws
-`Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. A file loaded with `xlsx.load` / `xlsx.read` can have at
-most 1,048,576 merged cells **in all its worksheets together**, and is rejected with
-`Cannot merge <range>: the workbook would exceed 1048576 merged cells` otherwise.
+Every cell of a merge is created in memory (300 to 600 bytes each), so merges are capped, with the same rules when a workbook is built and
+when it is read (a workbook ExcelJS writes with the defaults can be read back with the defaults):
+
+- A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()`, a splice that
+  moves or widens merges, the streaming `WorkbookWriter` and loading a file throw
+  `Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. This cap is not configurable.
+- A workbook can have at most **`workbook.maxMergedCells`** merged cells in all its worksheets together, **4,194,304** (four full
+  worksheets) by default. Beyond it they throw
+  `Cannot merge <range>: the workbook would exceed 4194304 merged cells (see the maxMergedCells option)`. Raise it with the `maxMergedCells`
+  option of `xlsx.load` / `read` / `readFile` (the loaded workbook keeps that value), by setting `workbook.maxMergedCells` before merging or
+  loading, or with the `maxMergedCells` option of the streaming `WorkbookWriter`:
+
+```javascript
+const workbook = new ExcelJS.Workbook();
+await workbook.xlsx.load(data, { maxMergedCells: 16 * 1048576 }); // trusted input only
+```
 
 The check for overlapping merges now takes time proportional to the area being merged instead of the number of existing merges, so files
 with tens of thousands of merges load quickly. The `Cannot merge already merged cells` error is unchanged.

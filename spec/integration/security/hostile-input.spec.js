@@ -65,10 +65,10 @@ describe("hostile input", function () {
         });
 
         it("caps the merged cells of the whole workbook, not of each worksheet", async () => {
-            // each worksheet is under the cap of 1048576 merged cells, the workbook is not
+            // each worksheet is under the cap of 1048576 merged cells, the workbook is over the default of 4 * 1048576
             const buffer = await tamper(
-                await sheetsBuffer(2),
-                afterEachSheetData(2, () => '<mergeCells count="1"><mergeCell ref="B1:B524289"/></mergeCells>')
+                await sheetsBuffer(5),
+                afterEachSheetData(5, () => '<mergeCells count="1"><mergeCell ref="B1:B1048576"/></mergeCells>')
             );
             const { result: error, ms } = await timed(() => load(buffer).catch((e) => e));
             expect(error).to.be.an("error");

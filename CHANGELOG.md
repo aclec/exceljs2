@@ -13,8 +13,9 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
 
 - Requires Node.js >= 22.12. Bun >= 1.4 is supported.
 - The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles target ES2020 and need no polyfills.
-- Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet and per
-  loaded workbook, large data-validation and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
+- Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet (1,048,576)
+  and per workbook (`maxMergedCells`, 4,194,304 by default, the same when building, streaming and loading a workbook), large data-validation
+  and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#limits-when-reading-files).
 - TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers). See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#typescript).

@@ -1666,6 +1666,13 @@ export interface XlsxReadOptions extends ZipReadLimits {
      * The list of XML node names to ignore while parsing an XLSX file
      */
     ignoreNodes: string[];
+    /**
+     * Maximum number of cells covered by merges in all the worksheets of the file (every merged cell is created in
+     * memory). One worksheet holds at most 1,048,576 merged cells whatever this option. The loaded workbook keeps this
+     * value as its `maxMergedCells`.
+     * @default workbook.maxMergedCells (4194304, four full worksheets)
+     */
+    maxMergedCells: number;
 }
 
 export interface XlsxWriteOptions extends stream.xlsx.WorkbookWriterOptions {
@@ -1936,6 +1943,13 @@ export class Workbook {
     readonly nextId: number;
 
     readonly definedNames: DefinedNames;
+
+    /**
+     * Maximum number of cells covered by merges in all the worksheets (`mergeCells` throws beyond it; one worksheet holds
+     * at most 1,048,576). Also the default `maxMergedCells` of `xlsx.load` / `read` / `readFile`.
+     * @default 4194304 (four full worksheets)
+     */
+    maxMergedCells: number;
 
     model: WorkbookModel;
 
@@ -2227,6 +2241,12 @@ export namespace stream {
              * Styles can add some performance overhead. Default is false
              */
             zip: Partial<ZipOptions>;
+            /**
+             * Maximum number of cells covered by merges in all the worksheets (one worksheet holds at most 1,048,576).
+             * Reading the file back with `xlsx.load` needs a `maxMergedCells` load option at least as large.
+             * @default 4194304 (four full worksheets)
+             */
+            maxMergedCells: number;
         }
 
         class WorkbookWriter extends Workbook {
