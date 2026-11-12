@@ -18,6 +18,8 @@ module.exports = [
     { linterOptions: { reportUnusedDisableDirectives: "error" } },
     {
         ignores: [
+            // Claude Code agent worktrees (local copies of the repository)
+            ".claude/worktrees/**",
             "build/**",
             "coverage/**",
             "dist/**",

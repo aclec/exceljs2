@@ -276,7 +276,7 @@ describe("WorkbookReader (stream)", () => {
             const files = trackOpenedFiles();
             // the reader of the skipped worksheet, kept until the first check: a garbage collection during the
             // iteration may otherwise collect it (and rightly close its file) before that check
-            let skipped = [];
+            const skipped = [];
             try {
                 const buffer = await bigSheetFirstBuffer();
                 for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
@@ -297,7 +297,7 @@ describe("WorkbookReader (stream)", () => {
             expect(skipped).to.have.length(1);
             expect(files.handles[0].fd).to.not.equal(-1);
             // it can never be read once its reader is gone: the file must not stay open for the life of the process
-            skipped = [];
+            skipped.length = 0;
             for (let i = 0; i < 50 && files.handles[0].fd !== -1; i++) {
                 gc();
                 await new Promise((resolve) => setTimeout(resolve, 20));
