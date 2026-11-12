@@ -1,6 +1,7 @@
 import type { SaxTag } from "../../utils/parse-sax";
 import type XmlStream from "../../utils/xml-stream";
 import type { XmlAttributes } from "../../utils/xml-stream";
+import type { ListItemOptions } from "../../types";
 import BaseXform from "./base-xform";
 
 /** The options of a {@link ListXform}. */
@@ -21,14 +22,6 @@ export interface ListXformOptions<TItem> {
     readonly $?: XmlAttributes;
     /** Parsing fails when the list has more items than this (a limit against hostile files). Default: no limit. */
     readonly maxItems?: number;
-}
-
-/**
- * The options passed by {@link ListXform.prepare} to the item xforms: those of the caller, with `index` set to the
- * index of the item (0-based). The object is the caller's own, mutated.
- */
-export interface ListItemOptions {
-    index?: number;
 }
 
 /** The xform of the items of a {@link ListXform}. */

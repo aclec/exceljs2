@@ -6,16 +6,20 @@
 // the document-side models with the prepare-side additions as optional fields; the raw parsed cell (before reconcile) is
 // {@link ParsedCellModel}.
 
-import type { CellErrorValue, Font } from "../../index";
+import type { CellErrorValue } from "../../index";
 import type Range from "../doc/range";
 import type { ValueType } from "../doc/enums";
 import type { FontModel, StyleModel } from "./style";
 import type { NoteModel } from "./sheet";
 
-/** One run of rich text (rich-text-xform). Producer: the application, rich-text-xform parse. A run without text is not rendered. */
+/**
+ * One run of rich text (rich-text-xform): index.d.ts `RichText`. Producer: the application, rich-text-xform parse.
+ * Consumer: rich-text-xform render (a run without text is not rendered). NB: a parsed `<r>` without `<t>` has no `text`
+ * at runtime, although the type requires it.
+ */
 export interface RichTextRun {
     text: string;
-    font?: FontModel | Partial<Font>;
+    font?: FontModel;
 }
 
 /** A rich text value: `{ richText: [...] }`. */

@@ -22,7 +22,7 @@ import type {
 } from "../../index";
 import type { CellModel, ColModel, ParsedCellModel, RowModel } from "./cell";
 import type { DxfModel } from "./style";
-import type { RelationshipModel } from "./book";
+import type { MediaModel, RelationshipModel } from "./book";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Notes (cell comments)
@@ -38,8 +38,11 @@ export interface NoteModel {
     note: Comment & { anchor?: string };
     /** prepare (cell-xform) / parse: the address of the cell. */
     ref?: string;
-    /** Parse: the other attributes of `<comment>` (strings). */
-    [attribute: string]: unknown;
+    /**
+     * Parse: an attribute of `<comment>`. PARTIAL: comment-xform spreads every attribute of the element into the model
+     * (strings; even over `type` / `note`), only the known ones are typed.
+     */
+    authorId?: string;
 }
 
 /** A note as collected for the comments part by worksheet-xform prepare: `refAddress` is the decoded `ref`. */
@@ -207,7 +210,7 @@ export interface DrawingAnchorModel {
     picture?: { rId: string; hyperlinks?: ImageHyperlinkModel; index?: number; creationId?: number | string };
     anchorType?: "xdr:twoCellAnchor" | "xdr:oneCellAnchor";
     /** reconcile: the workbook medium of the picture. */
-    medium?: unknown;
+    medium?: MediaModel;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -297,7 +300,7 @@ export interface WorksheetModel {
     drawing?: DrawingModel;
     background?: { rId: string };
     /** The workbook medium of the background image. */
-    image?: unknown;
+    image?: MediaModel;
     /** xlsx.ts: the relationship id from the workbook. */
     rId?: string;
     /** xlsx.ts: the VML shape block of the comments. */

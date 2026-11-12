@@ -66,14 +66,16 @@ export type SaxEventBatches = AsyncIterable<readonly SaxEvent[]>;
  * ## Typing a subclass
  *
  * - `TModel` is the model rendered and parsed. Narrow the parameters of the overrides to the precise types: `render(xmlStream,
- *   model: M | undefined)` when an absent model renders nothing, `prepare(model: M, options: XformPrepareOptions)` with the
+ *   model: M | undefined)` when an absent model renders nothing, `prepare(model: M, options: CellPrepareOptions)` with the
  *   shared option types of `src/types` (method parameters are bivariant, so overrides may narrow them, add optional ones,
  *   or require `options`).
  * - Declare the fields set in the constructor or lazily with `declare` or an initializer; never as a plain field without
- *   initializer that a base constructor sets (ES2022 [[Define]] semantics reset it to `undefined`).
+ *   initializer that a base constructor sets (ES2022 [[Define]] semantics reset it to `undefined`). Redeclare `map` (and
+ *   `model`, when the subclass guarantees more) with `declare`.
  * - `tag` is not declared here: declare it as a getter (`get tag(): string`) or a readonly field, as the subclass needs.
- * - Read a child's result through its typed reference (`this.map.t.model`), not through `this.parser` (an {@link AnyXform},
- *   whose model is `unknown`).
+ * - Look child xforms up by element name with {@link ownEntry} (element names come from the file).
+ * - Read a child's result through its typed reference (`this.map.t.model`, after checking `this.parser === this.map.t`),
+ *   not through `this.parser` (an {@link AnyXform}, whose model is `unknown`).
  *
  * @example
  * // <c:val v="42"/> ⇄ 42
@@ -117,7 +119,7 @@ class BaseXform<TModel = unknown> {
      *
      * @param options - the state of the write shared by the xforms (shared strings, styles, ...)
      */
-    prepare(model: TModel, options?: unknown): void {
+    prepare(model: NoInfer<TModel>, options?: unknown): void {
         // optional preparation (mutation) of model so it is ready for write
     }
 
@@ -126,7 +128,7 @@ class BaseXform<TModel = unknown> {
      *
      * @param rest - extra arguments some xforms take (`ListXform` passes the index of the item)
      */
-    render(xmlStream: XmlStream, model: TModel, ...rest: unknown[]): void {
+    render(xmlStream: XmlStream, model: NoInfer<TModel>, ...rest: unknown[]): void {
         // convert model to xml
     }
 
@@ -160,7 +162,7 @@ class BaseXform<TModel = unknown> {
      *
      * @param options - the state of the read shared by the xforms (styles, shared strings, relationships, ...)
      */
-    reconcile(model: TModel, options?: unknown): void {
+    reconcile(model: NoInfer<TModel>, options?: unknown): void {
         // optional post-parse step (opposite to prepare)
     }
 
@@ -238,7 +240,7 @@ class BaseXform<TModel = unknown> {
     }
 
     /** Renders a model to an XML string (without XML declaration, unless the xform writes one). */
-    toXml(model: TModel): string {
+    toXml(model: NoInfer<TModel>): string {
         const xmlStream = new XmlStream();
         this.render(xmlStream, model);
         return xmlStream.xml;

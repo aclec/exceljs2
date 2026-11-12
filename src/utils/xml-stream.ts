@@ -108,18 +108,10 @@ class XmlStream {
      * @param attributes - its attributes; `undefined` values are skipped
      */
     openNode(name: string, attributes?: XmlAttributes): void {
-        const xml = this._xml;
-        if (this.open && this._stack.length) {
-            xml.push(">");
-        }
-
+        // the start tag as one fragment, with the ">" of the parent's start tag if still open
+        const start = attributes ? `<${name}${renderAttributes(attributes)}` : `<${name}`;
+        this._xml.push(this.open && this._stack.length ? `>${start}` : start);
         this._stack.push(name);
-
-        // start streaming node
-        xml.push(`<${name}`);
-        if (attributes) {
-            xml.push(renderAttributes(attributes));
-        }
         this.leaf = true;
         this.open = true;
     }
@@ -199,12 +191,13 @@ class XmlStream {
      * @param text - its text content; `undefined` writes an empty element (`0` and `""` are written)
      */
     leafNode(name: string, attributes?: XmlAttributes, text?: XmlValue): void {
-        this.openNode(name, attributes);
-        if (text !== undefined) {
-            // zeros need to be written
-            this.writeText(text);
-        }
-        this.closeNode();
+        // the whole element as one fragment: the same output and state as openNode, writeText, closeNode
+        const start = attributes ? `<${name}${renderAttributes(attributes)}` : `<${name}`;
+        // zeros need to be written
+        const element = text === undefined ? `${start}/>` : `${start}>${xmlEncode(text.toString())}</${name}>`;
+        this._xml.push(this.open && this._stack.length ? `>${element}` : element);
+        this.open = false;
+        this.leaf = false;
     }
 
     /** Closes every open element. */

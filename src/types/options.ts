@@ -11,10 +11,18 @@ import type { StyleLookup, StyleRegistry } from "./style";
 import type { SharedStringLookup, SharedStringRegistry } from "./strings";
 
 /**
+ * What ListXform adds to the prepare options it passes to its item xforms: `index`, the index of the item (0-based),
+ * set on the caller's object (mutated) before each item.
+ */
+export interface ListItemOptions {
+    index?: number;
+}
+
+/**
  * Workbook-level prepare options (xlsx.ts prepareModel, passed to every worksheet xform).
  * The stream writer builds its own subset per row ({@link CellPrepareOptions}).
  */
-export interface WorkbookPrepareOptions {
+export interface WorkbookPrepareOptions extends ListItemOptions {
     styles: StyleRegistry;
     sharedStrings?: SharedStringRegistry;
     /** the workbook uses the 1904 date system */
@@ -34,7 +42,7 @@ export interface WorkbookPrepareOptions {
  * writer builds the object for each row (`hyperlinks` is then a proxy with `push`, `merges` an array with a no-op `add`,
  * and `date1904` is not set).
  */
-export interface CellPrepareOptions {
+export interface CellPrepareOptions extends ListItemOptions {
     styles: StyleRegistry;
     sharedStrings?: SharedStringRegistry;
     date1904?: boolean;
