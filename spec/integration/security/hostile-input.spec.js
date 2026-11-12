@@ -132,6 +132,76 @@ describe("hostile input", function () {
         });
     });
 
+    describe("sheet ids", () => {
+        const withSheetIds = (...ids) => ({
+            "xl/workbook.xml": (xml) => {
+                let i = 0;
+                return xml.replace(/sheetId="\d+"/g, () => `sheetId="${ids[i++]}"`);
+            },
+        });
+        const twoSheets = () =>
+            baseWorkbookBuffer((wb) => {
+                wb.addWorksheet("Sheet2").getCell("A1").value = "two";
+            });
+
+        it("renumbers a huge sheetId instead of creating a sparse worksheet array", async () => {
+            // (up to 4294967294 in a file: 10 million is enough to show the cost and stays bounded)
+            const buffer = await tamper(await baseWorkbookBuffer(), withSheetIds("10000000"));
+            const { result: wb, ms } = await timed(async () => {
+                const book = await load(buffer);
+                book.getWorksheet("Sheet1");
+                book.addWorksheet("added");
+                await book.xlsx.writeBuffer();
+                return book;
+            });
+            expect(ms).to.be.below(500);
+            expect(wb.worksheets.map((ws) => [ws.id, ws.name])).to.deep.equal([
+                [1, "Sheet1"],
+                [2, "added"],
+            ]);
+        });
+
+        it("keeps ids up to 65535 and renumbers invalid or duplicate ones to free ids", async () => {
+            const check = async (ids, expected) => {
+                const wb = await load(await tamper(await twoSheets(), withSheetIds(...ids)));
+                expect(
+                    wb.worksheets.map((ws) => [ws.id, ws.name]),
+                    ids.join()
+                ).to.deep.equal(expected);
+                expect(wb.getWorksheet("Sheet2").getCell("A1").value).to.equal("two");
+            };
+            await check(
+                ["7", "65535"],
+                [
+                    [7, "Sheet1"],
+                    [65535, "Sheet2"],
+                ]
+            );
+            // a duplicate id used to replace the first worksheet with the second
+            await check(
+                ["3", "3"],
+                [
+                    [3, "Sheet1"],
+                    [1, "Sheet2"],
+                ]
+            );
+            await check(
+                ["65536", "1"],
+                [
+                    [2, "Sheet1"],
+                    [1, "Sheet2"],
+                ]
+            );
+            await check(
+                ["0", "x"],
+                [
+                    [1, "Sheet1"],
+                    [2, "Sheet2"],
+                ]
+            );
+        });
+    });
+
     describe("number formats", () => {
         // a numeric cell styled with the custom format formatCode
         const withNumFmt = (formatCode, cells = 1) => ({
