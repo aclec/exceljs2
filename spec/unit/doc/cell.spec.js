@@ -173,7 +173,7 @@ describe('Cell', () => {
 
     expect(a2.value).to.equal(5);
     expect(a2.type).to.equal(Enums.ValueType.Merge);
-    expect(a1._mergeCount).to.equal(1);
+    expect(a1._mergeSlaves.size).to.equal(1);
     expect(a1.isMerged).to.be.ok();
     expect(a2.isMerged).to.be.ok();
     expect(a2.isMergedTo(a1)).to.be.ok();
@@ -192,7 +192,7 @@ describe('Cell', () => {
     // unmerge should work also
     a2.unmerge();
     expect(a2.type).to.equal(Enums.ValueType.Null);
-    expect(a1._mergeCount).to.equal(0);
+    expect(a1._mergeSlaves).to.equal(undefined);
     expect(a1.isMerged).to.not.be.ok();
     expect(a2.isMerged).to.not.be.ok();
     expect(a2.isMergedTo(a1)).to.not.be.ok();
