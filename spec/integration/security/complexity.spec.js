@@ -153,4 +153,52 @@ describe("hostile input: algorithmic complexity", function () {
         expect(ws.getColumn(100).width).to.equal(20);
         expect(ws.model.cols.map(({ min, max, width }) => [min, max, width])).to.deep.equal([[1, 16384, 20]]);
     });
+
+    describe("image anchors", () => {
+        const PNG = Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "base64"
+        );
+
+        async function anchoredAt(col, row) {
+            const buffer = await tamper(
+                await baseWorkbookBuffer((wb, ws) => {
+                    ws.addImage(wb.addImage({ buffer: PNG, extension: "png" }), "B2:C3");
+                }),
+                {
+                    "xl/drawings/drawing1.xml": (xml) =>
+                        xml
+                            .replace("<xdr:col>1</xdr:col>", `<xdr:col>${col}</xdr:col>`)
+                            .replace("<xdr:row>1</xdr:row>", `<xdr:row>${row}</xdr:row>`),
+                }
+            );
+            const ws = (await load(buffer)).getWorksheet(1);
+            return { ws, tl: ws.getImages()[0].range.tl };
+        }
+
+        it("clamps an anchor beyond the grid to the last cell", async () => {
+            const { tl } = await anchoredAt(200000, 2000000);
+            expect([tl.nativeCol, tl.nativeRow]).to.deep.equal([16383, 1048575]);
+            expect([Math.floor(tl.col), Math.floor(tl.row)]).to.deep.equal([16383, 1048575]);
+        });
+
+        it("reads the position of an anchor without creating its row and column", async () => {
+            const { ws, tl } = await anchoredAt(5000, 70000);
+            const { rowCount } = ws;
+            expect([tl.col, tl.row]).to.deep.equal([5000, 70000]);
+            expect(ws.findRow(70001)).to.equal(undefined);
+            expect(ws.rowCount).to.equal(rowCount);
+            expect(ws.columns.length).to.be.below(5001);
+        });
+
+        it("still uses the width and height of the anchor cell", async () => {
+            const { ws, tl } = await anchoredAt(1, 1);
+            ws.getColumn(2).width = 20;
+            ws.getRow(2).height = 30;
+            tl.nativeColOff = 100000;
+            tl.nativeRowOff = 150000;
+            expect(tl.col).to.equal(1.5);
+            expect(tl.row).to.equal(1.5);
+        });
+    });
 });

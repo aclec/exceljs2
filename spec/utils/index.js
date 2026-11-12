@@ -122,6 +122,12 @@ module.exports = {
                 }
                 return column;
             },
+            _findColumn(colNumber) {
+                return this.columns[colNumber - 1];
+            },
+            findRow(rowNumber) {
+                return this.rows[rowNumber - 1];
+            },
             getRow(rowNumber) {
                 let row = this.rows[rowNumber - 1];
                 if (!row) {
