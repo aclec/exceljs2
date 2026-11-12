@@ -25,9 +25,7 @@ import ExtLstRefXform from "./ext-lst-ref-xform";
 import FormulaXform from "./formula-xform";
 import ColorScaleXform from "./color-scale-xform";
 import IconSetXform from "./icon-set-xform";
-
-// the icon sets of Excel 2010+, written in the x14 extension only
-const EXT_ICONS: ReadonlySet<string | undefined> = new Set(["3Triangles", "3Stars", "5Boxes"]);
+import { isX14OnlyIconSet } from "./icon-sets";
 
 // the operator of a text rule is the type of its <cfRule>; the four comparing a text also have an
 // operator attribute (ST_ConditionalFormattingOperator)
@@ -283,18 +281,22 @@ class CfRuleXform extends CompositeXform<ConditionalFormattingRuleModel> {
         return textOperatorAttribute(CfRuleXform.textType(model));
     }
 
+    /**
+     * An icon set is written in the x14 extension only when it is custom (`custom`, or `icons`: a rule read from a file
+     * has both) or uses an icon set that only the extension has (3Stars, 3Triangles, 5Boxes, NoIcons).
+     *
+     * @returns whether the icon set rule is written in the x14 extension only
+     */
+    static isX14IconSet(this: void, rule: IconSetRuleModel): boolean {
+        return rule.custom === true || rule.icons !== undefined || isX14OnlyIconSet(rule.iconSet);
+    }
+
     /** @returns whether the rule is written in `<conditionalFormatting>` (a data bar is also written in the extension) */
     static isPrimitive(this: void, rule: ConditionalFormattingRuleModel): boolean {
-        // is this rule primitive?
         if (CfRuleXform.isX14(rule)) {
             return false;
         }
-        if (rule.type === "iconSet") {
-            if (rule.custom || EXT_ICONS.has(rule.iconSet)) {
-                return false;
-            }
-        }
-        return true;
+        return rule.type !== "iconSet" || !CfRuleXform.isX14IconSet(rule);
     }
 
     /** Writes the rule (nothing for an unknown type, or an icon set written in the extension). */

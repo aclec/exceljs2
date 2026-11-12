@@ -374,4 +374,206 @@ describe("conditional formatting", () => {
             check(await readPart(Buffer.concat(chunks), SHEET));
         });
     });
+
+    describe("icon sets", () => {
+        const thresholds = [
+            { type: "percent", value: 0 },
+            { type: "percent", value: 33 },
+            { type: "percent", value: 67 },
+        ];
+        const cfIcons = (xml) => [...extSection(xml).matchAll(/<x14:cfIcon [^>]*>/g)].map(([icon]) => icon);
+        const iconSetSheet = (rule) => {
+            const wb = new ExcelJS.Workbook();
+            wb.addWorksheet("Sheet1").addConditionalFormatting({ ref: "A1:A5", rules: [rule] });
+            return wb;
+        };
+
+        it("a custom icon set keeps its icons through a load and a rewrite", async () => {
+            const icons = [
+                { iconSet: "3Flags", iconId: 2 },
+                { iconSet: "NoIcons", iconId: 0 },
+                { iconSet: "3Stars", iconId: 0 },
+            ];
+            const buffer = await iconSetSheet({
+                type: "iconSet",
+                iconSet: "3Arrows",
+                custom: true,
+                cfvo: thresholds,
+                icons,
+            }).xlsx.writeBuffer();
+            const expected = [
+                '<x14:cfIcon iconSet="3Flags" iconId="2"/>',
+                '<x14:cfIcon iconSet="NoIcons" iconId="0"/>',
+                '<x14:cfIcon iconSet="3Stars" iconId="0"/>',
+            ];
+            expect(cfIcons(await readPart(buffer, SHEET))).to.deep.equal(expected);
+
+            const wb = await load(buffer);
+            const [rule] = wb.getWorksheet("Sheet1").conditionalFormattings[0].rules;
+            expect(rule).to.include({ type: "iconSet", iconSet: "3Arrows", custom: true });
+            expect(rule.icons).to.deep.equal(icons);
+
+            const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
+            expect(cfIcons(xml)).to.deep.equal(expected);
+            expect(extSection(xml)).to.include('<x14:iconSet iconSet="3Arrows" custom="1">');
+            expect(mainSection(xml)).not.to.include("iconSet");
+        });
+
+        it("writes the iconId of each icon without changing the rule", async () => {
+            const rule = {
+                type: "iconSet",
+                custom: true,
+                cfvo: thresholds,
+                icons: [
+                    { iconSet: "3Flags", iconId: 2 },
+                    { iconSet: "3Flags", iconId: 1 },
+                    { iconSet: "3Flags", iconId: 0 },
+                ],
+            };
+            const icons = JSON.parse(JSON.stringify(rule.icons));
+            const xml = await readPart(await iconSetSheet(rule).xlsx.writeBuffer(), SHEET);
+            expect(cfIcons(xml)).to.deep.equal([
+                '<x14:cfIcon iconSet="3Flags" iconId="2"/>',
+                '<x14:cfIcon iconSet="3Flags" iconId="1"/>',
+                '<x14:cfIcon iconSet="3Flags" iconId="0"/>',
+            ]);
+            expect(rule.icons).to.deep.equal(icons);
+        });
+
+        it("a rule with icons is written in the extension, also without custom", async () => {
+            const rule = {
+                type: "iconSet",
+                cfvo: thresholds,
+                icons: [{ iconSet: "3Flags", iconId: 2 }, { iconSet: "NoIcons" }, { iconSet: "3Flags", iconId: 0 }],
+            };
+            const xml = await readPart(await iconSetSheet(rule).xlsx.writeBuffer(), SHEET);
+            expect(mainSection(xml)).to.equal("");
+            // NoIcons has a single "icon": its iconId is 0
+            expect(cfIcons(xml)).to.deep.equal([
+                '<x14:cfIcon iconSet="3Flags" iconId="2"/>',
+                '<x14:cfIcon iconSet="NoIcons" iconId="0"/>',
+                '<x14:cfIcon iconSet="3Flags" iconId="0"/>',
+            ]);
+        });
+
+        it("rejects icons that the file format cannot hold", async () => {
+            const cases = [
+                [[{ iconSet: "3Flags" }, { iconSet: "3Flags", iconId: 1 }, { iconSet: "3Flags", iconId: 0 }], /iconId/],
+                [
+                    [
+                        { iconSet: "3Flags", iconId: 3 },
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 0 },
+                    ],
+                    /iconId/,
+                ],
+                [
+                    [
+                        { iconSet: "5Arrows", iconId: 1.5 },
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 0 },
+                    ],
+                    /iconId/,
+                ],
+                [
+                    [
+                        { iconSet: "3Flags", iconId: -1 },
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 0 },
+                    ],
+                    /iconId/,
+                ],
+                [
+                    [
+                        { iconSet: "NoIcons", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 0 },
+                    ],
+                    /iconId/,
+                ],
+                [
+                    [
+                        { iconSet: "3Bogus", iconId: 0 },
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 0 },
+                    ],
+                    /icon set/,
+                ],
+                [
+                    [
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 0 },
+                    ],
+                    /one icon per threshold/,
+                ],
+            ];
+            for (const [icons, error] of cases) {
+                const wb = iconSetSheet({ type: "iconSet", custom: true, cfvo: thresholds, icons });
+                let thrown;
+                try {
+                    await wb.xlsx.writeBuffer();
+                } catch (e) {
+                    thrown = e;
+                }
+                expect(thrown, JSON.stringify(icons)).to.be.an.instanceOf(Error);
+                expect(thrown.message, JSON.stringify(icons)).to.match(error);
+            }
+        });
+
+        it("a rule read without icon set has the default one, 3TrafficLights1", async () => {
+            const cfvo = '<cfvo type="percent" val="0"/><cfvo type="percent" val="33"/><cfvo type="percent" val="67"/>';
+            const x14Cfvo =
+                '<x14:cfvo type="percent"><xm:f>0</xm:f></x14:cfvo><x14:cfvo type="percent"><xm:f>33</xm:f></x14:cfvo>' +
+                '<x14:cfvo type="percent"><xm:f>67</xm:f></x14:cfvo>';
+            const source = await sourceWith(
+                `<conditionalFormatting sqref="A1:A5"><cfRule type="iconSet" priority="1"><iconSet>${cfvo}</iconSet></cfRule></conditionalFormatting>`,
+                extLst(
+                    x14Cf(
+                        "B1:B5",
+                        `<x14:cfRule type="iconSet" priority="2" id="{00000000-0000-0000-0000-000000000001}"><x14:iconSet custom="1">${x14Cfvo}` +
+                            '<x14:cfIcon iconSet="3Flags" iconId="0"/><x14:cfIcon iconSet="3Flags" iconId="1"/><x14:cfIcon iconSet="3Flags" iconId="2"/>' +
+                            "</x14:iconSet></x14:cfRule>"
+                    )
+                )
+            );
+            const wb = await load(source);
+            const cfs = wb.getWorksheet("Sheet1").conditionalFormattings;
+            expect(cfs.map((cf) => cf.rules[0].iconSet)).to.deep.equal(["3TrafficLights1", "3TrafficLights1"]);
+
+            const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
+            expect(mainSection(xml)).to.include("<iconSet>");
+            expect(extSection(xml)).to.include('<x14:iconSet custom="1">');
+        });
+
+        it("rejects an icon set that is not one of the file format", async () => {
+            for (const iconSet of ["3TrafficLights", "bogus"]) {
+                for (const icons of [
+                    undefined,
+                    [
+                        { iconSet: "3Flags", iconId: 0 },
+                        { iconSet: "3Flags", iconId: 1 },
+                        { iconSet: "3Flags", iconId: 2 },
+                    ],
+                ]) {
+                    const wb = iconSetSheet({ type: "iconSet", iconSet, cfvo: thresholds, icons });
+                    let thrown;
+                    try {
+                        await wb.xlsx.writeBuffer();
+                    } catch (e) {
+                        thrown = e;
+                    }
+                    expect(thrown, iconSet).to.be.an.instanceOf(Error);
+                    expect(thrown.message).to.include(`"${iconSet}"`);
+                }
+            }
+        });
+
+        it("NoIcons and the icon sets of Excel 2010 are written in the extension only", async () => {
+            for (const iconSet of ["NoIcons", "3Stars", "3Triangles"]) {
+                const xml = await readPart(await iconSetSheet({ type: "iconSet", iconSet, cfvo: thresholds }).xlsx.writeBuffer(), SHEET);
+                expect(mainSection(xml), iconSet).to.equal("");
+                expect(extSection(xml), iconSet).to.include(`<x14:iconSet iconSet="${iconSet}">`);
+            }
+        });
+    });
 });

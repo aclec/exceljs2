@@ -5,8 +5,12 @@ import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
 
 import CfvoXform from "./cfvo-xform";
+import { DEFAULT_ICON_SET, iconSetAttribute } from "./icon-sets";
 
-/** The model of `<iconSet>` (merged into the rule). The parsed `iconSet` is the attribute (unvalidated). */
+/**
+ * The model of `<iconSet>` (merged into the rule). The parsed `iconSet` is the attribute (unvalidated), `"3TrafficLights1"`
+ * (the default) when absent.
+ */
 export interface IconSetModel {
     iconSet: NonNullable<IconSetRuleModel["iconSet"]>;
     reverse: boolean | undefined;
@@ -34,8 +38,11 @@ class IconSetXform extends CompositeXform<IconSetModel> {
     }
 
     /**
+     * Writes the icon set (`iconSet` is not written when it is absent or the default, `"3TrafficLights1"`).
+     *
      * @param model - the rule
-     * @throws Error when the rule has no `cfvo` (CT_IconSet requires them)
+     * @throws Error when the rule has no `cfvo` (CT_IconSet requires them), or an `iconSet` that is not an icon set of
+     *   ECMA-376 (the x14 ones are written by the x14 rule)
      */
     override render(xmlStream: XmlStream, model: Pick<IconSetRuleModel, "iconSet" | "reverse" | "showValue" | "cfvo">): void {
         const { cfvo } = model;
@@ -43,7 +50,7 @@ class IconSetXform extends CompositeXform<IconSetModel> {
             throw new Error("An iconSet conditional formatting rule needs cfvo");
         }
         xmlStream.openNode(this.tag, {
-            iconSet: BaseXform.toStringAttribute(model.iconSet, "3TrafficLights"),
+            iconSet: iconSetAttribute(model.iconSet, false),
             reverse: BaseXform.toBoolAttribute(model.reverse, false),
             showValue: BaseXform.toBoolAttribute(model.showValue, true),
         });
@@ -58,7 +65,7 @@ class IconSetXform extends CompositeXform<IconSetModel> {
     override createNewModel({ attributes }: SaxTag): IconSetModel {
         return {
             // unvalidated ST_IconSetType
-            iconSet: BaseXform.toStringValue(attributes.iconSet, "3TrafficLights") as IconSetModel["iconSet"],
+            iconSet: BaseXform.toStringValue(attributes.iconSet, DEFAULT_ICON_SET) as IconSetModel["iconSet"],
             reverse: BaseXform.toBoolValue(attributes.reverse),
             showValue: BaseXform.toBoolValue(attributes.showValue),
             cfvo: [],

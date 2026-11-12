@@ -94,6 +94,13 @@ export function conditionalFormatting(): void {
     const noColor: ExcelJS.ConditionalFormattingRule = { type: "colorScale", cfvo: [] };
     // @ts-expect-error an icon set needs its thresholds (writing it throws)
     const noIconCfvo: ExcelJS.ConditionalFormattingRule = { type: "iconSet", iconSet: "3Arrows" };
+    const legacyIconSet: ExcelJS.ConditionalFormattingRule = {
+        type: "iconSet",
+        // @ts-expect-error not an icon set of the file format (the default is 3TrafficLights1)
+        iconSet: "3TrafficLights",
+        cfvo: [],
+    };
+    void legacyIconSet;
     // @ts-expect-error a formula is a text, a number or a boolean
     const dateFormula: ExcelJS.ConditionalFormattingRule = { type: "cellIs", formulae: [new Date()] };
     void noCfvo;

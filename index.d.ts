@@ -1641,8 +1641,8 @@ export type TimePeriodTypes =
     "lastWeek" | "thisWeek" | "nextWeek" | "yesterday" | "today" | "tomorrow" | "last7Days" | "lastMonth" | "thisMonth" | "nextMonth";
 
 /**
- * The icon set of an `iconSet` rule. `3Triangles`, `3Stars` and `5Boxes` (Excel 2010) are written in the x14 extension of
- * the worksheet.
+ * An icon set (ST_IconSetType). `3Triangles`, `3Stars`, `5Boxes` and `NoIcons` (Excel 2010) are written in the x14
+ * extension of the worksheet. `NoIcons` has a single "icon": none.
  */
 export type IconSetTypes =
     | "5Arrows"
@@ -1766,8 +1766,8 @@ export interface CfIcon {
     /** The icon set the icon comes from (`"NoIcons"`: no icon). */
     iconSet: IconSetTypes;
     /**
-     * The 0-based index of the icon in `iconSet`. Writing the rule sets it to the index of the icon in `icons` (it mutates
-     * it).
+     * The 0-based index of the icon in `iconSet` (from 0 to its number of icons - 1), written as is. Required by the file
+     * format but for `"NoIcons"` (written as 0 when absent): writing a rule whose icon has no valid `iconId` throws.
      */
     iconId?: number;
 }
@@ -1780,19 +1780,22 @@ export interface IconSetRuleType extends ConditionalFormattingBaseRule {
     /** Whether the order of the icons is reversed. */
     reverse?: boolean;
     /**
-     * Write the rule in the x14 extension of the worksheet, with its `icons` (`custom="1"` is written when the rule has
-     * `icons`). Not set on the rules read from a file: they have `icons` instead.
+     * Whether the icon set shows custom `icons` (Excel 2010). A rule with `custom` or `icons` is written in the x14
+     * extension of the worksheet only, with `custom="1"` when it has `icons`. A rule read from the extension has the
+     * `custom` attribute of the file (`true` with its `icons`).
      */
     custom?: boolean;
     /**
-     * The icon set (`"3TrafficLights1"` when absent). A rule read from a file without icon set (the default) has
-     * `"3TrafficLights"`: not written in `<conditionalFormatting>` (the default), but written as is in the x14
-     * extension.
+     * The icon set (`"3TrafficLights1"`, the default, when absent; a rule read from a file without icon set has
+     * `"3TrafficLights1"`). Writing a rule whose icon set is not one of {@link IconSetTypes} throws.
      */
-    iconSet?: IconSetTypes | "3TrafficLights";
+    iconSet?: IconSetTypes;
     /** The thresholds, one per icon, from the lowest (required: writing a rule without them throws). */
     cfvo: Cvfo[];
-    /** The custom icons, one per threshold: written in the x14 extension, with `custom`. Set on the rules read from it. */
+    /**
+     * The custom icons, one per threshold (writing a rule with another number of icons throws): written in the x14
+     * extension, with `custom="1"`. Set on the rules read from it that have some.
+     */
     icons?: CfIcon[];
 }
 

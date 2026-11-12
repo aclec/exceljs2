@@ -153,7 +153,7 @@ export interface CfvoModel {
     value?: number | string;
 }
 
-/** A custom icon of an x14 icon set (`<x14:cfIcon>`): index.d.ts `CfIcon`. `iconId` is set by render (the index of the icon). */
+/** A custom icon of an x14 icon set (`<x14:cfIcon>`): index.d.ts `CfIcon` (render checks `iconSet` and `iconId`). */
 export type CfIconModel = CfIcon;
 
 /** Fields of every rule model. */
@@ -214,12 +214,13 @@ export interface ColorScaleRuleModel extends CfRuleModelBase {
 }
 
 /**
- * An `iconSet` rule (index.d.ts `IconSetRuleType`): rendering requires `cfvo`. A custom icon set (`custom`, or `icons`
- * when read) and the x14 icon sets (3Triangles, 3Stars, 5Boxes) are written in the extension only.
+ * An `iconSet` rule (index.d.ts `IconSetRuleType`): rendering requires `cfvo`. A custom icon set (`custom` or `icons`,
+ * both set when read) and the x14 icon sets (3Triangles, 3Stars, 5Boxes, NoIcons) are written in the extension only
+ * (CfRuleXform.isX14IconSet).
  */
 export interface IconSetRuleModel extends CfRuleModelBase {
     type: "iconSet";
-    /** Default 3TrafficLights1 (parsed as `"3TrafficLights"` when absent). */
+    /** Default 3TrafficLights1 (also parsed when absent). */
     iconSet?: IconSetRuleType["iconSet"];
     reverse?: boolean;
     showValue?: boolean;
