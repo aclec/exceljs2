@@ -308,6 +308,33 @@ describe('WorkbookReader (stream)', () => {
       expect(worksheet.getColumn('C').numFmt).to.equal('0.00');
     });
 
+    it('reads outline levels and sheet format properties', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.properties.outlineLevelCol = 1;
+        ws.properties.outlineLevelRow = 1;
+        ws.getColumn(2).outlineLevel = 1;
+        ws.getCell('A2').value = 'grouped';
+        ws.getRow(2).outlineLevel = 1;
+      });
+      const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer));
+      const rows = [];
+      let worksheet;
+      for await (worksheet of reader) {
+        for await (const row of worksheet) {
+          rows.push({outlineLevel: row.outlineLevel, collapsed: row.collapsed});
+        }
+      }
+      expect(worksheet.properties.outlineLevelCol).to.equal(1);
+      expect(worksheet.properties.outlineLevelRow).to.equal(1);
+      expect(worksheet.getColumn(1).collapsed).to.equal(false);
+      expect(worksheet.getColumn(2).outlineLevel).to.equal(1);
+      expect(worksheet.getColumn(2).collapsed).to.equal(true);
+      expect(rows).to.deep.equal([
+        {outlineLevel: 0, collapsed: false},
+        {outlineLevel: 1, collapsed: true},
+      ]);
+    });
+
     it('clamps column ranges to the worksheet grid', async () => {
       const buffer = await tamper(await baseWorkbookBuffer(), {
         'xl/worksheets/sheet1.xml': xml =>
