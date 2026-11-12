@@ -14,6 +14,8 @@ const tseslint = require("typescript-eslint");
 const NODE_ONLY_MODULES = ["child_process", "crypto", "fs", "http", "https", "net", "os", "path", "vm", "worker_threads"];
 
 module.exports = [
+    // an eslint-disable comment that no longer disables anything is an error (exceptions do not outlive their reason)
+    { linterOptions: { reportUnusedDisableDirectives: "error" } },
     {
         ignores: [
             "build/**",
@@ -128,7 +130,10 @@ module.exports = [
             "@typescript-eslint/consistent-type-imports": ["error", { fixStyle: "inline-type-imports" }],
             "@typescript-eslint/consistent-type-exports": "error",
             "@typescript-eslint/explicit-module-boundary-types": "error",
-            "@typescript-eslint/no-non-null-assertion": "off",
+            // no assertion that silences the compiler: narrow (type guards, checks that throw a clear Error) instead. A
+            // justified exception takes `// eslint-disable-next-line <rule> -- <why it is safe>`.
+            "@typescript-eslint/no-non-null-assertion": "error",
+            "@typescript-eslint/no-unsafe-type-assertion": "error",
             "@typescript-eslint/ban-ts-comment": ["error", { "ts-expect-error": "allow-with-description", minimumDescriptionLength: 10 }],
             "@typescript-eslint/switch-exhaustiveness-check": "error",
             "@typescript-eslint/prefer-nullish-coalescing": "off",
