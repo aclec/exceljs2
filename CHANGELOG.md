@@ -220,6 +220,9 @@ upstream PR code was merged) and has a regression test.
   rendering worksheets, at no measurable cost. Building the workbook from the parsed model and compressing one part are still done at once
   (about 0.5 s and 1.5 s for that sheet).
 
+- An empty shared string (`<si/>`) reads as `""` in both readers; it used to be re-saved as `[object Object]`.
+- A link to another workbook such as `"Book2.xlsx#Sheet1!A1"` is written as an external link again (not as a place in this workbook).
+
 ### Documentation
 
 - README: installation with any package manager, requirements, a "Security & limits" section, streaming reader defaults (#1531), tab colour
