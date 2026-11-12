@@ -1,35 +1,56 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { CellRichTextValue } from "../../index";
+
+/** A value of the shared strings table: a plain string or a rich text. */
+export type SharedStringValue = string | CellRichTextValue;
+
+/**
+ * The shared strings table of a workbook being written (the streaming writer's): each distinct value is stored once,
+ * and cells refer to it by its index.
+ */
 class SharedStrings {
+    private _values: SharedStringValue[];
+    private _totalRefs: number;
+    // plain strings => index. No prototype: the keys are cell values.
+    private _hash: Record<string, number>;
+    // rich text values, keyed by the JSON of their runs. Kept apart from _hash: as an object
+    // key every rich text would be "[object Object]", and a JSON key there could collide
+    // with an identical plain string.
+    private _richTextHash: Map<string, number>;
+
     constructor() {
         this._values = [];
         this._totalRefs = 0;
-        this._hash = Object.create(null);
-        // rich text values, keyed by the JSON of their runs. Kept apart from _hash: as an object
-        // key every rich text would be "[object Object]", and a JSON key there could collide
-        // with an identical plain string.
+        this._hash = Object.create(null) as Record<string, number>;
         this._richTextHash = new Map();
     }
 
-    get count() {
+    /** The number of distinct values. */
+    get count(): number {
         return this._values.length;
     }
 
-    get values() {
+    /** The distinct values, by index. */
+    get values(): SharedStringValue[] {
         return this._values;
     }
 
-    get totalRefs() {
+    /** The number of values added, duplicates included. */
+    get totalRefs(): number {
         return this._totalRefs;
     }
 
-    getString(index) {
+    /** The value at an index, or undefined. */
+    getString(index: number): SharedStringValue | undefined {
         return this._values[index];
     }
 
-    add(value) {
-        let index;
-        if (value && value.richText) {
+    /**
+     * Adds a value (rich texts are compared by their runs, as JSON), and counts a reference to it.
+     * @returns The index of the value.
+     */
+    add(value: SharedStringValue): number {
+        let index: number | undefined;
+        if (typeof value === "object" && value !== null && value.richText) {
             const key = JSON.stringify(value.richText);
             index = this._richTextHash.get(key);
             if (index === undefined) {
@@ -38,9 +59,11 @@ class SharedStrings {
                 this._values.push(value);
             }
         } else {
-            index = this._hash[value];
+            // a string (any other value is converted to a property key, e.g. "[object Object]", as it always was)
+            const key = value as string;
+            index = this._hash[key];
             if (index === undefined) {
-                index = this._hash[value] = this._values.length;
+                index = this._hash[key] = this._values.length;
                 this._values.push(value);
             }
         }

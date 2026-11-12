@@ -1,9 +1,23 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-// StringBuf - a way to keep string memory operations to a minimum
-// while building the strings for the xml files
+/** Options of a {@link StringBuf}. */
+export interface StringBufOptions {
+    /** The initial capacity, in bytes (16384 by default); it doubles when needed. */
+    size?: number;
+    /** The encoding of the text added (utf8 by default). */
+    encoding?: BufferEncoding;
+}
+
+/**
+ * A growable byte buffer to build the XML of a part with few string operations: text is encoded into it as it is added.
+ */
 class StringBuf {
-    constructor(options) {
+    private _buf: Buffer;
+    private _encoding: BufferEncoding;
+    // where in the buffer we are at
+    private _inPos: number;
+    // the copy that toBuffer() returned, until the content changes
+    private _buffer: Buffer | undefined;
+
+    constructor(options?: StringBufOptions) {
         this._buf = Buffer.alloc((options && options.size) || 16384);
         this._encoding = (options && options.encoding) || "utf8";
 
@@ -14,19 +28,23 @@ class StringBuf {
         this._buffer = undefined;
     }
 
-    get length() {
+    /** The number of bytes written. */
+    get length(): number {
         return this._inPos;
     }
 
-    get capacity() {
+    /** The size of the underlying buffer, in bytes. */
+    get capacity(): number {
         return this._buf.length;
     }
 
-    get buffer() {
+    /** The underlying buffer: its first {@link length} bytes are the content. */
+    get buffer(): Buffer {
         return this._buf;
     }
 
-    toBuffer() {
+    /** A copy of the content, kept until the content changes. */
+    toBuffer(): Buffer {
         // return the current data as a single enclosing buffer
         if (!this._buffer) {
             this._buffer = Buffer.alloc(this.length);
@@ -35,13 +53,15 @@ class StringBuf {
         return this._buffer;
     }
 
-    reset(position) {
+    /** Moves the write position back to position (0 by default: empties the buffer). */
+    reset(position?: number): void {
         position = position || 0;
         this._buffer = undefined;
         this._inPos = position;
     }
 
-    _grow(min) {
+    // doubles the capacity until it is at least min
+    private _grow(min: number): void {
         let size = this._buf.length * 2;
         while (size < min) {
             size *= 2;
@@ -51,7 +71,8 @@ class StringBuf {
         this._buf = buf;
     }
 
-    addText(text) {
+    /** Appends text, encoded. */
+    addText(text: string): void {
         this._buffer = undefined;
 
         let inPos = this._inPos + this._buf.write(text, this._inPos, this._encoding);
@@ -67,7 +88,8 @@ class StringBuf {
         this._inPos = inPos;
     }
 
-    addStringBuf(inBuf) {
+    /** Appends the content of another StringBuf. */
+    addStringBuf(inBuf: StringBuf): void {
         if (inBuf.length) {
             this._buffer = undefined;
 
