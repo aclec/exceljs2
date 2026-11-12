@@ -39,8 +39,8 @@ export interface NoteModel {
     /** prepare (cell-xform) / parse: the address of the cell. */
     ref?: string;
     /**
-     * Parse: an attribute of `<comment>`. PARTIAL: comment-xform spreads every attribute of the element into the model
-     * (strings; even over `type` / `note`), only the known ones are typed.
+     * Parse: an attribute of `<comment>`. comment-xform copies every attribute of the element into the model (strings;
+     * never over `type` / `note`): only the known ones are typed.
      */
     authorId?: string;
 }
@@ -49,6 +49,30 @@ export interface NoteModel {
 export interface CommentRefModel extends NoteModel {
     ref: string;
     refAddress: { row: number; col: number; address: string; $col$row?: string };
+}
+
+/**
+ * The VML shape of a note (comment/vml-shape-xform parse): its box settings, as written in the file (unvalidated
+ * strings). worksheet-xform reconcile merges it into the `note` of the {@link NoteModel} at the same index.
+ */
+export interface VmlNoteShapeModel {
+    margins: {
+        /** `o:insetmode` of `<v:shape>` (`auto` / `custom`). */
+        insetmode: string | undefined;
+        /** `inset` of `<v:textbox>`, in cm (left, top, right, bottom); invalid: `undefined`; no `<v:textbox>`: `null`. */
+        inset?: number[] | null;
+    };
+    /** The text of `<x:Anchor>` ("col, dx, row, dy, col, dx, row, dy"); `null` without `<x:ClientData>`. */
+    anchor: string | null | undefined;
+    /** From `<x:MoveWithCells>` / `<x:SizeWithCells>`: `twoCells`, `oneCells` or `absolute`; `null` without `<x:ClientData>`. */
+    editAs: string | null | undefined;
+    /** The texts of `<x:Locked>` / `<x:LockText>` (`True` / `False`); `null` without `<x:ClientData>`. */
+    protection: { locked?: string; lockText?: string } | null | undefined;
+}
+
+/** A VML drawing of notes, `xl/drawings/vmlDrawingN.vml` (comment/vml-notes-xform parse): the shapes, in order. */
+export interface VmlNotesModel {
+    comments: VmlNoteShapeModel[];
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

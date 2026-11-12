@@ -1,21 +1,31 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { ColorModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-// Color encapsulates translation from color model to/from xlsx
-class ColorXform extends BaseXform {
-    constructor(name) {
+/**
+ * A color element (CT_Color, `<color>` by default; `<fgColor>`, `<bgColor>`, `<tabColor>`... with another name):
+ * `rgb`, `theme` (with `tint`) or `indexed`. A model without any of them renders `auto="1"`; an `auto` color (or one
+ * without a known attribute) parses as `undefined`.
+ */
+class ColorXform extends BaseXform<ColorModel> {
+    /** The name of the element. */
+    readonly name: string;
+
+    /** @param name - the name of the element (default `color`) */
+    constructor(name?: string) {
         super();
 
         // this.name controls the xm node name
         this.name = name || "color";
     }
 
-    get tag() {
+    get tag(): string {
         return this.name;
     }
 
-    render(xmlStream, model) {
+    /** @returns `true` when the element was written (the model is truthy) */
+    override render(xmlStream: XmlStream, model: ColorModel | undefined): boolean {
         if (model) {
             xmlStream.openNode(this.name);
             if (model.argb) {
@@ -36,17 +46,20 @@ class ColorXform extends BaseXform {
         return false;
     }
 
-    parseOpen(node) {
+    /** @returns `true` for its element */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === this.name) {
-            if (node.attributes.rgb) {
-                this.model = { argb: node.attributes.rgb };
-            } else if (node.attributes.theme) {
-                this.model = { theme: parseInt(node.attributes.theme, 10) };
-                if (node.attributes.tint) {
-                    this.model.tint = parseFloat(node.attributes.tint);
+            const { rgb, theme, tint, indexed } = node.attributes;
+            if (rgb) {
+                this.model = { argb: rgb };
+            } else if (theme) {
+                const model: ColorModel = { theme: parseInt(theme, 10) };
+                if (tint) {
+                    model.tint = parseFloat(tint);
                 }
-            } else if (node.attributes.indexed) {
-                this.model = { indexed: parseInt(node.attributes.indexed, 10) };
+                this.model = model;
+            } else if (indexed) {
+                this.model = { indexed: parseInt(indexed, 10) };
             } else {
                 this.model = undefined;
             }
@@ -55,9 +68,9 @@ class ColorXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

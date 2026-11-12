@@ -1,10 +1,18 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { XmlAttributes } from "../../../utils/xml-stream";
+import type { VmlNoteShapeModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 import VmlTextboxXform from "./vml-textbox-xform";
-import VmlClientDataXform from "./vml-client-data-xform";
+import VmlClientDataXform, { type VmlClientDataRenderModel } from "./vml-client-data-xform";
 
-class VmlShapeXform extends BaseXform {
+/**
+ * The VML shape of a note, `<v:shape>`: a hidden box with its text box and its Excel data (`<x:ClientData>`). Rendered
+ * for a note of the comments part, parsed as a {@link VmlNoteShapeModel} (the model of the xform is one or the other).
+ */
+class VmlShapeXform extends BaseXform<VmlNoteShapeModel | VmlClientDataRenderModel> {
+    declare map: { readonly "v:textbox": VmlTextboxXform; readonly "x:ClientData": VmlClientDataXform };
+
     constructor() {
         super();
         this.map = {
@@ -13,11 +21,12 @@ class VmlShapeXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "v:shape";
     }
 
-    render(xmlStream, model, index) {
+    /** @param index - the index of the shape: its id is `_x0000_s{1025 + index}` (see VmlNotesXform.shapeIndex) */
+    override render(xmlStream: XmlStream, model: VmlClientDataRenderModel, index: number): void {
         xmlStream.openNode("v:shape", VmlShapeXform.V_SHAPE_ATTRIBUTES(model, index));
 
         xmlStream.leafNode("v:fill", { color2: "infoBackground [80]" });
@@ -29,7 +38,8 @@ class VmlShapeXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<v:shape>` is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -47,23 +57,25 @@ class VmlShapeXform extends BaseXform {
                     protection: {},
                 };
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -71,25 +83,37 @@ class VmlShapeXform extends BaseXform {
             return true;
         }
         switch (name) {
-            case this.tag:
-                this.model.margins.inset = this.map["v:textbox"].model && this.map["v:textbox"].model.inset;
-                this.model.protection = this.map["x:ClientData"].model && this.map["x:ClientData"].model.protection;
-                this.model.anchor = this.map["x:ClientData"].model && this.map["x:ClientData"].model.anchor;
-                this.model.editAs = this.map["x:ClientData"].model && this.map["x:ClientData"].model.editAs;
+            case this.tag: {
+                // the model was created when the element opened; the children were reset then (null when absent)
+                const { model } = this;
+                if (model && "margins" in model) {
+                    const tb = this.map["v:textbox"].model;
+                    const textbox = tb && "inset" in tb ? tb : null;
+                    const cd = this.map["x:ClientData"].model;
+                    const clientData = cd && "protection" in cd ? cd : null;
+                    model.margins.inset = textbox && textbox.inset;
+                    model.protection = clientData && clientData.protection;
+                    model.anchor = clientData && clientData.anchor;
+                    model.editAs = clientData && clientData.editAs;
+                }
                 return false;
+            }
             default:
                 return true;
         }
     }
-}
 
-VmlShapeXform.V_SHAPE_ATTRIBUTES = (model, index) => ({
-    id: `_x0000_s${1025 + index}`,
-    type: "#_x0000_t202",
-    style: "position:absolute; margin-left:105.3pt;margin-top:10.5pt;width:97.8pt;height:59.1pt;z-index:1;visibility:hidden",
-    fillcolor: "infoBackground [80]",
-    strokecolor: "none [81]",
-    "o:insetmode": model.note.margins && model.note.margins.insetmode,
-});
+    /** @returns the attributes of `<v:shape>` for a note and its index */
+    static V_SHAPE_ATTRIBUTES(this: void, model: VmlClientDataRenderModel, index: number): XmlAttributes {
+        return {
+            id: `_x0000_s${1025 + index}`,
+            type: "#_x0000_t202",
+            style: "position:absolute; margin-left:105.3pt;margin-top:10.5pt;width:97.8pt;height:59.1pt;z-index:1;visibility:hidden",
+            fillcolor: "infoBackground [80]",
+            strokecolor: "none [81]",
+            "o:insetmode": model.note.margins && model.note.margins.insetmode,
+        };
+    }
+}
 
 export default VmlShapeXform;

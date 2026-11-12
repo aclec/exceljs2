@@ -1,46 +1,30 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { ProtectionModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-const validation = {
-    boolean(value, dflt) {
-        if (value === undefined) {
-            return dflt;
-        }
-        return value;
-    },
-};
-
-// Protection encapsulates translation from style.protection model to/from xlsx
-class ProtectionXform extends BaseXform {
-    get tag() {
+/**
+ * The protection of a cell format, `<protection locked hidden>`. Only the values that differ from the defaults (locked,
+ * not hidden) are written, and nothing when both are the defaults; parsing gives `null` when both are the defaults.
+ */
+class ProtectionXform extends BaseXform<ProtectionModel> {
+    get tag(): string {
         return "protection";
     }
 
-    render(xmlStream, model) {
-        xmlStream.addRollback();
-        xmlStream.openNode("protection");
-
-        let isValid = false;
-        function add(name, value) {
-            if (value !== undefined) {
-                xmlStream.addAttribute(name, value);
-                isValid = true;
-            }
-        }
-        add("locked", validation.boolean(model.locked, true) ? undefined : "0");
-        add("hidden", validation.boolean(model.hidden, false) ? "1" : undefined);
-
-        xmlStream.closeNode();
-
-        if (isValid) {
-            xmlStream.commit();
-        } else {
-            xmlStream.rollback();
+    override render(xmlStream: XmlStream, model: ProtectionModel): void {
+        const locked = model.locked === undefined ? true : model.locked;
+        const hidden = model.hidden === undefined ? false : model.hidden;
+        if (!locked || hidden) {
+            xmlStream.leafNode("protection", {
+                locked: locked ? undefined : "0",
+                hidden: hidden ? "1" : undefined,
+            });
         }
     }
 
-    parseOpen(node) {
+    /** Reads `<protection>` (returns nothing: the parent decides when to delegate to this xform). */
+    override parseOpen(node: SaxTag): void {
         const model = {
             locked: !(node.attributes.locked === "0"),
             hidden: node.attributes.hidden === "1",
@@ -52,9 +36,9 @@ class ProtectionXform extends BaseXform {
         this.model = isSignificant ? model : null;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

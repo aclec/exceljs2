@@ -1,22 +1,57 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { FontModel } from "../../../types";
 import ColorXform from "./color-xform";
 import BooleanXform from "../simple/boolean-xform";
 import IntegerXform from "../simple/integer-xform";
 import StringXform from "../simple/string-xform";
 import UnderlineXform from "./underline-xform";
 
-import _ from "../../../utils/under-dash";
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry, type AnyXform } from "../base-xform";
 
-// Font encapsulates translation from font model to xlsx
-class FontXform extends BaseXform {
-    constructor(options) {
+/** The options of a {@link FontXform}: the names of its element and of its font name element. */
+export interface FontXformOptions {
+    /** The font element: `font` (styles part), `rPr` (rich text run). */
+    readonly tagName: string;
+    /** The font name element: `name` (styles part), `rFont` (rich text run). */
+    readonly fontNameTag: string;
+}
+
+/** A child element of a font: the model property it holds, and its xform (whose model is that property). */
+interface FontEntry {
+    readonly prop: keyof FontModel;
+    readonly xform: AnyXform;
+}
+
+/**
+ * A font (CT_Font, or CT_RPrElt for the run of a rich text): one child element per property of {@link FontModel}, in
+ * the order of the map (`b`, `i`, `u`, `charset`, `color`, `condense`, `extend`, `family`, `outline`, `vertAlign`,
+ * `scheme`, `shadow`, `strike`, `sz`, then the name). Parsing keeps the properties whose value is truthy.
+ */
+class FontXform extends BaseXform<FontModel> {
+    /** The options of the font of the styles part. */
+    static readonly OPTIONS: FontXformOptions = {
+        tagName: "font",
+        fontNameTag: "name",
+    };
+
+    /** The element names. */
+    readonly options: FontXformOptions;
+
+    declare map: Readonly<Record<string, FontEntry>>;
+
+    /** The entries of {@link map}, in render order. */
+    private readonly entries: readonly FontEntry[];
+
+    /** While parsing: the entry of the child being parsed. */
+    private entry?: FontEntry;
+
+    constructor(options?: FontXformOptions) {
         super();
 
         this.options = options || FontXform.OPTIONS;
 
-        this.map = {
+        const map: Record<string, FontEntry> = {
             b: { prop: "bold", xform: new BooleanXform({ tag: "b", attr: "val" }) },
             i: { prop: "italic", xform: new BooleanXform({ tag: "i", attr: "val" }) },
             u: { prop: "underline", xform: new UnderlineXform() },
@@ -32,33 +67,42 @@ class FontXform extends BaseXform {
             strike: { prop: "strike", xform: new BooleanXform({ tag: "strike", attr: "val" }) },
             sz: { prop: "size", xform: new IntegerXform({ tag: "sz", attr: "val" }) },
         };
-        this.map[this.options.fontNameTag] = {
+        map[this.options.fontNameTag] = {
             prop: "name",
             xform: new StringXform({ tag: this.options.fontNameTag, attr: "val" }),
         };
+        this.map = map;
+        this.entries = Object.values(map);
     }
 
-    get tag() {
+    get tag(): string {
         return this.options.tagName;
     }
 
-    render(xmlStream, model) {
-        const { map } = this;
+    override render(xmlStream: XmlStream, model: FontModel): void {
+        const { entries } = this;
 
         xmlStream.openNode(this.options.tagName);
-        _.each(this.map, (defn, tag) => {
-            map[tag].xform.render(xmlStream, model[defn.prop]);
-        });
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i]!;
+            entry.xform.render(xmlStream, model[entry.prop]);
+        }
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /**
+     * @returns `true` for the font element (and its descendants while a child is parsed), `false` for an unknown
+     *   element; for a property element, what its xform returns (nothing for most)
+     */
+    override parseOpen(node: SaxTag): boolean | void {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
         }
-        if (this.map[node.name]) {
-            this.parser = this.map[node.name].xform;
+        const entry = ownEntry(this.map, node.name);
+        if (entry) {
+            this.entry = entry;
+            this.parser = entry.xform;
             return this.parser.parseOpen(node);
         }
         switch (node.name) {
@@ -70,19 +114,21 @@ class FontXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser && !this.parser.parseClose(name)) {
-            const item = this.map[name];
-            if (this.parser.model) {
-                this.model[item.prop] = this.parser.model;
+            const value = this.parser.model;
+            if (value && this.entry && this.model) {
+                // each xform of the map parses the type of the property it is mapped to
+                (this.model as Record<keyof FontModel, unknown>)[this.entry.prop] = value;
             }
             this.parser = undefined;
+            this.entry = undefined;
             return true;
         }
         switch (name) {
@@ -93,10 +139,5 @@ class FontXform extends BaseXform {
         }
     }
 }
-
-FontXform.OPTIONS = {
-    tagName: "font",
-    fontNameTag: "name",
-};
 
 export default FontXform;

@@ -5,7 +5,7 @@
 // them; pivot tables are left `unknown`.
 
 import type { CalculationProperties, WorkbookProperties } from "../../index";
-import type { DrawingModel, NoteModel, TableModel, WorksheetModel, ParsedWorksheetModel } from "./sheet";
+import type { DrawingModel, NoteModel, TableModel, VmlNotesModel, WorksheetModel, ParsedWorksheetModel } from "./sheet";
 import type { SharedStringValue } from "./strings";
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -196,8 +196,8 @@ export interface WorkbookReadModel extends CoreModel {
     comments: Record<string, { comments: NoteModel[] }>;
     /** table part name → table */
     tables: Record<string, TableModel>;
-    /** VML part name → its shapes (PARTIAL) */
-    vmlDrawings: Record<string, { comments: unknown[] }>;
+    /** VML part name → its shapes */
+    vmlDrawings: Record<string, VmlNotesModel>;
     globalRels?: RelationshipModel[];
     workbookRels?: RelationshipModel[];
     sheets?: SheetDefModel[];
