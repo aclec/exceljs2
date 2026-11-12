@@ -59,7 +59,36 @@ All fixes have regression tests in `spec/integration/security`.
 
 ### Bug fixes
 
-<!-- TODO(5.0.0): complete after merging the bug-fix branches. -->
+Upstream numbers refer to issues / pull requests of exceljs/exceljs that reported the bug. Every fix was re-implemented in this fork (no
+upstream PR code was merged) and has a regression test.
+
+- Files reported as corrupt by Excel:
+    - worksheet elements written in `CT_Worksheet` order, by both writers (`legacyDrawing` #2079; streaming writer #2685, #2803); `sheetPr`
+      children order (#2807); data bar extension colour order (#2651);
+    - multiple print areas written as one `_xlnm.Print_Area` name, whole-column/row print areas, apostrophes in sheet names (#1516, #3071);
+    - `theme1.xml` always written (#2009); comment VML shape ids unique per sheet, both writers (#3070); unique picture `creationId`
+      (#3092); the right image when pictures repeat (#3094);
+    - empty rich-text runs (#2737); distinct rich-text shared strings in the streaming writer (#2588); dxf number format written as
+      `[object Object]` (#2698).
+- Data lost or wrong on read:
+    - rows/cells without an `r` attribute (#2962, both readers); `t="d"` ISO 8601 date cells (#2702, both readers);
+    - falsy formula results (#3048); only numeric formula results converted to dates (#3111);
+    - leading plain text of mixed rich-text strings (#3091); explicit `val="0"`/`"false"` boolean attributes (#2095, #2851, #3057);
+    - hyperlink `location` (#2002); table columns after a column with child elements (#1936); table `filterColumn` matched by `colId`
+      (#2978); filter buttons kept visible on round trip; `headerRowCount` default and no `autoFilter` without a header row (#1345); x14
+      `expression`/`cellIs` conditional formats (#1767); `stopIfTrue` (#2736);
+    - column width 9 when the sheet default differs (#3088); sheet names longer than 31 characters (#3087).
+- Files that failed to load: unusual `docProps` parts (#2846); relationships to missing or absolute-path parts and VML notes (#3051, #3105);
+  unmodelled table filter elements such as `dynamicFilter` (#2973); bare data bars and rules without formulae on write (#3019, #2883).
+- Streaming reader: rejects instead of hanging or crashing on truncated/corrupt input and always removes its temp files (#2148); waits for
+  `workbook.xml`/styles before parsing sheets stored earlier in the zip (#2790, #2915, #3095); UTF-8 characters split across chunks (#1665,
+  #2894, #3102); column definitions, hidden rows, sheet format properties (#2800); absolute relationship targets (#2671); options passed to
+  `read()`/`parse()` merged with the defaults; `sharedStrings: 'emit'` emits again.
+- Document model: setting a style property on a cell no longer restyles every cell sharing a loaded style, while merged cells still share
+  the master style (#2055, #2781); `spliceRows` stale rows (#1600); column keys / table names / CSV headers named like `Object.prototype`
+  members (#2080).
+- CSV: whitespace-only cells stay strings (#2752); integers beyond `Number.MAX_SAFE_INTEGER` stay strings (#1743); `parserOptions.headers`
+  support (#2080).
 
 - Streaming reader: worksheets and shared strings were silently dropped when the zip stream ended before all entries had been read (#2790,
   #2915, #3095).

@@ -40,7 +40,10 @@
         "index.d.ts",
         "LICENSE",
         "README.md",
-        "README_zh.md"
+        "README_zh.md",
+        "CHANGELOG.md",
+        "UPGRADE-5.0.md",
+        "SECURITY.md"
     ],
     "scripts": {
         "build": "node scripts/build.mjs",

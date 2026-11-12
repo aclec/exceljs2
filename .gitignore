@@ -32,6 +32,7 @@ spec/integration/data/gold
 # graphify: keep GRAPH_REPORT.md and graph.json, ignore the cache and generated HTML
 /graphify-out/cache/
 /graphify-out/*.html
+/graphify-out/.graphify_*
 
 # optional switch off tests
 .disable-test-*
@@ -51,3 +52,4 @@ Thumbs.db
 
 # Temporary files
 /tmp/
+/tasks/
