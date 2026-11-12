@@ -1,6 +1,7 @@
 // Reading xlsx files written by other producers (Excel, LibreOffice, openpyxl, POI, hand-edited):
 // legal-but-unusual XML must load, malformed parts must not crash with a TypeError.
 // Fixtures are built with ExcelJS and patched with xlsx-tamper so they stay readable.
+const { Readable } = require("stream");
 const { baseWorkbookBuffer, editParts, tamper, readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
@@ -321,6 +322,45 @@ describe("xlsx read robustness", function () {
             expect(ws.getCell("B2").result).to.equal(true);
             expect(ws.getCell("C2").result).to.deep.equal({ error: "#DIV/0!" });
             expect(ws.getCell("D2").result).to.deep.equal(new Date(Date.UTC(2024, 1, 21)));
+        });
+    });
+
+    describe("truncated parts", () => {
+        async function truncatedSheetBuffer() {
+            const buffer = await baseWorkbookBuffer((wb, ws) => {
+                for (let row = 1; row <= 50; row++) {
+                    ws.getCell(row, 1).value = row;
+                }
+            });
+            return tamper(buffer, { [SHEET]: (xml) => xml.slice(0, Math.floor(xml.length / 2)) });
+        }
+
+        it("rejects a worksheet whose XML ends before the end of the document", async () => {
+            const error = await load(await truncatedSheetBuffer()).then(
+                () => undefined,
+                (e) => e
+            );
+            expect(error).to.be.an("error");
+            expect(error.message).to.match(/unclosed tag/);
+        });
+
+        it("rejects it in the streaming reader too", async () => {
+            let rows = 0;
+            const read = async () => {
+                for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([await truncatedSheetBuffer()]))) {
+                    // eslint-disable-next-line no-unused-vars
+                    for await (const row of worksheet) {
+                        rows++;
+                    }
+                }
+            };
+            const error = await read().then(
+                () => undefined,
+                (e) => e
+            );
+            expect(error).to.be.an("error");
+            expect(error.message).to.match(/unclosed tag/);
+            expect(rows).to.be.below(50);
         });
     });
 
