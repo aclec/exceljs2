@@ -477,4 +477,25 @@ describe('WorkbookReader (stream)', () => {
       'row [null,{"sharedString":0}]',
     ]);
   });
+
+  it('emits shared strings in sharedStrings: emit mode', async () => {
+    const buffer = await baseWorkbookBuffer((wb, ws) => {
+      ws.getCell('B1').value = {richText: [{font: {bold: true}, text: 'bold'}]};
+    });
+    const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer), {
+      sharedStrings: 'emit',
+      worksheets: 'ignore',
+    });
+    const strings = [];
+    await new Promise((resolve, reject) => {
+      reader.on('shared-strings', value => strings.push(value));
+      reader.on('end', resolve);
+      reader.on('error', reject);
+      reader.read();
+    });
+    expect(strings).to.deep.equal([
+      {index: 0, text: 'hello'},
+      {index: 1, text: {richText: [{font: {bold: true}, text: 'bold'}]}},
+    ]);
+  });
 });
