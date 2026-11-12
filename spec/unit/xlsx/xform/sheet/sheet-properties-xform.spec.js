@@ -1,5 +1,6 @@
 const testXformHelper = require('../test-xform-helper');
 
+const XmlStream = verquire('utils/xml-stream');
 const SheetPropertiesXform = verquire(
   'xlsx/xform/sheet/sheet-properties-xform'
 );
@@ -89,7 +90,7 @@ const expectations = [
       outlineProperties: {summaryBelow: false},
     },
     xml:
-      '<sheetPr><pageSetUpPr fitToPage="1"/><outlinePr summaryBelow="0"/></sheetPr>',
+      '<sheetPr><outlinePr summaryBelow="0"/><pageSetUpPr fitToPage="1"/></sheetPr>',
     parsedModel: {
       pageSetup: {fitToPage: true},
       outlineProperties: {summaryBelow: false},
@@ -119,4 +120,17 @@ const expectations = [
 
 describe('SheetPropertiesXform', () => {
   testXformHelper(expectations);
+
+  // chai-xml ignores sibling order, so check the CT_SheetPr sequence on the raw string
+  it('renders children in CT_SheetPr order (tabColor, outlinePr, pageSetUpPr)', () => {
+    const xmlStream = new XmlStream();
+    new SheetPropertiesXform().render(xmlStream, {
+      pageSetup: {fitToPage: true},
+      outlineProperties: {summaryBelow: false},
+      tabColor: {argb: 'FFFF0000'},
+    });
+    expect(xmlStream.xml).to.equal(
+      '<sheetPr><tabColor rgb="FFFF0000"/><outlinePr summaryBelow="0"/><pageSetUpPr fitToPage="1"/></sheetPr>'
+    );
+  });
 });

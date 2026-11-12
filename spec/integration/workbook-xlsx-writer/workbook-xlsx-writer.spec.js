@@ -606,11 +606,10 @@ describe('WorkbookWriter', () => {
       const ws2 = wb2.getWorksheet(sheet);
       const [cf2] = ws2.conditionalFormattings;
 
-      // verify that rules from generated file contain styles with valid numFmt
-      cf2.rules.forEach(rule => {
-        expect(rule.style.numFmt).to.exist();
-        expect(rule.style.numFmt.id).to.be.a('number');
-        expect(rule.style.numFmt.formatCode).to.be.a('string');
+      // verify that rules from generated file contain styles with valid numFmt:
+      // like cell styles, a dxf numFmt is the format code string (NumFmtXform drops `\` escapes)
+      cf2.rules.forEach((rule, index) => {
+        expect(rule.style.numFmt).to.equal(cf1.rules[index].style.numFmt.replace(/\\(.)/g, '$1'));
       });
     });
   });

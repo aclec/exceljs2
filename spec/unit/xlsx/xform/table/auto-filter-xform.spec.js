@@ -31,7 +31,7 @@ const expectations = [
       '<filterColumn colId="2" hiddenButton="0" />' +
       '</autoFilter>',
     get parsedModel() {
-      return this.initialModel;
+      return this.preparedModel;
     },
     tests: ['prepare', 'render', 'renderIn', 'parse'],
   },

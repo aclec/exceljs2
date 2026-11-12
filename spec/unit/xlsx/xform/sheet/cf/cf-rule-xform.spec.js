@@ -28,6 +28,44 @@ const expectations = [
     tests: ['render', 'parse'],
   },
   {
+    title: 'Expression without formulae',
+    create() {
+      return new CfRuleXform();
+    },
+    preparedModel: {
+      type: 'expression',
+      dxfId: 1,
+      priority: 1,
+    },
+    xml: '<cfRule type="expression" dxfId="1" priority="1"/>',
+    parsedModel: {
+      type: 'expression',
+      dxfId: 1,
+      priority: 1,
+    },
+    tests: ['render', 'parse'],
+  },
+  {
+    title: 'Cell Is without formulae',
+    create() {
+      return new CfRuleXform();
+    },
+    preparedModel: {
+      type: 'cellIs',
+      dxfId: 1,
+      priority: 1,
+      operator: 'greaterThan',
+    },
+    xml: '<cfRule type="cellIs" dxfId="1" priority="1" operator="greaterThan"/>',
+    parsedModel: {
+      type: 'cellIs',
+      dxfId: 1,
+      priority: 1,
+      operator: 'greaterThan',
+    },
+    tests: ['render', 'parse'],
+  },
+  {
     title: 'Cell Is',
     create() {
       return new CfRuleXform();
