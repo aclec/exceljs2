@@ -2,18 +2,62 @@ name: Asset size
 
 on: [pull_request]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HUSKY: 0
+
+# Builds the browser bundles of the pull request and of its base branch and writes a size comparison
+# to the job summary. (Replaces chrysanthos/simple-asset-size-reporter, an unmaintained third-party
+# action that needed a write token to comment on the pull request.)
 jobs:
   compare:
     timeout-minutes: 15
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: chrysanthos/simple-asset-size-reporter@1.0.2
+          path: head
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          files: '["dist/*.js"]'
-          with-same: "false"
-          build-assets: "npm run install-build"
+          ref: ${{ github.base_ref }}
+          path: base
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: Build pull request
+        working-directory: head
+        run: bun install --frozen-lockfile && bun run build
+      - name: Build base branch
+        working-directory: base
+        # the base branch may predate the bun/esbuild toolchain: then only the PR sizes are reported
+        run: |
+          if [ -f scripts/build.mjs ] && [ -f bun.lock ]; then
+            bun install --frozen-lockfile && bun run build
+          else
+            echo "base branch has no scripts/build.mjs, skipping"
+          fi
+      - name: Report sizes
+        shell: bash
+        run: |
+          size() { [ -f "$1" ] && wc -c < "$1" | tr -d ' ' || echo '-'; }
+          gzsize() { [ -f "$1" ] && gzip -9c "$1" | wc -c | tr -d ' ' || echo '-'; }
+          {
+            echo '| file | base | PR | PR gzip |'
+            echo '|---|---:|---:|---:|'
+            for f in head/dist/*.js; do
+              name=$(basename "$f")
+              echo "| $name | $(size "base/dist/$name") | $(size "$f") | $(gzsize "$f") |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
