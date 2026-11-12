@@ -1931,6 +1931,9 @@ worksheet.addConditionalFormatting({
 | Operator          | Description |
 | ----------------- | ----------- |
 | containsText      | Apply format if cell value contains the value specified in the 'text' field |
+| notContainsText   | Apply format if cell value does not contain the value specified in the 'text' field |
+| beginsWith        | Apply format if cell value begins with the value specified in the 'text' field |
+| endsWith          | Apply format if cell value ends with the value specified in the 'text' field |
 | containsBlanks    | Apply format if cell value contains blanks |
 | notContainsBlanks | Apply format if cell value does not contain blanks |
 | containsErrors    | Apply format if cell value contains errors |

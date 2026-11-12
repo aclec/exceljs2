@@ -1048,7 +1048,15 @@ export type WorksheetState = "visible" | "hidden" | "veryHidden";
 export type CellIsOperators =
     "equal" | "notEqual" | "greaterThan" | "greaterThanOrEqual" | "lessThan" | "lessThanOrEqual" | "between" | "notBetween";
 
-export type ContainsTextOperators = "containsText" | "containsBlanks" | "notContainsBlanks" | "containsErrors" | "notContainsErrors";
+export type ContainsTextOperators =
+    | "containsText"
+    | "notContainsText"
+    | "beginsWith"
+    | "endsWith"
+    | "containsBlanks"
+    | "notContainsBlanks"
+    | "containsErrors"
+    | "notContainsErrors";
 
 export type TimePeriodTypes =
     "lastWeek" | "thisWeek" | "nextWeek" | "yesterday" | "today" | "tomorrow" | "last7Days" | "lastMonth" | "thisMonth" | "nextMonth";
@@ -1145,8 +1153,18 @@ export interface IconSetRuleType extends ConditionalFormattingBaseRule {
 
 export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
     type: "containsText";
+    /**
+     * Defaults to "containsText"
+     */
     operator?: ContainsTextOperators;
+    /**
+     * The text compared by the containsText, notContainsText, beginsWith and endsWith operators
+     */
     text?: string;
+    /**
+     * Written instead of the formula derived from the operator and text
+     */
+    formulae?: any[];
 }
 
 export interface TimePeriodRuleType extends ConditionalFormattingBaseRule {

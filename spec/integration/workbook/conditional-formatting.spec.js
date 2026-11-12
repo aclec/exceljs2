@@ -1,4 +1,5 @@
-// Conditional formats round-tripped through their x14 extension (<extLst> of the worksheet).
+// Conditional formats written and read back, in the main section and in the x14 extension (<extLst>)
+// of the worksheet.
 const { baseWorkbookBuffer, tamper, readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
@@ -34,8 +35,8 @@ async function sourceWith(conditionalFormattings, ext) {
     });
 }
 
-describe("conditional formatting x14 extension", () => {
-    describe("dataBar", () => {
+describe("conditional formatting", () => {
+    describe("dataBar x14 extension", () => {
         // as written by Excel: the main rule references its x14 counterpart by id
         const mainDataBar = (id, priority) =>
             `<cfRule type="dataBar" priority="${priority}"><dataBar><cfvo type="min"/><cfvo type="max"/>` +
@@ -121,6 +122,48 @@ describe("conditional formatting x14 extension", () => {
                 rules: [{ type: "dataBar", gradient: true, cfvo: [{ type: "autoMin" }, { type: "max" }] }],
             });
             expect(extSection(await readPart(await wb.xlsx.writeBuffer(), SHEET))).to.include("<xm:sqref>C1:C5</xm:sqref>");
+        });
+    });
+
+    describe("text rules", () => {
+        const bold = { font: { bold: true } };
+
+        it("are written with their type, operator, text and formula, and read back", async () => {
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet("Sheet1");
+            ws.addConditionalFormatting({
+                ref: "A1:A5",
+                rules: [
+                    { type: "containsText", operator: "containsText", text: "ab", style: bold },
+                    { type: "containsText", operator: "notContainsText", text: "ab", style: bold },
+                    { type: "containsText", operator: "beginsWith", text: 'say "hi"', style: bold },
+                    { type: "containsText", operator: "endsWith", text: "ab", style: bold },
+                    { type: "containsText", operator: "containsBlanks", style: bold },
+                    { type: "containsText", text: "x", style: bold },
+                ],
+            });
+            const buffer = await wb.xlsx.writeBuffer();
+            const xml = await readPart(buffer, SHEET);
+            [
+                '<cfRule type="containsText" dxfId="0" priority="1" operator="containsText" text="ab"><formula>NOT(ISERROR(SEARCH(&quot;ab&quot;,A1)))</formula></cfRule>',
+                '<cfRule type="notContainsText" dxfId="1" priority="2" operator="notContains" text="ab"><formula>ISERROR(SEARCH(&quot;ab&quot;,A1))</formula></cfRule>',
+                '<cfRule type="beginsWith" dxfId="2" priority="3" operator="beginsWith" text="say &quot;hi&quot;"><formula>LEFT(A1,LEN(&quot;say &quot;&quot;hi&quot;&quot;&quot;))=&quot;say &quot;&quot;hi&quot;&quot;&quot;</formula></cfRule>',
+                '<cfRule type="endsWith" dxfId="3" priority="4" operator="endsWith" text="ab"><formula>RIGHT(A1,LEN(&quot;ab&quot;))=&quot;ab&quot;</formula></cfRule>',
+                // containsBlanks is not an ST_ConditionalFormattingOperator
+                '<cfRule type="containsBlanks" dxfId="4" priority="5"><formula>LEN(TRIM(A1))=0</formula></cfRule>',
+                '<cfRule type="containsText" dxfId="5" priority="6" operator="containsText" text="x"><formula>NOT(ISERROR(SEARCH(&quot;x&quot;,A1)))</formula></cfRule>',
+            ].forEach((rule) => expect(xml).to.include(rule));
+
+            const [cf] = (await load(buffer)).getWorksheet("Sheet1").conditionalFormattings;
+            expect(cf.rules.map(({ type, operator, text }) => [type, operator, text])).to.deep.equal([
+                ["containsText", "containsText", "ab"],
+                ["containsText", "notContainsText", "ab"],
+                ["containsText", "beginsWith", 'say "hi"'],
+                ["containsText", "endsWith", "ab"],
+                ["containsText", "containsBlanks", undefined],
+                ["containsText", "containsText", "x"],
+            ]);
+            expect(cf.rules[2].formulae).to.deep.equal(['LEFT(A1,LEN("say ""hi"""))="say ""hi"""']);
         });
     });
 });
