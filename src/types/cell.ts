@@ -67,8 +67,8 @@ export interface NumberCellModel extends CellModelBase {
 export interface StringCellModel extends CellModelBase {
     type: typeof ValueType.String | typeof ValueType.RichText;
     value: string | RichTextValue;
-    /** JSON values only: the value itself. */
-    rawValue?: unknown;
+    /** JSON values only: the value itself (any object that is not another kind of value). */
+    rawValue?: object;
     /** prepare: the shared string index, when shared strings are used. */
     ssId?: number;
 }
@@ -116,10 +116,13 @@ export interface FormulaCellModel extends CellModelBase {
     date1904?: true;
 }
 
-/** A shared string index (stream reader only: prepare and render ignore this type, the cell renders as `<c r s/>`). */
+/**
+ * A shared string index (stream reader only: prepare and render ignore this type, the cell renders as `<c r s/>`). A
+ * cell set to a `{ sharedString }` value (legacy) holds that object as its value.
+ */
 export interface SharedStringCellModel extends CellModelBase {
     type: typeof ValueType.SharedString;
-    value: number;
+    value: number | { readonly sharedString: unknown };
 }
 
 /** A boolean. */
