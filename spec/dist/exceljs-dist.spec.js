@@ -3,6 +3,7 @@
 // Checks the output of `bun run build` (run it first).
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const DIST = path.resolve(__dirname, "../../dist");
 const BUNDLES = ["exceljs.js", "exceljs.min.js", "exceljs.bare.js", "exceljs.bare.min.js"];
@@ -52,6 +53,17 @@ describe("ExcelJS", () => {
                     ws.insertRow(1, ["new"]);
                     expect(ws.getCell("B3").isMerged).to.equal(true);
                     expect(ws.getCell("B3").master.address).to.equal("A3");
+                });
+
+                it("loads without a warning (no access to globalThis.localStorage, which Node.js 25+ warns about)", () => {
+                    const { stderr, status } = spawnSync(
+                        process.execPath,
+                        ["-e", `const ExcelJS = require(${JSON.stringify(file)}); new ExcelJS.Workbook().addWorksheet("s");`],
+                        { encoding: "utf8" }
+                    );
+                    expect(status).to.equal(0);
+                    expect(stderr).to.equal("");
+                    expect(fs.readFileSync(file, "utf8")).not.to.include("localStorage");
                 });
 
                 it("compresses with the bundled fflate, not node:zlib", () => {
