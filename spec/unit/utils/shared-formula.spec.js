@@ -1,3 +1,6 @@
+const fs = require("fs");
+const path = require("path");
+
 const { slideFormula } = verquire("utils/shared-formula");
 const colCache = verquire("utils/col-cache");
 
@@ -67,6 +70,29 @@ describe("shared-formula", () => {
                 }
                 expect(outcome(slideFormula, formula, "B2", "C5"), formula).to.equal(outcome(referenceSlideFormula, formula, "B2", "C5"));
             }
+        });
+
+        it("treats a name only as a sheet name from the start of a token", () => {
+            // unquoted sheet names that look like references are not valid Excel; the former regular expression
+            // could take 'A1!' here for a sheet name because its match started inside the token 'ab-A1'
+            expect(slideFormula("x$ab-A1!C3", "A1", "B2")).to.equal("x$ab-B2!D4");
+            expect(slideFormula("Sheet-1!A1+'My Sheet'!B2", "A1", "B2")).to.equal("Sheet-1!B2+'My Sheet'!C3");
+        });
+
+        it("does not use regular expression lookbehind (unsupported before Safari 16.4)", () => {
+            const libDir = path.join(__dirname, "../../../lib");
+            const offenders = [];
+            const visit = (dir) =>
+                fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
+                    const file = path.join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        visit(file);
+                    } else if (entry.name.endsWith(".js") && /\(\?<[!=]/.test(fs.readFileSync(file, "utf8"))) {
+                        offenders.push(path.relative(libDir, file));
+                    }
+                });
+            visit(libDir);
+            expect(offenders).to.deep.equal([]);
         });
 
         it("translates a long formula in linear time", () => {
