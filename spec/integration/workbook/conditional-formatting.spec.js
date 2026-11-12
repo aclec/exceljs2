@@ -83,7 +83,7 @@ describe("conditional formatting", () => {
             expect(xml).to.include('<dataBar><cfvo type="num" val="0"/><cfvo type="max"/>');
             const ext = extSection(xml);
             expect(ext).to.include(
-                '<x14:dataBar minLength="0" maxLength="100" border="1" negativeBarColorSameAsPositive="0" ' +
+                '<x14:dataBar minLength="0" maxLength="100" border="1" ' +
                     'negativeBarBorderColorSameAsPositive="0" axisPosition="middle"><x14:cfvo type="autoMin"/>' +
                     '<x14:cfvo type="autoMax"/><x14:borderColor rgb="FF638EC6"/><x14:negativeFillColor rgb="FFFF0000"/>' +
                     '<x14:negativeBorderColor rgb="FFFF0000"/><x14:axisColor rgb="FF000000"/></x14:dataBar>'
@@ -96,6 +96,38 @@ describe("conditional formatting", () => {
 
             const back = await load(buffer);
             expect(snapshot(back.getWorksheet("Sheet1").conditionalFormattings)).to.deep.equal(before);
+        });
+
+        it("keeps the settings Excel writes when they differ from the schema defaults", async () => {
+            const main =
+                '<conditionalFormatting sqref="C1:C5"><cfRule type="dataBar" priority="1"><dataBar showValue="0">' +
+                '<cfvo type="min"/><cfvo type="max"/><color rgb="FF638EC6"/></dataBar><extLst>' +
+                '<ext uri="{B025F937-C7B1-47D3-B67F-A62EFF666E3E}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">' +
+                `<x14:id>${ID1}</x14:id></ext></extLst></cfRule></conditionalFormatting>`;
+            // [MS-XLSX] CT_DataBar defaults: minLength 10, maxLength 90, negativeBarColorSameAsPositive false,
+            // direction context
+            const ext = extLst(
+                x14Cf(
+                    "C1:C5",
+                    `<x14:cfRule type="dataBar" id="${ID1}"><x14:dataBar negativeBarColorSameAsPositive="1" ` +
+                        'direction="leftToRight"><x14:cfvo type="autoMin"/><x14:cfvo type="autoMax"/></x14:dataBar></x14:cfRule>'
+                )
+            );
+            const wb = await load(await sourceWith(main, ext));
+            const [rule] = wb.getWorksheet("Sheet1").conditionalFormattings[0].rules;
+            expect(rule).to.include({
+                showValue: false,
+                minLength: 10,
+                maxLength: 90,
+                negativeBarColorSameAsPositive: true,
+                direction: "leftToRight",
+            });
+
+            const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
+            expect(xml).to.include('<dataBar showValue="0"><cfvo type="min"/>');
+            expect(extSection(xml)).to.include(
+                '<x14:dataBar minLength="10" maxLength="90" negativeBarColorSameAsPositive="1" direction="leftToRight">'
+            );
         });
 
         it("created with x14 settings is written with its extension, even with a gradient", async () => {
