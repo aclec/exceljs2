@@ -466,6 +466,38 @@ describe("WorkbookReader (stream)", () => {
         expect(sheets.map((sheet) => sheet.name)).to.deep.equal(["Sheet1", "Named"]);
     });
 
+    it("names many worksheets among many relationships in linear time", async function () {
+        this.timeout(20000);
+        const W = 3000;
+        const NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+        const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        // the worksheet relationships come last: every lookup used to scan the 150,000 relationships and the sheets
+        let rels = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`;
+        rels += '<Relationship Id="x" Type="t" Target="other.xml"/>'.repeat(150000);
+        let sheets = "";
+        const parts = {};
+        for (let i = 1; i <= W; i++) {
+            rels += `<Relationship Id="rId${i}" Type="${R}/worksheet" Target="worksheets/sheet${i}.xml"/>`;
+            sheets += `<sheet name="S${i}" sheetId="${i}" r:id="rId${i}"/>`;
+        }
+        parts["xl/_rels/workbook.xml.rels"] = `${rels}</Relationships>`;
+        parts["xl/workbook.xml"] = `<workbook ${NS} xmlns:r="${R}"><sheets>${sheets}</sheets></workbook>`;
+        parts["xl/sharedStrings.xml"] = `<sst ${NS}/>`;
+        for (let i = 1; i <= W; i++) {
+            parts[`xl/worksheets/sheet${i}.xml`] = `<worksheet ${NS}><sheetData/></worksheet>`;
+        }
+        const start = Date.now();
+        const names = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([zipParts(parts)]))) {
+            names.push(worksheet.name);
+        }
+        const ms = Date.now() - start;
+        expect(names).to.have.length(W);
+        expect(names[W - 1]).to.equal(`S${W}`);
+        // about 0.2 s; 7 s with the linear lookups
+        expect(ms).to.be.below(4000);
+    });
+
     describe("cell references", () => {
         async function rowsOf(buffer) {
             const [sheet] = await readAll(chunkedStream(buffer));
