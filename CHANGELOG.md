@@ -251,6 +251,28 @@ Found while porting to TypeScript (each with a regression test that fails on the
 - Malformed files: a part without `<workbook>` / `<worksheet>`, a conditional formatting rule without range, an unknown shared string index,
   an invalid data-validation range or a colorScale / iconSet without `cfvo` throw an explicit `Error` instead of a `TypeError`.
 
+Found while aligning the typings with the runtime (each with a regression test that fails before the fix):
+
+- Files Excel may reject: a sheet name in a merge reference (`mergeCells("Sheet1!A1:B2")`) was written into `<mergeCell>`; the streaming
+  writer wrote merge references without XML escaping; a gradient stop or a colour scale entry with an automatic colour lost its `<color>`;
+  `addPageBreak()` wrote `max="16838"` (the last column is 16383); `NoIcons` was written in the main `<iconSet>`; icon set names that are
+  not `ST_IconSetType` values were written as is.
+- Data lost or wrong on round trip: custom icon sets lost their icons, and `iconId` was overwritten with the icon position; font sizes with
+  decimals were read as integers (10.5 → 10); automatic colours were dropped; data-validation formulas that are references or formulas
+  (`$B$1`, `TODAY()`) were read as `NaN` / `Invalid Date` and written back as `NaN`; row breaks were not read; automatic page numbering
+  became "start at 1"; `date1904="true"` (a valid xsd:boolean) was read as false; `worksheet.model = other.model` dropped the merges.
+- Cell values: hyperlink, shared-string and formula values with an empty or zero marker (`{ text: "", hyperlink }`, `{ sharedString: 0 }`,
+  `{ formula: "", result }`) were stored as JSON text; `cell.text` of a hyperlink whose text is a number or rich text was not a string; a
+  formula with a falsy result had an empty text.
+- Worksheets: `getCell("A0")`, `getCell(0, 1)` created a cell outside the grid, `getCell("foo")` threw an unrelated error,
+  `mergeCells(10, 10)` and `mergeCells()` registered broken merges, lowercase references merged the wrong cells, `fillFormula` ignored a
+  single cell or an invalid range and threw a `TypeError` with fewer result rows than the range: they throw a clear `Error` or work.
+- Defined names: removing a range (`remove("S!$A$1:$B$2", name)`, `removeEx(range)`) did nothing; removing one cell from a huge range kept
+  as a rectangle removed the whole range.
+- Tables: a row longer than the columns threw a `TypeError` and left a half-written table; a second `commit()` after a move cleared the
+  wrong cells; tables read from a file threw `TypeError`s from `height`, their mutators and style setters.
+- Streaming reader: `hyperlinks: "cache"` never read the hyperlink targets.
+
 ### Performance
 
 The TypeScript port was measured against the JavaScript code on every hot path (`bun run benchmark:suite`, median of 7 runs, Node 26):

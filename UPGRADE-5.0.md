@@ -280,6 +280,31 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
   `undefined`) that resolves once the output can take more data. `await worksheet.addRow(values).commit()` keeps memory bounded on large
   sheets; code that ignores the promise works as before (and keeps all the pending data in memory until it yields to the event loop). See
   the [README](README.md#streaming-xlsx). In TypeScript, `commit()` is typed `void | Promise<void>`.
+- **Invalid references throw.** `getCell`, `getRow`, `getRows`, `mergeCells`, `mergeCellsWithoutStyle`, `unMergeCells` and `fillFormula`
+  (document and streaming worksheets) throw a clear `Error` for an address or range they cannot place: row 0, NaN or fractional numbers,
+  bounds outside the grid, no arguments, unparsable or lowercase references (`"a1:b2"` merged A1:A2 in 4.x), or a sheet name other than the
+  worksheet's. The worksheet's own sheet name is accepted and dropped (`mergeCells("Sheet1!A1:B2")` on `Sheet1`). `findCell` returns
+  `undefined` in those cases. `fillFormula` stores its `ref` without sheet name or `$`, and fills a single cell (`"C3"`).
+- **Views and header/footer after a load.** `worksheet.views` and `workbook.views` are `[]`, and `worksheet.headerFooter` the default
+  object, for a file without them (4.x: `null` / `undefined`, so `views.push(...)` threw).
+- **Page setup.** Row breaks are read (at most 1,023, Excel's limit; invalid `<brk>` attributes reject the load). `firstPageNumber` is not
+  set when the file uses automatic numbering, and `useFirstPageNumber` is read and written as given (4.x read `firstPageNumber: 1`).
+- **Icon sets.** A rule read without `iconSet` has the schema default `"3TrafficLights1"` (4.x: `"3TrafficLights"`, which is not a valid
+  value; it is still accepted on write, as the default). Custom icons are written with their `iconId`, which is required (except for
+  `NoIcons`): 4.x replaced it with the icon position. A rule with `icons` is written in the x14 extension, also without `custom`. An unknown
+  icon set, an `iconId` outside its set or a number of icons different from the number of thresholds throws on write.
+- **Colours and fonts.** An automatic colour (`auto="1"`) reads as `{ auto: true }` (4.x: `undefined`); font sizes keep their decimals.
+- **Data-validation formulas** that are not plain numbers or dates (`$B$1`, `TODAY()`, `A1+1`) are read and written as text (4.x: `NaN`). A
+  `date` rule takes a `Date`, an ISO 8601 date string or a formula string; an invalid date or a non-finite number throws on write.
+- **Cell value markers** are recognised by their type, not their truthiness: `{ text: "", hyperlink }`, `{ sharedString: 0 }`,
+  `{ formula: "", result }` are hyperlink, shared string and formula values (4.x stored them as JSON text), and an object whose marker has
+  the wrong type (`{ formula: 1 }`, `{ richText: "x" }`) is a JSON value. `cell.text` is always a string.
+- **Defined names.** Removing a cell or a range from a range kept as a rectangle (more than 100,000 cells) keeps the rest of the range, cut
+  into at most four rectangles (4.x removed the whole range). Invalid range bounds throw.
+- **Tables.** `addTable`, `table.addRow`, `addColumn` and `commit` validate the whole table first and throw a clear `Error` (a row with more
+  values than columns, ...) without writing any cell; `getColumn(index)` out of range throws. A table read from a file without style returns
+  `null` / `undefined` for `theme` and the `show*` properties.
+- **Streaming reader hyperlinks.** With `hyperlinks: "cache"`, `worksheetReader.hyperlinks` entries have their `target` and `targetMode`.
 
 ## TypeScript
 
@@ -333,11 +358,10 @@ Values that are `undefined` or `null` in normal use now say so:
 | `row.height`                                                                                                    | optional                                             |
 | `row.model`                                                                                                     | getter `RowModel \| null`; the setter rejects `null` |
 | `worksheet.getSheetValues()`                                                                                    | `(CellValue[] \| undefined)[]` (sparse)              |
-| `worksheet.views`, `headerFooter`, `pageSetup.margins`                                                          | `\| null` for a sheet read from a file without them  |
+| `pageSetup.margins`                                                                                             | `\| null` for a sheet read from a file without them  |
 | `worksheet.columns`                                                                                             | getter `Column[] \| null`                            |
 | `worksheet.getTable()`, `findRows()` items, `insertRows()`, `getBackgroundImageId()`                            | `\| undefined`                                       |
 | `workbook.title`, `creator`, `created` and the other document properties                                        | `\| undefined` (absent in the file)                  |
-| `workbook.views`                                                                                                | `WorkbookView[] \| undefined` (a file without views) |
 | `workbook.getImage()`; streaming `getWorksheet()`, `getImage()`, `lastRow`, `findRow()`, `findCell()`           | `\| undefined`                                       |
 | `outlineProperties.summaryBelow` / `summaryRight`, `RowBreak.min`, `WorkbookView.firstSheet` / `activeTab`      | optional                                             |
 | Conditional-formatting `rule.style` parts (`DifferentialStyle`), gradient `degree` / stop `color`, `top10.rank` | `null` / optional as read from a file                |
@@ -356,7 +380,9 @@ Corrected signatures:
 - `fillFormula(range, ...)` takes an address string (a `Range` or `Location` threw); its `results` may hold strings and booleans; new
   `shareType`.
 - `mergeCells` / `unMergeCells` take the range arguments the runtime accepts (`RangeArguments`).
-- `Range.containsEx()` needs `row` and `col`; `definedNames.removeEx()` takes a cell (removing a range did nothing).
+- `Range.containsEx()` needs `row` and `col`.
+- `mergeCells()` / `unMergeCells()` without arguments no longer compile (they merged A1 or threw); `IconSetRuleType.iconSet` no longer
+  accepts `"3TrafficLights"` (not a schema value; still written as the default at run time); new `Color.auto`.
 - `addRow` / `insertRow` / `addRows` take `RowValues` and a `RowStyleOption` (`"n" | "i" | "i+" | "o" | "o+"`); `row.splice()` takes
   `CellValue`s; `TableProperties.rows` is `CellValue[][]`; conditional-formatting `formulae` are `CfFormula[]`
   (`string | number | boolean`), and `colorScale` / `iconSet` rules require `cfvo` (writing threw without them).
