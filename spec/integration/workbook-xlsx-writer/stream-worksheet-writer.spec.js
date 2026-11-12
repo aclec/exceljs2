@@ -132,4 +132,28 @@ describe('WorkbookWriter (stream)', () => {
     const xml = await readPart(buffer, 'xl/sharedStrings.xml');
     expect(xml).to.match(/<sst [^>]*uniqueCount="5"/);
   });
+
+  it('treats column keys named like Object.prototype members as plain keys', async () => {
+    let worksheet;
+    const buffer = await writeBuffer(wb => {
+      worksheet = wb.addWorksheet('Sheet');
+      expect(worksheet.getColumnKey('constructor')).to.equal(undefined);
+      worksheet.columns = [
+        {header: 'proto', key: '__proto__'},
+        {header: 'ctor', key: 'constructor'},
+        {header: 'name', key: 'name'},
+      ];
+      expect(worksheet.getColumn('constructor').number).to.equal(2);
+      expect(worksheet.getColumn('__proto__').number).to.equal(1);
+      // JSON.parse creates an own "__proto__" property (an object literal would not)
+      worksheet.addRow(JSON.parse('{"__proto__": "p", "constructor": "c", "name": "n"}')).commit();
+    });
+    const keys = [];
+    worksheet.eachColumnKey((column, key) => keys.push(`${key}:${column.number}`));
+    expect(keys).to.deep.equal(['__proto__:1', 'constructor:2', 'name:3']);
+
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(buffer);
+    expect(wb2.getWorksheet('Sheet').getRow(2).values.slice(1)).to.deep.equal(['p', 'c', 'n']);
+  });
 });

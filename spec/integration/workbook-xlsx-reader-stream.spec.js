@@ -335,6 +335,18 @@ describe('WorkbookReader (stream)', () => {
       ]);
     });
 
+    it('treats column keys named like Object.prototype members as plain keys', async () => {
+      const [{worksheet}] = await readAll(chunkedStream(await baseWorkbookBuffer()));
+      expect(worksheet.getColumnKey('constructor')).to.equal(undefined);
+      worksheet.getColumn(1).key = '__proto__';
+      worksheet.getColumn(2).key = 'constructor';
+      expect(worksheet.getColumn('__proto__').number).to.equal(1);
+      expect(worksheet.getColumn('constructor').number).to.equal(2);
+      const keys = [];
+      worksheet.eachColumnKey((column, key) => keys.push(`${key}:${column.number}`));
+      expect(keys).to.deep.equal(['__proto__:1', 'constructor:2']);
+    });
+
     it('clamps column ranges to the worksheet grid', async () => {
       const buffer = await tamper(await baseWorkbookBuffer(), {
         'xl/worksheets/sheet1.xml': xml =>
