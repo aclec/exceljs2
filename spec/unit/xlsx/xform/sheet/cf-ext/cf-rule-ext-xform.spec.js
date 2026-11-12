@@ -178,6 +178,9 @@ describe("CfRuleExtXform", () => {
             // a "!" in a string literal is not a sheet reference
             expect(isExt("expression", ['A1="Hi!"'])).to.equal(false);
             expect(isExt("expression", ['A1="say ""Hi!"""'])).to.equal(false);
+            // nor is the "!" of an error literal
+            expect(isExt("expression", ["ISERROR(#REF!)", "A1=#DIV/0!"])).to.equal(false);
+            expect(isExt("expression", ["AND(A1<>#NULL!,Other!A1)"])).to.equal(true);
             expect(isExt("cellIs", [5])).to.equal(false);
             expect(isExt("cellIs", undefined)).to.equal(false);
             // other rule types keep their own rules

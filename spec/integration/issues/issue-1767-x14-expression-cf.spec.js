@@ -86,6 +86,29 @@ describe("github issues", () => {
             expect(snapshot(back.getWorksheet("Sheet1").conditionalFormattings)).to.deep.equal(before);
         });
 
+        it("keep stopIfTrue and a number format of their inline differential format", async () => {
+            const rule =
+                '<x14:cfRule type="cellIs" priority="1" stopIfTrue="1" operator="lessThan" id="{00000000-0000-0000-0000-000000000003}">' +
+                '<xm:f>Other!$A$1</xm:f><x14:dxf><numFmt numFmtId="170" formatCode="0.000%"/></x14:dxf></x14:cfRule>';
+            const source = await tamper(await baseWorkbookBuffer(), {
+                [SHEET]: (xml) => xml.replace("</worksheet>", `${extLst(x14Cf("A1", rule))}</worksheet>`),
+            });
+            const wb = await load(source);
+            const [cf] = wb.getWorksheet("Sheet1").conditionalFormattings;
+            expect(cf.rules[0]).to.include({ type: "cellIs", operator: "lessThan", stopIfTrue: true, x14: true });
+            expect(cf.rules[0].style.numFmt).to.equal("0.000%");
+            const before = snapshot(wb.getWorksheet("Sheet1").conditionalFormattings);
+
+            const buffer = await wb.xlsx.writeBuffer();
+            const xml = await readPart(buffer, SHEET);
+            const [, numFmtId] = xml.match(
+                /<x14:cfRule type="cellIs" priority="1" stopIfTrue="1" operator="lessThan" id="\{[0-9A-F-]{36}\}"><xm:f>Other!\$A\$1<\/xm:f><x14:dxf><numFmt numFmtId="(\d+)" formatCode="0.000%"\/><\/x14:dxf><\/x14:cfRule>/
+            );
+            // the id is the one registered for this format in styles.xml
+            expect(await readPart(buffer, "xl/styles.xml")).to.include(`<numFmt numFmtId="${numFmtId}" formatCode="0.000%"/>`);
+            expect(snapshot((await load(buffer)).getWorksheet("Sheet1").conditionalFormattings)).to.deep.equal(before);
+        });
+
         it("rules referencing another sheet found only in the extension stay there, beside the main rules", async () => {
             const base = await baseWorkbookBuffer((wb, ws) => {
                 wb.addWorksheet("Other sheet").getCell("A1").value = 1;
