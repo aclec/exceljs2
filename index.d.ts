@@ -1048,7 +1048,15 @@ export type WorksheetState = "visible" | "hidden" | "veryHidden";
 export type CellIsOperators =
     "equal" | "notEqual" | "greaterThan" | "greaterThanOrEqual" | "lessThan" | "lessThanOrEqual" | "between" | "notBetween";
 
-export type ContainsTextOperators = "containsText" | "containsBlanks" | "notContainsBlanks" | "containsErrors" | "notContainsErrors";
+export type ContainsTextOperators =
+    | "containsText"
+    | "notContainsText"
+    | "beginsWith"
+    | "endsWith"
+    | "containsBlanks"
+    | "notContainsBlanks"
+    | "containsErrors"
+    | "notContainsErrors";
 
 export type TimePeriodTypes =
     "lastWeek" | "thisWeek" | "nextWeek" | "yesterday" | "today" | "tomorrow" | "last7Days" | "lastMonth" | "thisMonth" | "nextMonth";
@@ -1080,7 +1088,10 @@ export type CfvoTypes = "percentile" | "percent" | "num" | "min" | "max" | "form
 
 export interface Cvfo {
     type: CfvoTypes;
-    value?: number;
+    /**
+     * A number, or a formula or cell reference such as "$A$1" (type formula, or num / percent / percentile)
+     */
+    value?: number | string;
 }
 export interface ConditionalFormattingBaseRule {
     /**
@@ -1145,13 +1156,37 @@ export interface IconSetRuleType extends ConditionalFormattingBaseRule {
 
 export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
     type: "containsText";
+    /**
+     * Defaults to "containsText"
+     */
     operator?: ContainsTextOperators;
+    /**
+     * The text compared by the containsText, notContainsText, beginsWith and endsWith operators
+     */
     text?: string;
+    /**
+     * Written instead of the formula derived from the operator and text
+     */
+    formulae?: any[];
+    /**
+     * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
+     * other sheets (always done when a formula contains a sheet reference such as Other!A1).
+     * Set on the rules read from that extension only.
+     */
+    x14?: boolean;
 }
 
 export interface TimePeriodRuleType extends ConditionalFormattingBaseRule {
     type: "timePeriod";
     timePeriod?: TimePeriodTypes;
+    /**
+     * Written instead of the formula derived from the time period
+     */
+    formulae?: any[];
+    /**
+     * Write the rule in the x14 extension of the worksheet (set on the rules read from that extension only)
+     */
+    x14?: boolean;
 }
 
 export interface DataBarRuleType extends ConditionalFormattingBaseRule {

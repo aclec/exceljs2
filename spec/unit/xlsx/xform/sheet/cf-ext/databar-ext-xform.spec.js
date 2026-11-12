@@ -26,10 +26,11 @@ const expectations = [
             maxLength: 100,
             border: false,
             gradient: true,
-            negativeBarColorSameAsPositive: true,
+            // [MS-XLSX] CT_DataBar defaults
+            negativeBarColorSameAsPositive: false,
             negativeBarBorderColorSameAsPositive: true,
             axisPosition: "auto",
-            direction: "leftToRight",
+            direction: "context",
             cfvo: [
                 { type: "num", value: 5 },
                 { type: "num", value: 20 },
@@ -47,7 +48,7 @@ const expectations = [
             maxLength: 95,
             gradient: false,
             border: true,
-            negativeBarColorSameAsPositive: false,
+            negativeBarColorSameAsPositive: true,
             negativeBarBorderColorSameAsPositive: false,
             axisPosition: "middle",
             borderColor: { argb: "FFFF0000" },
@@ -62,7 +63,7 @@ const expectations = [
          maxLength="95"
          gradient="0"
          border="1"
-         negativeBarColorSameAsPositive="0"
+         negativeBarColorSameAsPositive="1"
          negativeBarBorderColorSameAsPositive="0"
          axisPosition="middle"
          direction="rightToLeft"

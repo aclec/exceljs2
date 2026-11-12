@@ -23,13 +23,15 @@ describe("utils", () => {
         });
     });
     describe("isDateFmt", () => {
-        ["yyyy-mm-dd"].forEach((fmt) => {
+        // an escaped quote does not start a literal text
+        ["yyyy-mm-dd", "d\\ mmmm\\ yyyy", "[$-40C]d\\-mmm", '\\"yyyy\\"'].forEach((fmt) => {
             it(`'${fmt}' a date`, () => {
                 expect(utils.isDateFmt(fmt)).to.be.true();
             });
         });
 
-        ["", "[Green]#,##0 ;[Red](#,##0)"].forEach((fmt) => {
+        // escaped (\m), padding (_m) and fill (*m) characters are literal text
+        ["", "[Green]#,##0 ;[Red](#,##0)", "0.0\\ \\m", "#,##0_m", "0*m", '0"*" "pts"', '"a_" 0 "d"', '0"\\" "m"'].forEach((fmt) => {
             it(`'${fmt}' is not a date`, () => {
                 expect(utils.isDateFmt(fmt)).to.be.false();
             });

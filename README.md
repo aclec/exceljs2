@@ -1941,11 +1941,11 @@ worksheet.addConditionalFormatting({
 | maxLength  |          | 100     | Specifies the length of the longest data bar in this conditional formatting range |
 | showValue  |          | true    | Specifies whether the cells in the conditional formatting range display both the data bar and the numeric value or the data bar |
 | gradient   |          | true    | Specifies whether the data bar has a gradient fill |
-| border     |          | true    | Specifies whether the data bar has a border |
-| negativeBarColorSameAsPositive  |                | true        | Specifies whether the data bar has a negative bar color that is different from the positive bar color |
-| negativeBarBorderColorSameAsPositive  |          | true        | Specifies whether the data bar has a negative border color that is different from the positive border color |
+| border     |          | false   | Specifies whether the data bar has a border |
+| negativeBarColorSameAsPositive  |                | false       | Specifies whether negative bars have the color of the positive ones (otherwise negativeFillColor) |
+| negativeBarBorderColorSameAsPositive  |          | true        | Specifies whether negative bars have the border color of the positive ones (otherwise negativeBorderColor) |
 | axisPosition  |       | 'auto'             | Specifies the axis position for the data bar |
-| direction  |          | 'leftToRight'      | Specifies the direction of the data bar |
+| direction  |          | 'context'          | Specifies the direction of the data bar ('context', 'leftToRight' or 'rightToLeft') |
 | cfvo          |          |         | array of 2 to 5 Conditional Formatting Value Objects specifying way-points in the value range |
 | style         |          |         | style structure to apply if the comparison returns true |
 
@@ -1964,6 +1964,9 @@ worksheet.addConditionalFormatting({
 | Operator          | Description |
 | ----------------- | ----------- |
 | containsText      | Apply format if cell value contains the value specified in the 'text' field |
+| notContainsText   | Apply format if cell value does not contain the value specified in the 'text' field |
+| beginsWith        | Apply format if cell value begins with the value specified in the 'text' field |
+| endsWith          | Apply format if cell value ends with the value specified in the 'text' field |
 | containsBlanks    | Apply format if cell value contains blanks |
 | notContainsBlanks | Apply format if cell value does not contain blanks |
 | containsErrors    | Apply format if cell value contains errors |

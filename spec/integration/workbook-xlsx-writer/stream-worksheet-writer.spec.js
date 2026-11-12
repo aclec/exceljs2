@@ -89,6 +89,48 @@ describe("WorkbookWriter (stream)", () => {
         expect(ws2.getCell("B1").hyperlink).to.equal("https://example.com");
     });
 
+    it("writes the differential formats of conditional formatting rules without useStyles", async () => {
+        const buffer = await writeBuffer((wb) => {
+            const ws = wb.addWorksheet("Sheet");
+            ws.getCell("A1").value = 1;
+            ws.addConditionalFormatting({
+                ref: "A1:A5",
+                rules: [
+                    { type: "expression", formulae: ["A1>1"], style: { font: { bold: true }, numFmt: '0.0 "kg"' } },
+                    { type: "cellIs", operator: "equal", formulae: ["Other!$A$1"], style: { numFmt: "0.00%" } },
+                    {
+                        type: "cellIs",
+                        operator: "lessThan",
+                        formulae: ["0"],
+                        style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFFF0000" } } },
+                    },
+                ],
+            });
+            ws.commit();
+        });
+
+        const styles = await readPart(buffer, "xl/styles.xml");
+        const [, numFmtId] = styles.match(/<numFmt numFmtId="(\d+)" formatCode="0.0 &quot;kg&quot;"\/>/);
+        expect(styles).to.include(
+            `<dxfs count="3"><dxf><font><b/></font><numFmt numFmtId="${numFmtId}" formatCode="0.0 &quot;kg&quot;"/></dxf>`
+        );
+        const sheet = await readPart(buffer, "xl/worksheets/sheet1.xml");
+        expect(sheet).to.match(/<cfRule type="expression" dxfId="0" priority="1">/);
+        expect(sheet).to.match(/<cfRule type="cellIs" dxfId="2" priority="3" operator="lessThan">/);
+        // the x14 rule carries its differential format inline, with a built-in number format
+        expect(sheet).to.include('<x14:dxf><numFmt numFmtId="10" formatCode="0.00%"/></x14:dxf>');
+
+        const wb2 = new ExcelJS.Workbook();
+        await wb2.xlsx.load(buffer);
+        const [cf] = wb2.getWorksheet("Sheet").conditionalFormattings;
+        // the x14 rule is read after the main ones
+        const [expression, lessThan, crossSheet] = cf.rules;
+        expect(expression.style.numFmt).to.equal('0.0 "kg"');
+        expect(expression.style.font.bold).to.equal(true);
+        expect(lessThan.style.fill.bgColor).to.deep.equal({ argb: "FFFF0000" });
+        expect(crossSheet.style.numFmt).to.equal("0.00%");
+    });
+
     it("keeps distinct rich text values apart in shared strings", async () => {
         const bold = { richText: [{ font: { bold: true }, text: "first" }] };
         const mixed = { richText: [{ text: "second " }, { font: { italic: true }, text: "part" }] };
@@ -124,8 +166,9 @@ describe("WorkbookWriter (stream)", () => {
         const text = (value) => (value.richText ? value.richText.map((run) => run.text).join("|") : value);
         expect(streamed.map(text)).to.deep.equal(["first", "second |part", json, "[object Object]", "first", "plain"]);
 
+        // count: the references to the shared strings, uniqueCount: the shared strings
         const xml = await readPart(buffer, "xl/sharedStrings.xml");
-        expect(xml).to.match(/<sst [^>]*uniqueCount="5"/);
+        expect(xml).to.match(/<sst [^>]* count="6" uniqueCount="5">/);
     });
 
     it("treats column keys named like Object.prototype members as plain keys", async () => {
