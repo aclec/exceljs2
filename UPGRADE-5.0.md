@@ -377,7 +377,10 @@ New at run time: `ExcelJS.PaperSize` (`ExcelJS.PaperSize.A4`), an object of the 
 `isolatedModules`. `pageSetup.paperSize` accepts any paper size number of the standard (`8` for A3).
 
 `Range` addresses and `count` are `readonly` (they are getters: setting them threw). `xlsx.load(data, { base64: true })` takes a string or a
-Node `Buffer` of the text (a plain `Uint8Array` was not decoded as text). `new ModelContainer()` takes an optional model.
+Node `Buffer` of the text (a plain `Uint8Array` was not decoded as text). `new ModelContainer()` takes an optional model; `container.model`
+is a `WorkbookModelInput | undefined` (a model read from a file has no `rowBreaks` or `merges`, and its worksheet `dimensions` is a string).
+`worksheet.model` and `workbook.model` accept the narrower `WorksheetModelInput` / `WorkbookModelInput` when set. The `style` of a column of
+`WorksheetModel.tables` is a `TableColumnStyle` (its parts may be `null`, as read from a file).
 
 Added (they existed at run time): `ModelContainer`; `cell.html`; `row.style`; `CellFormulaValue.shareType` / `ref`; `comment.anchor`;
 `Range.setTLBR()` / `forEachAddress()`; `worksheet.sheetProtection`, `rowBreaks`, `conditionalFormattings`; `PageSetup.copies`,
