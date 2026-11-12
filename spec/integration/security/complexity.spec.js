@@ -1,6 +1,6 @@
 // Regression tests for hostile input that used to cost super-linear time or memory
 // (ReDoS, quadratic lookups, per-index traversals of sparse arrays).
-const { baseWorkbookBuffer, tamper } = require("../../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, zipParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -64,5 +64,14 @@ describe("hostile input: algorithmic complexity", function () {
             const { ms } = await timed(() => load(buffer));
             expect(ms).to.be.below(1000);
         });
+    });
+
+    it("matches worksheets to many <sheet> elements in linear time", async () => {
+        const parts = { "xl/workbook.xml": `<workbook><sheets>${'<sheet name=""/>'.repeat(400000)}</sheets></workbook>` };
+        for (let i = 1; i <= 2000; i++) {
+            parts[`xl/worksheets/sheet${i}.xml`] = "<worksheet/>";
+        }
+        const { ms } = await timed(() => load(zipParts(parts)));
+        expect(ms).to.be.below(1500);
     });
 });
