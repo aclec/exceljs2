@@ -1,24 +1,45 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../utils/under-dash";
-
 import RelType from "../../xlsx/rel-type";
 
 import colCache from "../../utils/col-cache";
 import Encryptor from "../../utils/encryptor";
 import { checkMergedCells } from "../../utils/merge-limits";
-import sparseArrayModule from "../../utils/sparse-array";
-import Dimensions from "../../doc/range";
+import { eachEntry, someEntry } from "../../utils/sparse-array";
+import RangeJs from "../../doc/range";
 import StringBuf from "../../utils/string-buf";
 
-import Row from "../../doc/row";
-import Column from "../../doc/column";
+import RowJs from "../../doc/row";
+import ColumnJs from "../../doc/column";
 
 import SheetRelsWriter from "./sheet-rels-writer";
 import SheetCommentsWriter from "./sheet-comments-writer";
-import DataValidations from "../../doc/data-validations";
-
-const xmlBuffer = new StringBuf();
+import DataValidationsJs from "../../doc/data-validations";
+import type { ZipEntry } from "../../utils/zip-stream";
+import type {
+    AutoFilter,
+    Column,
+    ConditionalFormattingOptions,
+    DataValidations,
+    HeaderFooter,
+    PageSetup,
+    RowBreak,
+    RowValues,
+    WorksheetProperties,
+    WorksheetProtection,
+    WorksheetState,
+    WorksheetView,
+} from "../../../index";
+import type {
+    CellPrepareOptions,
+    CommentRefModel,
+    FormulaCellModel,
+    ListItemOptions,
+    MergeCellModel,
+    PageSetupModel,
+    SheetProtectionModel,
+    StyleRegistry,
+} from "../../types";
+import type { DocCell, DocColumnConstructor, DocRange, DocRangeConstructor, DocRow, DocRowConstructor } from "../../types/io";
+import type WorkbookWriter from "./workbook-writer";
 
 // ============================================================================================
 // Xforms
@@ -40,33 +61,138 @@ import ConditionalFormattingsXform from "../../xlsx/xform/sheet/cf/conditional-f
 import HeaderFooterXform from "../../xlsx/xform/sheet/header-footer-xform";
 import RowBreaksXform from "../../xlsx/xform/sheet/row-breaks-xform";
 import ExtListXform from "../../xlsx/xform/sheet/ext-lst-xform";
-const { eachEntry, someEntry } = sparseArrayModule;
+
+// TS-WAVE2: src/doc is typed in parallel; the constructors as used here, asserted once (guide rule 15)
+const Row = RowJs as unknown as DocRowConstructor;
+const Column = ColumnJs as unknown as DocColumnConstructor;
+const Dimensions = RangeJs as unknown as DocRangeConstructor;
+const DataValidationsClass = DataValidationsJs as unknown as new () => DataValidations;
+
+/** TS-WAVE2: a sheet xform as the writer uses it (the sheet xforms are typed in parallel). */
+interface PartXform {
+    prepare(model: unknown, options?: unknown): void;
+    toXml(model: unknown): string;
+}
+// TS-WAVE2: instantiates a sheet xform typed in parallel (guide rule 15): `new XformClass()` once they are typed
+const partXform = (XformClass: unknown): PartXform => new (XformClass as new () => PartXform)();
+
+const xmlBuffer = new StringBuf();
 
 // since prepare and render are functional, we can use singletons
 const xform = {
-    dataValidations: new DataValidationsXform(),
-    sheetProperties: new SheetPropertiesXform(),
-    sheetFormatProperties: new SheetFormatPropertiesXform(),
-    columns: new ListXform({ tag: "cols", length: false, childXform: new ColXform() }),
-    row: new RowXform(),
-    hyperlinks: new ListXform({ tag: "hyperlinks", length: false, childXform: new HyperlinkXform() }),
-    sheetViews: new ListXform({ tag: "sheetViews", length: false, childXform: new SheetViewXform() }),
-    sheetProtection: new SheetProtectionXform(),
-    pageMargins: new PageMarginsXform(),
-    pageSeteup: new PageSetupXform(),
-    printOptions: new PrintOptionsXform(),
-    autoFilter: new AutoFilterXform(),
-    picture: new PictureXform(),
-    conditionalFormattings: new ConditionalFormattingsXform(),
-    headerFooter: new HeaderFooterXform(),
-    rowBreaks: new RowBreaksXform(),
-    extLst: new ExtListXform(),
+    dataValidations: partXform(DataValidationsXform),
+    sheetProperties: partXform(SheetPropertiesXform),
+    sheetFormatProperties: partXform(SheetFormatPropertiesXform),
+    columns: new ListXform({ tag: "cols", childXform: new ColXform() }),
+    row: partXform(RowXform),
+    hyperlinks: new ListXform({ tag: "hyperlinks", childXform: new HyperlinkXform() }),
+    sheetViews: new ListXform({ tag: "sheetViews", childXform: new SheetViewXform() }),
+    sheetProtection: partXform(SheetProtectionXform),
+    pageMargins: partXform(PageMarginsXform),
+    pageSeteup: partXform(PageSetupXform),
+    printOptions: partXform(PrintOptionsXform),
+    autoFilter: partXform(AutoFilterXform),
+    picture: partXform(PictureXform),
+    conditionalFormattings: partXform(ConditionalFormattingsXform),
+    headerFooter: partXform(HeaderFooterXform),
+    rowBreaks: partXform(RowBreaksXform),
+    extLst: partXform(ExtListXform),
 };
 
-// ============================================================================================
+/** A column definition (`worksheet.columns = [...]`): index.d.ts `Column` properties, and multi-row `headers`. */
+export type ColumnDefinition = Partial<Column> & { headers?: readonly unknown[] };
 
+/** The sheet properties of a streamed worksheet: the defaults below, and those given. */
+export type WorksheetWriterProperties = Partial<WorksheetProperties> &
+    Pick<WorksheetProperties, "defaultRowHeight" | "dyDescent" | "outlineLevelCol" | "outlineLevelRow">;
+
+/** The header and footer of a streamed worksheet: the texts are `null` by default. */
+export type WorksheetWriterHeaderFooter = { [K in keyof HeaderFooter]?: HeaderFooter[K] | null };
+
+/** The page setup of a streamed worksheet: the defaults below (`rowBreaks` / `colBreaks` null), and those given. */
+export type WorksheetWriterPageSetup = PageSetupModel & { rowBreaks?: unknown; colBreaks?: unknown };
+
+/** The arguments of the {@link WorksheetWriter} constructor (WorkbookWriter.addWorksheet). */
+export interface WorksheetWriterOptions {
+    /** the number of the worksheet in the workbook */
+    id: number;
+    name?: string;
+    workbook: WorkbookWriter;
+    useSharedStrings?: boolean;
+    properties?: Partial<WorksheetProperties>;
+    state?: WorksheetState;
+    pageSetup?: Partial<PageSetup>;
+    views?: Partial<WorksheetView>[];
+    autoFilter?: AutoFilter | null;
+    headerFooter?: Partial<HeaderFooter>;
+}
+
+// the error of an operation on the rows of a committed worksheet
+function committedError(): Error {
+    return new Error("Invalid Operation: the worksheet has been committed");
+}
+
+/**
+ * A worksheet of the streaming {@link WorkbookWriter}: the rows are written (and dropped) as they are committed, in
+ * order; the rest of the worksheet (merges, validations, hyperlinks, page setup...) when the worksheet is committed. The
+ * XML elements follow the ECMA-376 CT_Worksheet sequence, as WorkSheetXform.render.
+ */
 class WorksheetWriter {
-    constructor(options) {
+    /** The number of the worksheet in the workbook. */
+    readonly id: number;
+    name: string;
+    state: WorksheetState;
+    /** True once {@link commit} was called: no row can be added. */
+    committed: boolean;
+    dataValidations: DataValidations;
+    conditionalFormatting: ConditionalFormattingOptions[];
+    rowBreaks: RowBreak[];
+    properties: WorksheetWriterProperties;
+    headerFooter: WorksheetWriterHeaderFooter;
+    pageSetup: WorksheetWriterPageSetup;
+    /** Use the shared strings table (smaller file, more memory). */
+    useSharedStrings: boolean;
+    /** True once a row with notes was written. */
+    hasComments: boolean;
+    autoFilter: AutoFilter | null;
+    sheetProtection: SheetProtectionModel | null;
+    /** True once `<sheetData>` was opened. */
+    startedData: boolean;
+    /** Set to `[]` by the comments writer when the first note is written. */
+    comments?: CommentRefModel[];
+    /** The relationship id of the worksheet in the workbook (WorkbookWriter.addWorkbookRels). */
+    rId?: string;
+
+    // rows are stored here while they need to be worked on, indexed by number - this._rowsBase.
+    // when they are committed, they will be deleted; null once the worksheet is committed
+    private _rows: (DocRow | undefined)[] | null;
+    private _rowsBase: number;
+    // the number of rows in this._rows
+    private _rowsCount: number;
+    // column definitions
+    private _columns: Column[] | null;
+    private _headerRowCount?: number;
+    // column keys (addRow convenience): key ==> this._columns index
+    // no prototype: keys come from data (e.g. CSV headers) and may be '__proto__' or 'constructor'
+    private _keys: Record<string, Column>;
+    // the merged ranges; `add` is the merges collector of the cells' prepare (the merges are written from this list)
+    private _merges: DocRange[] & { add(cell: MergeCellModel): void };
+    private _mergedCellCount: number;
+    private _sheetRelsWriter: SheetRelsWriter;
+    private _sheetCommentsWriter: SheetCommentsWriter;
+    private _dimensions: DocRange;
+    // first uncommitted row
+    private _rowZero: number;
+    // shared formula masters by cell address, and the next shared formula index (cell-xform prepare)
+    private _formulae: Record<string, FormulaCellModel>;
+    private _siFormulae: number;
+    private _workbook: WorkbookWriter;
+    private _views: Partial<WorksheetView>[];
+    private _media: unknown[];
+    private _background?: { imageId?: number; rId?: string };
+    private _stream?: ZipEntry;
+
+    constructor(options: WorksheetWriterOptions) {
         // in a workbook, each sheet will have a number
         this.id = options.id;
 
@@ -76,23 +202,18 @@ class WorksheetWriter {
         // add a state
         this.state = options.state || "visible";
 
-        // rows are stored here while they need to be worked on, indexed by number - this._rowsBase.
-        // when they are committed, they will be deleted.
         this._rows = [];
         this._rowsBase = 1;
-        // the number of rows in this._rows
         this._rowsCount = 0;
 
-        // column definitions
         this._columns = null;
 
-        // column keys (addRow convenience): key ==> this._columns index
-        // no prototype: keys come from data (e.g. CSV headers) and may be '__proto__' or 'constructor'
-        this._keys = Object.create(null);
+        this._keys = Object.create(null) as Record<string, Column>;
 
-        // keep a record of all row and column pageBreaks
-        this._merges = [];
-        this._merges.add = function () {}; // ignore cell instruction
+        // keep a record of all merges
+        this._merges = Object.assign([] as DocRange[], {
+            add() {}, // ignore cell instruction
+        });
         this._mergedCellCount = 0;
 
         // keep record of all hyperlinks
@@ -103,17 +224,16 @@ class WorksheetWriter {
         // keep a record of dimensions
         this._dimensions = new Dimensions();
 
-        // first uncommitted row
         this._rowZero = 1;
 
         // committed flag
         this.committed = false;
 
         // for data validations
-        this.dataValidations = new DataValidations();
+        this.dataValidations = new DataValidationsClass();
 
-        // for sharing formulae
-        this._formulae = {};
+        // for sharing formulae; keyed by cell addresses (no prototype: a sharedFormula "constructor" finds no master)
+        this._formulae = Object.create(null) as Record<string, FormulaCellModel>;
         this._siFormulae = 0;
 
         // keep a record of conditionalFormattings
@@ -154,7 +274,7 @@ class WorksheetWriter {
             {},
             {
                 margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
-                orientation: "portrait",
+                orientation: "portrait" as const,
                 horizontalDpi: 4294967295,
                 verticalDpi: 4294967295,
                 fitToPage: !!(
@@ -162,11 +282,11 @@ class WorksheetWriter {
                     (options.pageSetup.fitToWidth || options.pageSetup.fitToHeight) &&
                     !options.pageSetup.scale
                 ),
-                pageOrder: "downThenOver",
+                pageOrder: "downThenOver" as const,
                 blackAndWhite: false,
                 draft: false,
-                cellComments: "None",
-                errors: "displayed",
+                cellComments: "None" as const,
+                errors: "displayed" as const,
                 scale: 100,
                 fitToWidth: 1,
                 fitToHeight: 1,
@@ -205,31 +325,41 @@ class WorksheetWriter {
         this.startedData = false;
     }
 
-    get workbook() {
+    /** The workbook writer. */
+    get workbook(): WorkbookWriter {
         return this._workbook;
     }
 
-    get stream() {
+    /** The zip entry of the worksheet part, opened on first use. */
+    get stream(): ZipEntry {
         if (!this._stream) {
             this._stream = this._workbook._openStream(`/xl/worksheets/sheet${this.id}.xml`);
         }
         return this._stream;
     }
 
-    // destroy - not a valid operation for a streaming writer
-    // even though some streamers might be able to, it's a bad idea.
-    destroy() {
+    /**
+     * Not a valid operation for a streaming writer (even though some streamers might be able to, it's a bad idea).
+     *
+     * @throws Error always
+     */
+    destroy(): never {
         throw new Error("Invalid Operation: destroy");
     }
 
-    // Writes the rest of the worksheet. Returns a promise to await before writing more (backpressure, see _commitRow).
-    commit() {
+    /**
+     * Writes the rest of the worksheet: the uncommitted rows, then the elements after `<sheetData>`. Rows can no longer
+     * be added.
+     *
+     * @returns a promise to await before writing more (backpressure, see {@link _commitRow})
+     */
+    commit(): Promise<void> {
         if (this.committed) {
             return this._workbook.zip.drained();
         }
         // commit all rows
         eachEntry(
-            this._rows,
+            this._liveRows,
             (cRow) => {
                 // write the row to the stream
                 this._writeRow(cRow);
@@ -278,26 +408,26 @@ class WorksheetWriter {
         return this._workbook.zip.drained();
     }
 
-    // return the current dimensions of the writer
-    get dimensions() {
+    /** The dimensions of the rows written so far. */
+    get dimensions(): DocRange {
         return this._dimensions;
     }
 
-    get views() {
+    /** The sheet views (`views` option). */
+    get views(): Partial<WorksheetView>[] {
         return this._views;
     }
 
     // =========================================================================
     // Columns
 
-    // get the current columns array.
-    get columns() {
+    /** The columns defined or used, or `null` when there is none. */
+    get columns(): Column[] | null {
         return this._columns;
     }
 
-    // set the columns from an array of column definitions.
-    // Note: any headers defined will overwrite existing values.
-    set columns(value) {
+    /** Defines the columns. Note: any headers defined will overwrite existing values. */
+    set columns(value: readonly ColumnDefinition[]) {
         // calculate max header row count
         this._headerRowCount = value.reduce((pv, cv) => {
             const headerCount = (cv.header && 1) || (cv.headers && cv.headers.length) || 0;
@@ -306,7 +436,7 @@ class WorksheetWriter {
 
         // construct Column objects
         let count = 1;
-        const columns = (this._columns = []);
+        const columns: Column[] = (this._columns = []);
         value.forEach((defn) => {
             const column = new Column(this, count++, false);
             columns.push(column);
@@ -314,25 +444,35 @@ class WorksheetWriter {
         });
     }
 
-    getColumnKey(key) {
+    /** The column with this key (Column.key), if any. */
+    getColumnKey(key: string): Column | undefined {
         return this._keys[key];
     }
 
-    setColumnKey(key, value) {
+    /** Registers the column of a key (Column.key setter). */
+    setColumnKey(key: string, value: Column): void {
         this._keys[key] = value;
     }
 
-    deleteColumnKey(key) {
+    /** Unregisters a key (Column.key setter). */
+    deleteColumnKey(key: string): void {
         delete this._keys[key];
     }
 
-    eachColumnKey(f) {
-        _.each(this._keys, f);
+    /** Calls `f` for each keyed column. */
+    eachColumnKey(f: (column: Column, key: string) => void): void {
+        for (const key of Object.keys(this._keys)) {
+            f(this._keys[key]!, key);
+        }
     }
 
-    // get a single column by col number. If it doesn't exist, it and any gaps before it
-    // are created.
-    getColumn(c) {
+    /**
+     * A column by key, letter or number (1-based); it and any gap before it are created if needed.
+     *
+     * @returns `undefined` for a number below 1
+     * @throws Error for letters that are not a column
+     */
+    getColumn(c: number | string): Column | undefined {
         if (typeof c === "string") {
             // if it matches a key'd column, return that
             const col = this._keys[c];
@@ -355,27 +495,45 @@ class WorksheetWriter {
 
     // =========================================================================
     // Rows
-    get _nextRow() {
-        return Math.max(this._rowZero, this._rowsBase + this._rows.length);
+
+    // the uncommitted rows
+    private get _liveRows(): (DocRow | undefined)[] {
+        if (!this._rows) {
+            throw committedError();
+        }
+        return this._rows;
     }
 
-    // iterate over every uncommitted row in the worksheet, including maybe empty rows
-    eachRow(options, iteratee) {
+    private get _nextRow(): number {
+        return Math.max(this._rowZero, this._rowsBase + this._liveRows.length);
+    }
+
+    /**
+     * Iterates over the uncommitted rows with values (with `includeEmpty`, over every uncommitted row, created if
+     * needed).
+     */
+    eachRow(iteratee: (row: DocRow, rowNumber: number) => void): void;
+    eachRow(options: { includeEmpty?: boolean } | undefined, iteratee: (row: DocRow, rowNumber: number) => void): void;
+    eachRow(
+        options: { includeEmpty?: boolean } | ((row: DocRow, rowNumber: number) => void) | undefined,
+        iteratee?: (row: DocRow, rowNumber: number) => void
+    ): void {
         if (!iteratee) {
-            iteratee = options;
+            iteratee = options as (row: DocRow, rowNumber: number) => void;
             options = undefined;
         }
-        if (options && options.includeEmpty) {
+        if (options && typeof options === "object" && options.includeEmpty) {
             const n = this._nextRow;
             for (let i = this._rowZero; i < n; i++) {
                 iteratee(this.getRow(i), i);
             }
         } else {
+            const callback = iteratee;
             eachEntry(
-                this._rows,
+                this._liveRows,
                 (row) => {
                     if (row.hasValues) {
-                        iteratee(row, row.number);
+                        callback(row, row.number);
                     }
                 },
                 this._rowZero - this._rowsBase
@@ -383,17 +541,23 @@ class WorksheetWriter {
         }
     }
 
-    // Returns a promise that resolves once the output can take more data: awaiting it keeps memory bounded. Without
-    // waiting, written data piles up in memory until the event loop runs (the zip compresses asynchronously).
-    _commitRow(cRow) {
+    /**
+     * Writes the rows up to `cRow` (rows are written in order) and drops them (Row.commit).
+     *
+     * @returns a promise that resolves once the output can take more data: awaiting it keeps memory bounded. Without
+     * waiting, written data piles up in memory until the event loop runs (the zip compresses asynchronously).
+     */
+    _commitRow(cRow: DocRow): Promise<void> {
         // since rows must be written in order, we commit all rows up till and including cRow.
         // The committed rows are deleted, not shifted out: shift takes time proportional to the length of a
         // sparse array, so a row after a hole of 10,000 rows took 2 s to commit.
-        const rows = this._rows;
+        const rows = this._liveRows;
         someEntry(
             rows,
             (row, index) => {
-                // removed before it is written: a row whose writing fails is not written again
+                // removed before it is written: a row whose writing fails is not written again. A hole, not undefined:
+                // the iteration of a sparse array visits the keys of the array (sparse-array.ts)
+                // eslint-disable-next-line @typescript-eslint/no-array-delete -- see above
                 delete rows[index];
                 this._rowsCount--;
                 this._rowZero = row.number + 1;
@@ -405,7 +569,7 @@ class WorksheetWriter {
         // drop the committed indexes once they outnumber the rows: time proportional to the rows committed
         const committed = this._rowZero - this._rowsBase;
         if (committed > this._rowsCount + 32) {
-            const remaining = [];
+            const remaining: (DocRow | undefined)[] = [];
             eachEntry(
                 rows,
                 (row, index) => {
@@ -419,57 +583,81 @@ class WorksheetWriter {
         return this._workbook.zip.drained();
     }
 
-    get lastRow() {
-        // returns last uncommitted row
-        const index = this._rows.length - 1;
-        return index >= this._rowZero - this._rowsBase ? this._rows[index] : undefined;
+    /** The last uncommitted row, if any. */
+    get lastRow(): DocRow | undefined {
+        const rows = this._liveRows;
+        const index = rows.length - 1;
+        return index >= this._rowZero - this._rowsBase ? rows[index] : undefined;
     }
 
-    // find a row (if exists) by row number
-    findRow(rowNumber) {
-        return rowNumber < this._rowZero ? undefined : this._rows[rowNumber - this._rowsBase];
+    /** A row (1-based number) if it exists and is not committed. */
+    findRow(rowNumber: number): DocRow | undefined {
+        return rowNumber < this._rowZero ? undefined : this._liveRows[rowNumber - this._rowsBase];
     }
 
-    getRow(rowNumber) {
+    /**
+     * A row (1-based number), created if needed.
+     *
+     * @throws Error when the row was committed
+     */
+    getRow(rowNumber: number): DocRow {
         // may fail if rows have been comitted
         if (rowNumber < this._rowZero) {
             throw new Error("Out of bounds: this row has been committed");
         }
+        const rows = this._liveRows;
         const index = rowNumber - this._rowsBase;
-        let row = this._rows[index];
+        let row = rows[index];
         if (!row) {
-            this._rows[index] = row = new Row(this, rowNumber);
+            rows[index] = row = new Row(this, rowNumber);
             this._rowsCount++;
         }
         return row;
     }
 
-    addRow(value) {
+    /** Adds a row after the last one, with values (an array by column number, or an object by column key). */
+    addRow(value: RowValues): DocRow {
+        const rows = this._liveRows;
         const row = new Row(this, this._nextRow);
-        this._rows[row.number - this._rowsBase] = row;
+        rows[row.number - this._rowsBase] = row;
         this._rowsCount++;
-        row.values = value;
+        // TS-WAVE2: the Row values setter takes what addRow takes (null / undefined clear the row)
+        (row as { values: RowValues }).values = value;
         return row;
     }
 
     // ================================================================================
     // Cells
 
-    // returns the cell at [r,c] or address given by r. If not found, return undefined
-    findCell(r, c) {
-        const address = colCache.getAddress(r, c);
+    /** The cell at an address (`B3`) or at (row, col), if it exists. */
+    findCell(address: string): DocCell | undefined;
+    findCell(row: number, col: number): DocCell | undefined;
+    findCell(r: number | string, c?: number): DocCell | undefined {
+        const address = typeof c === "number" ? colCache.getAddress(r as number, c) : colCache.getAddress(r as string);
         const row = this.findRow(address.row);
-        return row ? row.findCell(address.column) : undefined;
+        return row ? row.findCell(address.col) : undefined;
     }
 
-    // return the cell at [r,c] or address given by r. If not found, create a new one.
-    getCell(r, c) {
-        const address = colCache.getAddress(r, c);
+    /**
+     * The cell at an address (`B3`) or at (row, col), created if needed.
+     *
+     * @throws Error when its row was committed
+     */
+    getCell(address: string): DocCell;
+    getCell(row: number, col: number): DocCell;
+    getCell(r: number | string, c?: number): DocCell {
+        const address = typeof c === "number" ? colCache.getAddress(r as number, c) : colCache.getAddress(r as string);
         const row = this.getRow(address.row);
         return row.getCellEx(address);
     }
 
-    mergeCells(...cells) {
+    /**
+     * Merges a range of cells (same arguments as `new Range(...)`): every cell but the top-left one is merged into it.
+     *
+     * @throws Error when a cell is already merged, a row was committed, or the merged cells exceed the limits
+     * (utils/merge-limits)
+     */
+    mergeCells(...cells: unknown[]): void {
         // may fail if rows have been comitted
         const dimensions = new Dimensions(cells);
 
@@ -484,11 +672,11 @@ class WorksheetWriter {
         );
 
         // check cells aren't already merged
-        this._merges.forEach((merge) => {
+        for (const merge of this._merges) {
             if (merge.intersects(dimensions)) {
                 throw new Error("Cannot merge already merged cells");
             }
-        });
+        }
 
         // apply merge
         const master = this.getCell(dimensions.top, dimensions.left);
@@ -508,11 +696,14 @@ class WorksheetWriter {
 
     // ===========================================================================
     // Conditional Formatting
-    addConditionalFormatting(cf) {
+
+    /** Adds conditional formatting rules, written when the worksheet is committed. */
+    addConditionalFormatting(cf: ConditionalFormattingOptions): void {
         this.conditionalFormatting.push(cf);
     }
 
-    removeConditionalFormatting(filter) {
+    /** Removes the conditional formattings at an index, those a filter rejects, or all of them. */
+    removeConditionalFormatting(filter?: number | ((value: ConditionalFormattingOptions, index: number) => unknown)): void {
         if (typeof filter === "number") {
             this.conditionalFormatting.splice(filter, 1);
         } else if (filter instanceof Function) {
@@ -524,42 +715,48 @@ class WorksheetWriter {
 
     // =========================================================================
 
-    addBackgroundImage(imageId) {
+    /** Sets the background image (an id of WorkbookWriter.addImage). */
+    addBackgroundImage(imageId: number): void {
         this._background = {
             imageId,
         };
     }
 
-    getBackgroundImageId() {
+    /** The id of the background image, if any. */
+    getBackgroundImageId(): number | undefined {
         return this._background && this._background.imageId;
     }
 
     // =========================================================================
     // Worksheet Protection
-    protect(password, options) {
+
+    /**
+     * Protects the worksheet, with a password hashed with SHA-512 (`spinCount` iterations, 100000 by default). Mutates
+     * `options`: `spinCount` is made an integer >= 0.
+     */
+    protect(password?: string, options?: Partial<WorksheetProtection>): Promise<void> {
         // TODO: make this function truly async
         // perhaps marshal to worker thread or something
         return new Promise((resolve) => {
-            this.sheetProtection = {
+            const sheetProtection: SheetProtectionModel = {
                 sheet: true,
             };
+            this.sheetProtection = sheetProtection;
+            let spinCount = 100000;
             if (options && "spinCount" in options) {
-                // force spinCount to be integer >= 0
-                options.spinCount = Number.isFinite(options.spinCount) ? Math.round(Math.max(0, options.spinCount)) : 100000;
+                // force spinCount to be integer >= 0 (allow user specified spinCount)
+                const requested = options.spinCount;
+                spinCount = options.spinCount =
+                    typeof requested === "number" && Number.isFinite(requested) ? Math.round(Math.max(0, requested)) : 100000;
             }
             if (password) {
-                this.sheetProtection.algorithmName = "SHA-512";
-                this.sheetProtection.saltValue = Encryptor.randomBytes(16).toString("base64");
-                this.sheetProtection.spinCount = options && "spinCount" in options ? options.spinCount : 100000; // allow user specified spinCount
-                this.sheetProtection.hashValue = Encryptor.convertPasswordToHash(
-                    password,
-                    "SHA512",
-                    this.sheetProtection.saltValue,
-                    this.sheetProtection.spinCount
-                );
+                sheetProtection.algorithmName = "SHA-512";
+                sheetProtection.saltValue = Encryptor.randomBytes(16).toString("base64");
+                sheetProtection.spinCount = spinCount;
+                sheetProtection.hashValue = Encryptor.convertPasswordToHash(password, "SHA512", sheetProtection.saltValue, spinCount);
             }
             if (options) {
-                this.sheetProtection = Object.assign(this.sheetProtection, options);
+                this.sheetProtection = Object.assign(sheetProtection, options);
                 if (!password && "spinCount" in options) {
                     delete this.sheetProtection.spinCount;
                 }
@@ -568,19 +765,20 @@ class WorksheetWriter {
         });
     }
 
-    unprotect() {
+    /** Removes the protection. */
+    unprotect(): void {
         this.sheetProtection = null;
     }
 
     // ================================================================================
 
-    _write(text) {
+    private _write(text: string): void {
         xmlBuffer.reset();
         xmlBuffer.addText(text);
         this.stream.write(xmlBuffer);
     }
 
-    _writeSheetProperties(xmlBuf, properties, pageSetup) {
+    private _writeSheetProperties(xmlBuf: StringBuf, properties: WorksheetWriterProperties, pageSetup: WorksheetWriterPageSetup): void {
         const sheetPropertiesModel = {
             outlineProperties: properties && properties.outlineProperties,
             tabColor: properties && properties.tabColor,
@@ -595,15 +793,13 @@ class WorksheetWriter {
         xmlBuf.addText(xform.sheetProperties.toXml(sheetPropertiesModel));
     }
 
-    _writeSheetFormatProperties(xmlBuf, properties) {
-        const sheetFormatPropertiesModel = properties
-            ? {
-                  defaultRowHeight: properties.defaultRowHeight,
-                  dyDescent: properties.dyDescent,
-                  outlineLevelCol: properties.outlineLevelCol,
-                  outlineLevelRow: properties.outlineLevelRow,
-              }
-            : undefined;
+    private _writeSheetFormatProperties(xmlBuf: StringBuf, properties: WorksheetWriterProperties): void {
+        const sheetFormatPropertiesModel: Partial<WorksheetProperties> = {
+            defaultRowHeight: properties.defaultRowHeight,
+            dyDescent: properties.dyDescent,
+            outlineLevelCol: properties.outlineLevelCol,
+            outlineLevelRow: properties.outlineLevelRow,
+        };
         if (properties.defaultColWidth) {
             sheetFormatPropertiesModel.defaultColWidth = properties.defaultColWidth;
         }
@@ -611,7 +807,7 @@ class WorksheetWriter {
         xmlBuf.addText(xform.sheetFormatProperties.toXml(sheetFormatPropertiesModel));
     }
 
-    _writeOpenWorksheet() {
+    private _writeOpenWorksheet(): void {
         xmlBuffer.reset();
 
         xmlBuffer.addText('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
@@ -632,19 +828,20 @@ class WorksheetWriter {
         this.stream.write(xmlBuffer);
     }
 
-    _writeColumns() {
+    private _writeColumns(): void {
         const cols = Column.toModel(this.columns);
         if (cols) {
-            xform.columns.prepare(cols, { styles: this._workbook.styles });
+            const options: ListItemOptions & { styles: StyleRegistry } = { styles: this._workbook.styles };
+            xform.columns.prepare(cols, options);
             this.stream.write(xform.columns.toXml(cols));
         }
     }
 
-    _writeOpenSheetData() {
+    private _writeOpenSheetData(): void {
         this._write("<sheetData>");
     }
 
-    _writeRow(row) {
+    private _writeRow(row: DocRow): void {
         if (!this.startedData) {
             this._writeColumns();
             this._writeOpenSheetData();
@@ -654,7 +851,7 @@ class WorksheetWriter {
         // a row of empty cells is still written for the notes of its cells
         if (row.hasValues || row.height || someEntry(row._cells, (cell) => cell._comment)) {
             const { model } = row;
-            const options = {
+            const options: CellPrepareOptions = {
                 styles: this._workbook.styles,
                 sharedStrings: this.useSharedStrings ? this._workbook.sharedStrings : undefined,
                 hyperlinks: this._sheetRelsWriter.hyperlinksProxy,
@@ -664,6 +861,8 @@ class WorksheetWriter {
                 comments: [],
             };
             xform.row.prepare(model, options);
+            // the next shared formula index: the prepare of the cells increments it
+            this._siFormulae = options.siFormulae;
             this.stream.write(xform.row.toXml(model));
 
             if (options.comments.length) {
@@ -673,28 +872,28 @@ class WorksheetWriter {
         }
     }
 
-    _writeCloseSheetData() {
+    private _writeCloseSheetData(): void {
         this._write("</sheetData>");
     }
 
-    _writeMergeCells() {
+    private _writeMergeCells(): void {
         if (this._merges.length) {
             xmlBuffer.reset();
             xmlBuffer.addText(`<mergeCells count="${this._merges.length}">`);
-            this._merges.forEach((merge) => {
-                xmlBuffer.addText(`<mergeCell ref="${merge}"/>`);
-            });
+            for (const merge of this._merges) {
+                xmlBuffer.addText(`<mergeCell ref="${merge.toString()}"/>`);
+            }
             xmlBuffer.addText("</mergeCells>");
 
             this.stream.write(xmlBuffer);
         }
     }
 
-    _writeHyperlinks() {
+    private _writeHyperlinks(): void {
         this.stream.write(xform.hyperlinks.toXml(this._sheetRelsWriter._hyperlinks));
     }
 
-    _writeConditionalFormatting() {
+    private _writeConditionalFormatting(): void {
         const options = {
             styles: this._workbook.styles,
         };
@@ -704,47 +903,50 @@ class WorksheetWriter {
         this.stream.write(xform.conditionalFormattings.toXml(this.conditionalFormatting));
     }
 
-    _writeRowBreaks() {
+    private _writeRowBreaks(): void {
         this.stream.write(xform.rowBreaks.toXml(this.rowBreaks));
     }
 
-    _writeDataValidations() {
+    private _writeDataValidations(): void {
         this.stream.write(xform.dataValidations.toXml(this.dataValidations.model));
     }
 
-    _writeSheetProtection() {
+    private _writeSheetProtection(): void {
         this.stream.write(xform.sheetProtection.toXml(this.sheetProtection));
     }
 
-    _writePrintOptions() {
+    private _writePrintOptions(): void {
         this.stream.write(xform.printOptions.toXml(this.pageSetup));
     }
 
-    _writePageMargins() {
+    private _writePageMargins(): void {
         this.stream.write(xform.pageMargins.toXml(this.pageSetup.margins));
     }
 
-    _writePageSetup() {
+    private _writePageSetup(): void {
         this.stream.write(xform.pageSeteup.toXml(this.pageSetup));
     }
 
-    _writeHeaderFooter() {
+    private _writeHeaderFooter(): void {
         this.stream.write(xform.headerFooter.toXml(this.headerFooter));
     }
 
-    _writeExtLst() {
+    private _writeExtLst(): void {
         // x14 conditional formattings (e.g. dataBar), prepared in _writeConditionalFormatting
         this.stream.write(xform.extLst.toXml({ conditionalFormattings: this.conditionalFormatting }));
     }
 
-    _writeAutoFilter() {
+    private _writeAutoFilter(): void {
         this.stream.write(xform.autoFilter.toXml(this.autoFilter));
     }
 
-    _writeBackground() {
+    private _writeBackground(): void {
         if (this._background) {
             if (this._background.imageId !== undefined) {
                 const image = this._workbook.getImage(this._background.imageId);
+                if (!image) {
+                    throw new Error(`Unknown background image id: ${this._background.imageId}`);
+                }
                 const pictureId = this._sheetRelsWriter.addMedia({
                     Target: `../media/${image.name}`,
                     Type: RelType.Image,
@@ -759,7 +961,7 @@ class WorksheetWriter {
         }
     }
 
-    _writeLegacyData() {
+    private _writeLegacyData(): void {
         if (this.hasComments) {
             xmlBuffer.reset();
             xmlBuffer.addText(`<legacyDrawing r:id="${this._sheetCommentsWriter.vmlRelId}"/>`);
@@ -767,13 +969,12 @@ class WorksheetWriter {
         }
     }
 
-    _writeDimensions() {
-        // for some reason, Excel can't handle dimensions at the bottom of the file
-        // and we don't know the dimensions until the commit, so don't write them.
+    /** Writes nothing: Excel can't handle dimensions at the bottom of the file, and they are known only at the commit. */
+    _writeDimensions(): void {
         // this._write('<dimension ref="' + this._dimensions + '"/>');
     }
 
-    _writeCloseWorksheet() {
+    private _writeCloseWorksheet(): void {
         this._write("</worksheet>");
     }
 }

@@ -130,6 +130,18 @@ export interface WorkbookViewModel {
     firstSheet?: number;
 }
 
+/**
+ * `xl/workbook.xml` as WorkbookXform parses it (read by xlsx.ts and the stream WorkbookReader). `sheets` / `views` are
+ * `undefined` when their element is absent; `calcProperties` is always `{}` (not parsed).
+ */
+export interface WorkbookPartModel {
+    sheets?: SheetDefModel[];
+    properties: Partial<WorkbookProperties>;
+    views?: WorkbookViewModel[];
+    calcProperties: Partial<CalculationProperties>;
+    definedNames?: DefinedNameModel[];
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Workbook
 

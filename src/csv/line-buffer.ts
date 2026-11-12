@@ -1,9 +1,39 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
 import { EventEmitter } from "events";
 
-class LineBuffer extends EventEmitter {
-    constructor(options) {
+/** Options of a {@link LineBuffer}. */
+export interface LineBufferOptions {
+    /** Kept for reference: the chunks written are strings, already decoded. */
+    encoding?: BufferEncoding;
+}
+
+/** The events of a {@link LineBuffer}. */
+interface LineBufferEvents {
+    /** a complete line (without its end of line) */
+    line: [line: string];
+    /** every line was emitted (after {@link LineBuffer.end}) */
+    done: [];
+    /** the buffer was uncorked: the source can write again */
+    drain: [];
+}
+
+/**
+ * Splits text written in chunks into lines (`\n` or `\r\n`), emitted as `line` events; while corked, the lines are
+ * queued and emitted on {@link uncork}. Not used by the library itself (kept for compatibility of deep imports).
+ */
+class LineBuffer extends EventEmitter<LineBufferEvents> {
+    /** The encoding given in the options (unused). */
+    encoding: BufferEncoding | undefined;
+
+    /** The incomplete last line, until more text or {@link end} completes it. */
+    buffer: string | null;
+
+    /** While true, the lines are queued instead of emitted. */
+    corked: boolean;
+
+    /** The lines read while corked. */
+    queue: string[];
+
+    constructor(options: LineBufferOptions) {
         super();
 
         this.encoding = options.encoding;
@@ -15,35 +45,36 @@ class LineBuffer extends EventEmitter {
         this.queue = [];
     }
 
-    // Events:
-    //  line: here is a line
-    //  done: all lines emitted
-
-    write(chunk) {
-        // find line or lines in chunk and emit them if not corked
-        // or queue them if corked
+    /**
+     * Adds text: emits (or queues, when corked) the lines it completes.
+     *
+     * @returns `false` when corked (the caller should wait for `drain`)
+     */
+    write(chunk: string): boolean {
         const data = this.buffer ? this.buffer + chunk : chunk;
         const lines = data.split(/\r?\n/g);
 
         // save the last line
-        this.buffer = lines.pop();
+        this.buffer = lines.pop() ?? null;
 
-        lines.forEach(function (line) {
+        for (const line of lines) {
             if (this.corked) {
                 this.queue.push(line);
             } else {
                 this.emit("line", line);
             }
-        });
+        }
 
         return !this.corked;
     }
 
-    cork() {
+    /** Queues the lines instead of emitting them. */
+    cork(): void {
         this.corked = true;
     }
 
-    uncork() {
+    /** Emits the queued lines, then `drain`. */
+    uncork(): void {
         this.corked = false;
         this._flush();
 
@@ -51,11 +82,13 @@ class LineBuffer extends EventEmitter {
         this.emit("drain");
     }
 
-    setDefaultEncoding() {
+    /** No-op (stream interface). */
+    setDefaultEncoding(): void {
         // ?
     }
 
-    end() {
+    /** Emits the last line (if not empty), then `done`. */
+    end(): void {
         if (this.buffer) {
             this.emit("line", this.buffer);
             this.buffer = null;
@@ -63,11 +96,11 @@ class LineBuffer extends EventEmitter {
         this.emit("done");
     }
 
-    _flush() {
+    private _flush(): void {
         if (!this.corked) {
-            this.queue.forEach((line) => {
+            for (const line of this.queue) {
                 this.emit("line", line);
-            });
+            }
             this.queue = [];
         }
     }

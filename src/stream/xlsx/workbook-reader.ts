@@ -1,23 +1,88 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
 import * as fs from "fs";
 import { EventEmitter } from "events";
 import { PassThrough, Readable, pipeline } from "stream";
+import type { ReadableStream as WebReadableStream } from "stream/web";
 import * as os from "os";
 import * as path from "path";
-import { parseZipStream } from "../../utils/zip-reader";
-import parseSax from "../../utils/parse-sax";
+import { parseZipStream, type ZipReadOptions, type ZipStreamEntry } from "../../utils/zip-reader";
+import parseSax, { type SaxInput } from "../../utils/parse-sax";
 
-import StyleManager from "../../xlsx/xform/style/styles-xform";
+import StylesXform from "../../xlsx/xform/style/styles-xform";
 import WorkbookXform from "../../xlsx/xform/book/workbook-xform";
 import RelationshipsXform from "../../xlsx/xform/core/relationships-xform";
 import SharedStringXform from "../../xlsx/xform/strings/shared-string-xform";
+import type { WorkbookProperties, stream as publicStream } from "../../../index";
+import type { RelationshipModel, SharedStringValue, SheetDefModel, StyleLookup, WorkbookPartModel } from "../../types";
 
 import WorksheetReader from "./worksheet-reader";
 import HyperlinkReader from "./hyperlink-reader";
 
+/**
+ * What the WorkbookReader reads: a file name, a Node.js stream (or any object with a `pipe` method), a web
+ * ReadableStream or an async iterable of byte chunks.
+ */
+export type WorkbookReaderInput = publicStream.xlsx.WorkbookReaderInput;
+
+/**
+ * The options of the WorkbookReader, defaults applied: what to do with each kind of part, and the decompression limits
+ * (16 GiB per entry, 32 GiB in all, by default).
+ */
+export interface WorkbookReaderOptions extends ZipReadOptions {
+    /** `emit`: the worksheets are read (WorksheetReader); `ignore`: skipped. */
+    worksheets: "emit" | "ignore";
+    /** `cache`: kept for the cells; `emit`: emitted one by one (the cells then hold `{ sharedString: index }`); `ignore`. */
+    sharedStrings: "cache" | "emit" | "ignore";
+    /** The hyperlinks of the worksheets and their relationships: `cache`, `emit` or `ignore`. */
+    hyperlinks: "cache" | "emit" | "ignore";
+    /** `cache`: the cells get their styles; `ignore`. */
+    styles: "cache" | "ignore";
+    /** `emit`: an `entry` event for each part read. */
+    entries: "emit" | "ignore";
+}
+
+/** The payload of an `entry` event (`entries: "emit"`): the kind of part, and the number of a worksheet part. */
+export interface WorkbookReaderEntry {
+    type: "workbook" | "shared-strings" | "styles" | "worksheet" | "hyperlinks";
+    id?: string;
+}
+
+/** A shared string emitted by the reader (`sharedStrings: "emit"`): its index in the table and its value. */
+export interface EmittedSharedString {
+    index: number;
+    text: SharedStringValue;
+}
+
+/** An event of {@link WorkbookReader.parse}. */
+export type WorkbookReaderEvent =
+    | { readonly eventType: "shared-strings"; readonly value: EmittedSharedString }
+    | { readonly eventType: "worksheet"; readonly value: WorksheetReader }
+    | { readonly eventType: "hyperlinks"; readonly value: HyperlinkReader };
+
+/** The events of a {@link WorkbookReader} (with {@link WorkbookReader.read}). */
+interface WorkbookReaderEvents {
+    worksheet: [worksheet: WorksheetReader];
+    "shared-strings": [sharedString: EmittedSharedString];
+    hyperlinks: [hyperlinks: HyperlinkReader];
+    entry: [entry: WorkbookReaderEntry];
+    end: [];
+    finished: [];
+    error: [error: unknown];
+}
+
+/**
+ * The styles manager of the reader (StylesXform). TS-WAVE2: styles-xform.ts is typed in parallel; the API used by the
+ * stream reader.
+ */
+export interface ReaderStyles extends StyleLookup {
+    init(): void;
+    parseStream(stream: SaxInput): Promise<unknown>;
+}
+
+// TS-WAVE2: styles-xform.ts is typed in parallel; its constructor as used here, asserted once (guide rule 15)
+const StyleManager = StylesXform as unknown as new () => ReaderStyles;
+
 // workbook.xml.rels targets are relative to xl/ or absolute from the package root (openpyxl)
-function workbookPartPath(target) {
+function workbookPartPath(target: unknown): string | undefined {
     if (typeof target !== "string") {
         return undefined;
     }
@@ -27,28 +92,41 @@ function workbookPartPath(target) {
 // size of the chunks read back from the spool file
 const SPOOL_CHUNK = 64 * 1024;
 
+// a worksheet in the spool file: bytes [start, end)
+interface SpoolRange {
+    readonly start: number;
+    readonly end: number;
+    released: boolean;
+}
+
 // Worksheets that come before the parts they depend on are spooled to a single temp file, and read back range by range
 // when the consumer reads them: one file descriptor whatever the number of worksheets, and no I/O for the worksheets
 // that are skipped. The file stays open, so that a consumer can collect the readers and read them after the iteration
 // (when the temp dir is gone: unlink semantics of POSIX and of Windows' POSIX delete, which libuv uses). It is closed
 // when the iteration stops early, or once every worksheet has been read or its reader garbage collected.
 class SheetSpool {
-    constructor(handle) {
+    readonly handle: fs.promises.FileHandle;
+    size: number;
+    // ranges that may still be read
+    pending: number;
+    // no more ranges will be added
+    complete: boolean;
+    closing: Promise<void> | null;
+
+    constructor(handle: fs.promises.FileHandle) {
         this.handle = handle;
         this.size = 0;
-        // ranges that may still be read
         this.pending = 0;
-        // no more ranges will be added
         this.complete = false;
         this.closing = null;
     }
 
-    static async create(dir) {
+    static async create(dir: string): Promise<SheetSpool> {
         return new SheetSpool(await fs.promises.open(path.join(dir, "worksheets.xml"), "w+"));
     }
 
     // writes the data of a zip entry; returns its range
-    async append(entry) {
+    async append(entry: AsyncIterable<Uint8Array>): Promise<SpoolRange> {
         const start = this.size;
         for await (const chunk of entry) {
             for (let offset = 0; offset < chunk.length;) {
@@ -62,7 +140,7 @@ class SheetSpool {
     }
 
     // the data of a range, read on demand
-    async *read(range) {
+    async *read(range: SpoolRange): AsyncGenerator<Buffer, void, undefined> {
         try {
             for (let position = range.start; position < range.end;) {
                 const buffer = Buffer.allocUnsafe(Math.min(SPOOL_CHUNK, range.end - position));
@@ -80,7 +158,7 @@ class SheetSpool {
     }
 
     // the range will not be read (again); returns the closing of the file, if any
-    release(range) {
+    release(range: SpoolRange): Promise<void> | null {
         if (!range.released) {
             range.released = true;
             this.pending--;
@@ -88,19 +166,19 @@ class SheetSpool {
         return this._closeWhenDone();
     }
 
-    finish() {
+    finish(): Promise<void> | null {
         this.complete = true;
         return this._closeWhenDone();
     }
 
-    close() {
+    close(): Promise<void> {
         if (!this.closing) {
             this.closing = this.handle.close();
         }
         return this.closing;
     }
 
-    _closeWhenDone() {
+    private _closeWhenDone(): Promise<void> | null {
         return this.complete && !this.pending ? this.close() : this.closing;
     }
 }
@@ -109,14 +187,14 @@ class SheetSpool {
 // once the reader is garbage collected, so that the spool file does not stay open for the life of the process. Closing
 // the file is best-effort cleanup there: nothing awaits it, so a failure is ignored instead of becoming an unhandled
 // rejection (the file was already removed with its temp dir).
-const spooledSheets = new FinalizationRegistry(({ spool, range }) => {
+const spooledSheets = new FinalizationRegistry<{ spool: SheetSpool; range: SpoolRange }>(({ spool, range }) => {
     const closing = spool.release(range);
     if (closing) {
         closing.catch(() => {});
     }
 });
 
-const DEFAULT_OPTIONS = {
+const DEFAULT_OPTIONS: Readonly<Pick<WorkbookReaderOptions, "worksheets" | "sharedStrings" | "hyperlinks" | "styles" | "entries">> = {
     worksheets: "emit",
     sharedStrings: "cache",
     hyperlinks: "ignore",
@@ -124,8 +202,54 @@ const DEFAULT_OPTIONS = {
     entries: "ignore",
 };
 
-class WorkbookReader extends EventEmitter {
-    constructor(input, options = {}) {
+// the names of the worksheet parts and of their relationships (the number of the part is captured)
+const WORKSHEET_PART = /xl\/worksheets\/sheet(\d+)[.]xml/;
+const WORKSHEET_RELS_PART = /xl\/worksheets\/_rels\/sheet(\d+)[.]xml.rels/;
+
+// the byte chunks of the file (Buffers, Uint8Arrays...)
+type ByteChunks = AsyncIterable<unknown, unknown, undefined>;
+
+// a loosely typed input, to tell its kind
+type InputCandidate = Partial<ByteChunks & { getReader: unknown; pipe: unknown }> | null | undefined;
+
+/**
+ * The streaming reader of an xlsx file: reads the parts as they come out of the zip, in one pass, holding only the
+ * shared strings (when cached), the styles (when cached) and a worksheet at a time (the rows are not kept).
+ *
+ * Iterate it (`for await (const worksheet of reader)`), then each worksheet for its rows; or call {@link read} and
+ * listen to the events (`worksheet`, `shared-strings`, `hyperlinks`, `entry`, `end`, `finished`, `error`). A worksheet
+ * that comes before the parts it depends on (shared strings, workbook) is spooled to a temp file.
+ */
+class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
+    /** For reference: the valid values of the options. */
+    static readonly Options = {
+        worksheets: ["emit", "ignore"],
+        sharedStrings: ["cache", "emit", "ignore"],
+        hyperlinks: ["cache", "emit", "ignore"],
+        styles: ["cache", "ignore"],
+        entries: ["emit", "ignore"],
+    };
+
+    /** The input given to the constructor (read when {@link parse} gets none). */
+    input: WorkbookReaderInput | undefined;
+    options: WorkbookReaderOptions;
+    /** The styles: the default ones, replaced by those of the file with `styles: "cache"`. */
+    styles: ReaderStyles;
+    /** The stream being read. */
+    stream?: ByteChunks;
+    /** `sharedStrings: "cache"`: the shared strings table. */
+    sharedStrings?: SharedStringValue[];
+    /** The relationships of the workbook part. */
+    workbookRels?: RelationshipModel[] | null;
+    /** The workbook part. */
+    model?: WorkbookPartModel | null;
+    /** The workbook properties (`date1904`), as the workbookPr xform holds them. */
+    properties?: { readonly model?: Partial<WorkbookProperties> | null };
+
+    private _sheetIndex?: Map<string | undefined, SheetDefModel | undefined> | null;
+    private _stylesParsed?: boolean;
+
+    constructor(input: WorkbookReaderInput | undefined, options: Partial<WorkbookReaderOptions> = {}) {
         super();
 
         this.input = input;
@@ -136,40 +260,50 @@ class WorkbookReader extends EventEmitter {
         this.styles.init();
     }
 
-    // a file name, or any readable: a Node stream (or a readable-stream / older one), a web
-    // ReadableStream or an async iterable of byte chunks
-    _getStream(input) {
+    // a file name, or any readable: a Node stream (or a readable-stream / older one), a web ReadableStream or an async
+    // iterable of byte chunks
+    private _getStream(input: WorkbookReaderInput | undefined): ByteChunks {
         if (typeof input === "string") {
             return fs.createReadStream(input);
         }
-        if (input && typeof input[Symbol.asyncIterator] === "function") {
-            return input;
+        const candidate = input as InputCandidate;
+        if (candidate && typeof candidate[Symbol.asyncIterator] === "function") {
+            return candidate as ByteChunks;
         }
-        if (input && typeof input.getReader === "function") {
-            return Readable.fromWeb(input);
+        if (candidate && typeof candidate.getReader === "function") {
+            return Readable.fromWeb(candidate as WebReadableStream);
         }
-        if (input && typeof input.pipe === "function") {
+        if (candidate && typeof candidate.pipe === "function") {
             // pipeline (unlike pipe) forwards the errors of the input
-            return pipeline(input, new PassThrough(), () => {});
+            return pipeline(candidate as NodeJS.ReadableStream, new PassThrough(), () => {});
         }
-        throw new Error(`Could not recognise input: ${input}`);
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- the input as it always was in this message
+        throw new Error(`Could not recognise input: ${String(input)}`);
     }
 
-    async read(input, options) {
+    /**
+     * Reads the whole file, emitting the events of the parts (and reading each worksheet and hyperlinks part emitted),
+     * then `end` and `finished`.
+     *
+     * @param input - replaces the constructor's
+     * @param options - replace the constructor's, on top of the defaults
+     * @returns resolves once the file is read; errors are emitted (`error`), not thrown
+     */
+    async read(input?: WorkbookReaderInput, options?: Partial<WorkbookReaderOptions>): Promise<void> {
         try {
-            for await (const { eventType, value } of this.parse(input, options)) {
-                switch (eventType) {
+            for await (const event of this.parse(input, options)) {
+                switch (event.eventType) {
                     case "shared-strings":
-                        this.emit(eventType, value);
+                        this.emit(event.eventType, event.value);
                         break;
                     case "worksheet":
-                        this.emit(eventType, value);
-                        await value.read();
+                        this.emit(event.eventType, event.value);
+                        await event.value.read();
                         break;
                     case "hyperlinks":
-                        this.emit(eventType, value);
+                        this.emit(event.eventType, event.value);
                         // the zip moves on to the next entry once this one is read
-                        await value.read();
+                        await event.value.read();
                         break;
                 }
             }
@@ -180,30 +314,40 @@ class WorkbookReader extends EventEmitter {
         }
     }
 
-    async *[Symbol.asyncIterator]() {
-        for await (const { eventType, value } of this.parse()) {
-            if (eventType === "worksheet") {
-                yield value;
+    /** The worksheets of the file (`worksheets: "emit"`), each to be read before the next one comes. */
+    async *[Symbol.asyncIterator](): AsyncGenerator<WorksheetReader, void, undefined> {
+        for await (const event of this.parse()) {
+            if (event.eventType === "worksheet") {
+                yield event.value;
             }
         }
     }
 
-    async *parse(input, options) {
+    /**
+     * Reads the parts of the file as they come.
+     *
+     * @param input - replaces the constructor's
+     * @param options - replace the constructor's, on top of the defaults
+     * @returns the worksheets, shared strings and hyperlinks, as the options select them
+     * @throws Error on an unrecognised input, an invalid zip, a decompression limit exceeded, or invalid XML
+     */
+    async *parse(
+        input?: WorkbookReaderInput,
+        options?: Partial<WorkbookReaderOptions>
+    ): AsyncGenerator<WorkbookReaderEvent, void, undefined> {
         // options given here replace the constructor's, on top of the defaults
         if (options) this.options = { ...DEFAULT_OPTIONS, ...options };
         const stream = (this.stream = this._getStream(input || this.input));
 
         // worksheets, deferred for parsing after shared strings reading
-        const waitingWorkSheets = [];
+        const waitingWorkSheets: { sheetNo: string; range: SpoolRange }[] = [];
         let completed = false;
-        let tmpDir = null;
-        let spool = null;
+        let tmpDir: string | null = null;
+        let spool: SheetSpool | null = null;
         try {
             // stopping the iteration early releases the input (a stream is destroyed); input errors
             // reject it; the data of the entries left unread is skipped
             for await (const entry of parseZipStream(stream, this.options)) {
-                let match;
-                let sheetNo;
                 switch (entry.path) {
                     case "_rels/.rels":
                         break;
@@ -219,34 +363,37 @@ class WorkbookReader extends EventEmitter {
                     case "xl/styles.xml":
                         await this._parseStyles(entry);
                         break;
-                    default:
-                        if (entry.path.match(/xl\/worksheets\/sheet\d+[.]xml/)) {
-                            match = entry.path.match(/xl\/worksheets\/sheet(\d+)[.]xml/);
-                            sheetNo = match[1];
+                    default: {
+                        let match = WORKSHEET_PART.exec(entry.path);
+                        if (match) {
+                            const sheetNo = match[1]!;
                             if (this._worksheetDependenciesParsed() || this.options.worksheets !== "emit") {
                                 // ignored worksheets are not read: nothing to spool
                                 yield* this._parseWorksheet(entry, sheetNo);
                             } else {
                                 // defer worksheet until the parts it depends on are known: spool to a temp file
-                                if (!tmpDir) {
+                                if (!spool) {
                                     tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "exceljs-"));
                                     spool = await SheetSpool.create(tmpDir);
                                 }
                                 // rejects on entry errors too (truncated or corrupt zip data)
                                 waitingWorkSheets.push({ sheetNo, range: await spool.append(entry) });
                             }
-                        } else if (entry.path.match(/xl\/worksheets\/_rels\/sheet\d+[.]xml.rels/)) {
-                            match = entry.path.match(/xl\/worksheets\/_rels\/sheet(\d+)[.]xml.rels/);
-                            sheetNo = match[1];
-                            yield* this._parseHyperlinks(entry, sheetNo);
+                        } else if ((match = WORKSHEET_RELS_PART.exec(entry.path))) {
+                            yield* this._parseHyperlinks(entry, match[1]!);
                         }
                         break;
+                    }
                 }
             }
 
             for (const { sheetNo, range } of waitingWorkSheets) {
+                // a range was spooled: the spool exists
+                const sheetSpool = spool!;
                 // read when the consumer reads the worksheet, during or after the iteration
-                yield* this._parseWorksheet(spool.read(range), sheetNo, (reader) => spooledSheets.register(reader, { spool, range }));
+                yield* this._parseWorksheet(sheetSpool.read(range), sheetNo, (reader) =>
+                    spooledSheets.register(reader, { spool: sheetSpool, range })
+                );
             }
             completed = true;
         } finally {
@@ -266,66 +413,64 @@ class WorkbookReader extends EventEmitter {
     }
 
     // shared strings, sheet names (workbook rels + workbook) and, when cached, styles
-    _worksheetDependenciesParsed() {
+    private _worksheetDependenciesParsed(): boolean {
         const stylesReady = this.options.styles !== "cache" || this._stylesParsed;
         return Boolean(this.sharedStrings && this.workbookRels && this.model && stylesReady);
     }
 
-    _emitEntry(payload) {
+    private _emitEntry(payload: WorkbookReaderEntry): void {
         if (this.options.entries === "emit") {
             this.emit("entry", payload);
         }
     }
 
-    async _parseRels(entry) {
+    private async _parseRels(entry: ZipStreamEntry): Promise<void> {
         const xform = new RelationshipsXform();
         this.workbookRels = await xform.parseStream(entry);
         this._sheetIndex = null;
     }
 
-    async _parseWorkbook(entry) {
+    private async _parseWorkbook(entry: ZipStreamEntry): Promise<void> {
         this._emitEntry({ type: "workbook" });
 
         const workbook = new WorkbookXform();
         await workbook.parseStream(entry);
 
-        this.properties = workbook.map.workbookPr;
-        this.model = workbook.model;
+        // TS-WAVE2: workbook-xform.ts is typed in parallel; its workbookPr child and its model
+        this.properties = (workbook.map as unknown as { workbookPr: { model?: Partial<WorkbookProperties> | null } }).workbookPr;
+        this.model = workbook.model as WorkbookPartModel | null | undefined;
         this._sheetIndex = null;
     }
 
     // the <sheet> of each worksheet part, from the workbook rels and workbook.xml (built once: a lookup per worksheet
     // part in the lists would be quadratic)
-    _sheetOfPart(sheetPath) {
+    private _sheetOfPart(sheetPath: string): SheetDefModel | undefined {
         if (!this._sheetIndex) {
-            const sheetsByRId = new Map();
-            ((this.model && this.model.sheets) || []).forEach((sheet) => {
+            const sheetsByRId = new Map<string, SheetDefModel>();
+            for (const sheet of (this.model && this.model.sheets) || []) {
                 if (!sheetsByRId.has(sheet.rId)) {
                     sheetsByRId.set(sheet.rId, sheet);
                 }
-            });
+            }
             // the first relationship of each part, as before
-            this._sheetIndex = new Map();
-            (this.workbookRels || []).forEach((rel) => {
+            const sheetIndex = (this._sheetIndex = new Map());
+            for (const rel of this.workbookRels || []) {
                 const partPath = workbookPartPath(rel.Target);
-                if (!this._sheetIndex.has(partPath)) {
-                    this._sheetIndex.set(partPath, sheetsByRId.get(rel.Id));
+                if (!sheetIndex.has(partPath)) {
+                    sheetIndex.set(partPath, sheetsByRId.get(rel.Id));
                 }
-            });
+            }
         }
         return this._sheetIndex.get(sheetPath);
     }
 
-    async *_parseSharedStrings(entry) {
+    private async *_parseSharedStrings(entry: ZipStreamEntry): AsyncGenerator<WorkbookReaderEvent, void, undefined> {
         this._emitEntry({ type: "shared-strings" });
-        switch (this.options.sharedStrings) {
-            case "cache":
-                this.sharedStrings = [];
-                break;
-            case "emit":
-                break;
-            default:
-                return;
+        let cache: SharedStringValue[] | null = null;
+        if (this.options.sharedStrings === "cache") {
+            cache = this.sharedStrings = [];
+        } else if (this.options.sharedStrings !== "emit") {
+            return;
         }
 
         // each <si> is read by the xform of the document reader: same rich text fonts, phonetic runs and _xHHHH_ escapes
@@ -333,29 +478,31 @@ class WorkbookReader extends EventEmitter {
         let inString = false;
         let index = 0;
         for await (const events of parseSax(entry)) {
-            for (const { eventType, value } of events) {
-                if (eventType === "opentag") {
-                    if (inString || value.name === "si") {
+            for (const event of events) {
+                if (event.eventType === "opentag") {
+                    if (inString || event.value.name === "si") {
                         inString = true;
-                        xform.parseOpen(value);
+                        xform.parseOpen(event.value);
                     }
-                } else if (eventType === "text") {
+                } else if (event.eventType === "text") {
                     if (inString) {
-                        xform.parseText(value);
+                        xform.parseText(event.value);
                     }
-                } else if (eventType === "closetag" && inString && !xform.parseClose(value.name)) {
+                } else if (inString && !xform.parseClose(event.value.name)) {
                     inString = false;
-                    if (this.options.sharedStrings === "cache") {
-                        this.sharedStrings.push(xform.model);
+                    // the <si> was opened: the xform has its model
+                    const text = xform.model!;
+                    if (cache) {
+                        cache.push(text);
                     } else {
-                        yield { eventType: "shared-strings", value: { index: index++, text: xform.model } };
+                        yield { eventType: "shared-strings", value: { index: index++, text } };
                     }
                 }
             }
         }
     }
 
-    async _parseStyles(entry) {
+    private async _parseStyles(entry: ZipStreamEntry): Promise<void> {
         this._emitEntry({ type: "styles" });
         if (this.options.styles === "cache") {
             this.styles = new StyleManager();
@@ -364,7 +511,11 @@ class WorkbookReader extends EventEmitter {
         }
     }
 
-    *_parseWorksheet(iterator, sheetNo, onCreated) {
+    private *_parseWorksheet(
+        iterator: SaxInput,
+        sheetNo: string,
+        onCreated?: (reader: WorksheetReader) => void
+    ): Generator<WorkbookReaderEvent, void, undefined> {
         this._emitEntry({ type: "worksheet", id: sheetNo });
         const worksheetReader = new WorksheetReader({
             workbook: this,
@@ -380,14 +531,14 @@ class WorkbookReader extends EventEmitter {
         if (matchingSheet) {
             worksheetReader.id = matchingSheet.id;
             worksheetReader.name = matchingSheet.name;
-            worksheetReader.state = matchingSheet.state;
+            worksheetReader.state = matchingSheet.state as WorksheetReader["state"];
         }
         if (this.options.worksheets === "emit") {
             yield { eventType: "worksheet", value: worksheetReader };
         }
     }
 
-    *_parseHyperlinks(iterator, sheetNo) {
+    private *_parseHyperlinks(iterator: SaxInput, sheetNo: string): Generator<WorkbookReaderEvent, void, undefined> {
         this._emitEntry({ type: "hyperlinks", id: sheetNo });
         const hyperlinksReader = new HyperlinkReader({
             workbook: this,
@@ -400,14 +551,5 @@ class WorkbookReader extends EventEmitter {
         }
     }
 }
-
-// for reference - these are the valid values for options
-WorkbookReader.Options = {
-    worksheets: ["emit", "ignore"],
-    sharedStrings: ["cache", "emit", "ignore"],
-    hyperlinks: ["cache", "emit", "ignore"],
-    styles: ["cache", "ignore"],
-    entries: ["emit", "ignore"],
-};
 
 export default WorkbookReader;
