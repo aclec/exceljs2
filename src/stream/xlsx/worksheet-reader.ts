@@ -31,6 +31,33 @@ const Column = ColumnJs as unknown as DocColumnConstructor;
 const Dimensions = RangeJs as unknown as DocRangeConstructor;
 const { parseRowNumber } = RowXform as unknown as { parseRowNumber(this: void, r: string | undefined): number };
 
+/**
+ * The column number of a cell reference (the `r` of a `<c>`), as `colCache.decodeAddress(r).col`. A canonical
+ * reference (`AB12`: letters then digits, in the grid) is scanned without building its decoded address (this runs for
+ * every cell); anything else goes through decodeAddress, which validates it (bounds, `$` signs...).
+ */
+export function columnOfReference(r: string): number {
+    let col = 0;
+    let row = 0;
+    let i = 0;
+    let char = r.charCodeAt(0);
+    // letters: A (65) to Z (90)
+    while (char >= 65 && char <= 90) {
+        col = col * 26 + char - 64;
+        char = r.charCodeAt(++i);
+    }
+    const letters = i;
+    // digits: 0 (48) to 9 (57)
+    while (char >= 48 && char <= 57) {
+        row = row * 10 + char - 48;
+        char = r.charCodeAt(++i);
+    }
+    if (letters > 0 && i > letters && i === r.length && col <= colCache.MAX_COLS && row <= colCache.MAX_ROWS) {
+        return col;
+    }
+    return colCache.decodeAddress(r).col;
+}
+
 // value of a t="d" cell: a Date, or the text when it is not a valid ISO 8601 date (see iso-date)
 const parseIsoDate = (text: string): Date | string => parseIsoDateOrUndefined(text) || text;
 
@@ -365,7 +392,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                             case "c":
                                 if (row) {
                                     // r is optional: a cell without it follows the previous one
-                                    colNumber = attributes.r ? colCache.decodeAddress(attributes.r).col : colNumber + 1;
+                                    colNumber = attributes.r ? columnOfReference(attributes.r) : colNumber + 1;
                                     c = {
                                         ref: attributes.r || colCache.encodeAddress(row.number, colNumber),
                                         col: colNumber,

@@ -94,6 +94,28 @@ describe("stream I/O regressions", () => {
         });
     });
 
+    describe("WorksheetReader column of a cell reference", () => {
+        const { columnOfReference } = require("../../lib/stream/xlsx/worksheet-reader");
+        const colCache = verquire("utils/col-cache");
+
+        // what decodeAddress returns, or the message of the error it throws
+        const outcome = (fn, ref) => {
+            try {
+                return fn(ref);
+            } catch (error) {
+                return error.message;
+            }
+        };
+
+        it("is the column of colCache.decodeAddress for any reference", () => {
+            const refs = ["A1", "Z9", "AA10", "XFD1", "XFE1", "A1048576", "A1048577", "A0", "B", "12", "$B$3", "b3", "B3:C4"];
+            refs.push("A1x", "", " A1", "AAAA1", "XFD1048576", `A${"9".repeat(400)}`, "A01", "Ä1");
+            for (const ref of refs) {
+                expect(outcome(columnOfReference, ref), ref).to.equal(outcome((r) => colCache.decodeAddress(r).col, ref));
+            }
+        });
+    });
+
     describe("HyperlinkReader", () => {
         const HyperlinkReader = verquire("stream/xlsx/hyperlink-reader");
 
