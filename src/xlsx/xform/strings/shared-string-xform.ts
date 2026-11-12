@@ -1,10 +1,11 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { SharedStringValue } from "../../../types";
 import TextXform from "./text-xform";
 import RichTextXform from "./rich-text-xform";
 import PhoneticTextXform from "./phonetic-text-xform";
 
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 
 // <si>
 //   <r></r><r></r>...
@@ -13,8 +14,16 @@ import BaseXform from "../base-xform";
 //   <t></t>
 // </si>
 
-class SharedStringXform extends BaseXform {
-    constructor(model) {
+/**
+ * A shared string, `<si>` (ECMA-376 CT_Rst: `<t>?<r>*<rPh>*`): plain text or rich text runs. Phonetic runs are parsed and
+ * dropped. Parsing: an empty `<si/>` (or one holding only phonetic runs) is `""`; a leading `<t>` followed by runs is
+ * the first, unformatted run. Rendering skips the runs without text (an `<si>` left without runs gets an empty `<t>`).
+ */
+class SharedStringXform extends BaseXform<SharedStringValue> {
+    declare map: { readonly r: RichTextXform; readonly t: TextXform; readonly rPh: PhoneticTextXform };
+
+    /** @param model - the initial model */
+    constructor(model?: SharedStringValue) {
         super();
 
         this.model = model;
@@ -26,38 +35,44 @@ class SharedStringXform extends BaseXform {
         };
     }
 
-    get tag() {
+    /** The element: `si`. */
+    get tag(): string {
         return "si";
     }
 
-    render(xmlStream, model) {
+    /** @param model - `null` / `undefined` render an empty `<si/>` */
+    override render(xmlStream: XmlStream, model: SharedStringValue | null | undefined): void {
         xmlStream.openNode(this.tag);
-        if (model && model.hasOwnProperty("richText") && model.richText) {
+        if (model && typeof model === "object" && Object.hasOwn(model, "richText") && model.richText) {
             const runs = model.richText.filter((run) => !RichTextXform.isEmpty(run));
             if (runs.length) {
-                runs.forEach((run) => {
-                    this.map.r.render(xmlStream, run);
-                });
+                const { r } = this.map;
+                for (const run of runs) {
+                    r.render(xmlStream, run);
+                }
             } else {
                 this.map.t.render(xmlStream, "");
             }
         } else if (model !== undefined && model !== null) {
-            this.map.t.render(xmlStream, model);
+            // a string; an object without runs is written as its string, as it always was
+            this.map.t.render(xmlStream, model as string);
         }
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<si>` and its content */
+    override parseOpen(node: SaxTag): boolean {
         const { name } = node;
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
         }
         if (name === this.tag) {
-            this.model = {};
+            // nothing read yet: completed by the runs, or "" at the end
+            this.model = undefined;
             return true;
         }
-        this.parser = this.map[name];
+        this.parser = ownEntry(this.map, name);
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -65,33 +80,30 @@ class SharedStringXform extends BaseXform {
         return false;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<si>` */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                switch (name) {
-                    case "r": {
-                        if (typeof this.model === "string") {
-                            // CT_Rst is <t>?<r>*: a leading <t> is an unformatted first run
-                            this.model = { richText: [{ text: this.model }] };
-                        }
-                        let rt = this.model.richText;
-                        if (!rt) {
-                            rt = this.model.richText = [];
-                        }
-                        rt.push(this.parser.model);
-                        break;
+                // a child closed (its model is complete)
+                if (this.parser === this.map.r) {
+                    const run = this.map.r.model!;
+                    const { model } = this;
+                    if (typeof model === "string") {
+                        // CT_Rst is <t>?<r>*: a leading <t> is an unformatted first run
+                        this.model = { richText: [{ text: model }, run] };
+                    } else if (model) {
+                        model.richText.push(run);
+                    } else {
+                        this.model = { richText: [run] };
                     }
-                    case "t":
-                        this.model = this.parser.model;
-                        break;
-                    default:
-                        break;
+                } else if (this.parser === this.map.t) {
+                    this.model = this.map.t.model!;
                 }
                 this.parser = undefined;
             }
@@ -99,7 +111,7 @@ class SharedStringXform extends BaseXform {
         }
         switch (name) {
             case this.tag:
-                if (this.model && typeof this.model === "object" && !this.model.richText) {
+                if (this.model === undefined || this.model === null) {
                     // an empty <si/> (or one holding only phonetic runs) is the empty string
                     this.model = "";
                 }

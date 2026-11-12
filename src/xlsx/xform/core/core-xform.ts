@@ -1,17 +1,68 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { CoreModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 import DateXform from "../simple/date-xform";
 import StringXform from "../simple/string-xform";
 import IntegerXform from "../simple/integer-xform";
 
 // an Invalid Date (set by the app) is not written
-function validDate(date) {
+function validDate(date: Date | undefined): Date | undefined {
     return date instanceof Date && Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-class CoreXform extends BaseXform {
+/**
+ * `docProps/core.xml`, the core properties (Dublin Core terms). Other Dublin Core terms (dc:contributor,
+ * dcterms:available...) are skipped when parsing. A date that is not valid is neither written nor read.
+ */
+class CoreXform extends BaseXform<CoreModel> {
+    /** Formats a date as W3CDTF (ISO 8601 without milliseconds). */
+    static DateFormat(this: void, dt: Date): string {
+        return dt.toISOString().replace(/[.]\d{3}/, "");
+    }
+
+    /**
+     * Parses a W3CDTF date. A date that is not valid is read as undefined: it used to load as an Invalid Date, on which
+     * every later write failed (toISOString throws).
+     */
+    static DateParse(this: void, str: string | undefined): Date | undefined {
+        return validDate(new Date(str ?? NaN));
+    }
+
+    /** The attributes of a W3CDTF date element. */
+    static readonly DateAttrs: XmlAttributes = { "xsi:type": "dcterms:W3CDTF" };
+
+    /** The namespaces of `<cp:coreProperties>`. */
+    static readonly CORE_PROPERTY_ATTRIBUTES: XmlAttributes = {
+        "xmlns:cp": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+        "xmlns:dc": "http://purl.org/dc/elements/1.1/",
+        "xmlns:dcterms": "http://purl.org/dc/terms/",
+        "xmlns:dcmitype": "http://purl.org/dc/dcmitype/",
+        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+    };
+
+    declare map: {
+        readonly "dc:creator": StringXform;
+        readonly "dc:title": StringXform;
+        readonly "dc:subject": StringXform;
+        readonly "dc:description": StringXform;
+        readonly "dc:identifier": StringXform;
+        readonly "dc:language": StringXform;
+        readonly "cp:keywords": StringXform;
+        readonly "cp:category": StringXform;
+        readonly "cp:lastModifiedBy": StringXform;
+        readonly "cp:lastPrinted": DateXform;
+        readonly "cp:revision": IntegerXform;
+        readonly "cp:version": StringXform;
+        readonly "cp:contentStatus": StringXform;
+        readonly "cp:contentType": StringXform;
+        readonly "dcterms:created": DateXform;
+        readonly "dcterms:modified": DateXform;
+    };
+
+    /** The depth inside an element that is skipped (not modelled); 0 outside such an element. */
+    private skipDepth = 0;
+
     constructor() {
         super();
 
@@ -45,32 +96,34 @@ class CoreXform extends BaseXform {
         };
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: CoreModel): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
 
         xmlStream.openNode("cp:coreProperties", CoreXform.CORE_PROPERTY_ATTRIBUTES);
 
-        this.map["dc:creator"].render(xmlStream, model.creator);
-        this.map["dc:title"].render(xmlStream, model.title);
-        this.map["dc:subject"].render(xmlStream, model.subject);
-        this.map["dc:description"].render(xmlStream, model.description);
-        this.map["dc:identifier"].render(xmlStream, model.identifier);
-        this.map["dc:language"].render(xmlStream, model.language);
-        this.map["cp:keywords"].render(xmlStream, model.keywords);
-        this.map["cp:category"].render(xmlStream, model.category);
-        this.map["cp:lastModifiedBy"].render(xmlStream, model.lastModifiedBy);
-        this.map["cp:lastPrinted"].render(xmlStream, validDate(model.lastPrinted));
-        this.map["cp:revision"].render(xmlStream, model.revision);
-        this.map["cp:version"].render(xmlStream, model.version);
-        this.map["cp:contentStatus"].render(xmlStream, model.contentStatus);
-        this.map["cp:contentType"].render(xmlStream, model.contentType);
-        this.map["dcterms:created"].render(xmlStream, validDate(model.created));
-        this.map["dcterms:modified"].render(xmlStream, validDate(model.modified));
+        const { map } = this;
+        map["dc:creator"].render(xmlStream, model.creator);
+        map["dc:title"].render(xmlStream, model.title);
+        map["dc:subject"].render(xmlStream, model.subject);
+        map["dc:description"].render(xmlStream, model.description);
+        map["dc:identifier"].render(xmlStream, model.identifier);
+        map["dc:language"].render(xmlStream, model.language);
+        map["cp:keywords"].render(xmlStream, model.keywords);
+        map["cp:category"].render(xmlStream, model.category);
+        map["cp:lastModifiedBy"].render(xmlStream, model.lastModifiedBy);
+        map["cp:lastPrinted"].render(xmlStream, validDate(model.lastPrinted));
+        map["cp:revision"].render(xmlStream, model.revision);
+        map["cp:version"].render(xmlStream, model.version);
+        map["cp:contentStatus"].render(xmlStream, model.contentStatus);
+        map["cp:contentType"].render(xmlStream, model.contentType);
+        map["dcterms:created"].render(xmlStream, validDate(model.created));
+        map["dcterms:modified"].render(xmlStream, validDate(model.modified));
 
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element of the part is accepted (unknown ones are skipped with their content) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -85,7 +138,7 @@ class CoreXform extends BaseXform {
                 this.skipDepth = 0;
                 return true;
             default:
-                this.parser = this.map[node.name];
+                this.parser = ownEntry(this.map, node.name);
                 if (this.parser) {
                     this.parser.parseOpen(node);
                     return true;
@@ -96,13 +149,14 @@ class CoreXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /** @throws Error on an end tag that matches no start tag of the part */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -115,47 +169,32 @@ class CoreXform extends BaseXform {
         }
         switch (name) {
             case "cp:coreProperties":
-            case "coreProperties":
+            case "coreProperties": {
+                // (`?? undefined`: a child's model is null only after a reset, which this xform never does)
+                const { map } = this;
                 this.model = {
-                    creator: this.map["dc:creator"].model,
-                    title: this.map["dc:title"].model,
-                    subject: this.map["dc:subject"].model,
-                    description: this.map["dc:description"].model,
-                    identifier: this.map["dc:identifier"].model,
-                    language: this.map["dc:language"].model,
-                    keywords: this.map["cp:keywords"].model,
-                    category: this.map["cp:category"].model,
-                    lastModifiedBy: this.map["cp:lastModifiedBy"].model,
-                    lastPrinted: this.map["cp:lastPrinted"].model,
-                    revision: this.map["cp:revision"].model,
-                    contentStatus: this.map["cp:contentStatus"].model,
-                    contentType: this.map["cp:contentType"].model,
-                    created: this.map["dcterms:created"].model,
-                    modified: this.map["dcterms:modified"].model,
+                    creator: map["dc:creator"].model ?? undefined,
+                    title: map["dc:title"].model ?? undefined,
+                    subject: map["dc:subject"].model ?? undefined,
+                    description: map["dc:description"].model ?? undefined,
+                    identifier: map["dc:identifier"].model ?? undefined,
+                    language: map["dc:language"].model ?? undefined,
+                    keywords: map["cp:keywords"].model ?? undefined,
+                    category: map["cp:category"].model ?? undefined,
+                    lastModifiedBy: map["cp:lastModifiedBy"].model ?? undefined,
+                    lastPrinted: map["cp:lastPrinted"].model ?? undefined,
+                    revision: map["cp:revision"].model ?? undefined,
+                    contentStatus: map["cp:contentStatus"].model ?? undefined,
+                    contentType: map["cp:contentType"].model ?? undefined,
+                    created: map["dcterms:created"].model ?? undefined,
+                    modified: map["dcterms:modified"].model ?? undefined,
                 };
                 return false;
+            }
             default:
                 throw new Error(`Unexpected xml node in parseClose: ${name}`);
         }
     }
 }
-
-CoreXform.DateFormat = function (dt) {
-    return dt.toISOString().replace(/[.]\d{3}/, "");
-};
-// a date that is not valid is read as undefined: it used to load as an Invalid Date, on which every later write
-// failed (toISOString throws)
-CoreXform.DateParse = function (str) {
-    return validDate(new Date(str));
-};
-CoreXform.DateAttrs = { "xsi:type": "dcterms:W3CDTF" };
-
-CoreXform.CORE_PROPERTY_ATTRIBUTES = {
-    "xmlns:cp": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
-    "xmlns:dc": "http://purl.org/dc/elements/1.1/",
-    "xmlns:dcterms": "http://purl.org/dc/terms/",
-    "xmlns:dcmitype": "http://purl.org/dc/dcmitype/",
-    "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-};
 
 export default CoreXform;

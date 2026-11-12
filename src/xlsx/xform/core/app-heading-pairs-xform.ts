@@ -1,9 +1,13 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
 import BaseXform from "../base-xform";
 
-class AppHeadingPairsXform extends BaseXform {
-    render(xmlStream, model) {
+/**
+ * `<HeadingPairs>` of `docProps/app.xml`: one "Worksheets" heading with the number of worksheets. Rendered from the
+ * worksheets (only their count is used); not parsed (no model).
+ */
+class AppHeadingPairsXform extends BaseXform<readonly unknown[]> {
+    override render(xmlStream: XmlStream, model: readonly unknown[]): void {
         xmlStream.openNode("HeadingPairs");
         xmlStream.openNode("vt:vector", { size: 2, baseType: "variant" });
 
@@ -19,14 +23,15 @@ class AppHeadingPairsXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<HeadingPairs>` (its content is skipped) */
+    override parseOpen(node: SaxTag): boolean {
         // no parsing
         return node.name === "HeadingPairs";
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         return name !== "HeadingPairs";
     }
 }

@@ -1,28 +1,30 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
 import BaseXform from "../base-xform";
 
-class AppTitlesOfPartsXform extends BaseXform {
-    render(xmlStream, model) {
+/** `<TitlesOfParts>` of `docProps/app.xml`: the names of the worksheets. Rendered only (parsing skips it, no model). */
+class AppTitlesOfPartsXform extends BaseXform<readonly { readonly name: string }[]> {
+    override render(xmlStream: XmlStream, model: readonly { readonly name: string }[]): void {
         xmlStream.openNode("TitlesOfParts");
         xmlStream.openNode("vt:vector", { size: model.length, baseType: "lpstr" });
 
-        model.forEach((sheet) => {
+        for (const sheet of model) {
             xmlStream.leafNode("vt:lpstr", undefined, sheet.name);
-        });
+        }
 
         xmlStream.closeNode();
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<TitlesOfParts>` (its content is skipped) */
+    override parseOpen(node: SaxTag): boolean {
         // no parsing
         return node.name === "TitlesOfParts";
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         return name !== "TitlesOfParts";
     }
 }

@@ -1,23 +1,25 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
 import BaseXform from "./base-xform";
-import XmlStream from "../../utils/xml-stream";
+import XmlStream, { type XmlAttributes } from "../../utils/xml-stream";
 
-// const model = {
-//   tag: 'name',
-//   $: {attr: 'value'},
-//   c: [
-//     { tag: 'child' }
-//   ],
-//   t: 'some text'
-// };
+/**
+ * A static XML element: its tag, attributes (`$`), children (`c`) and text (`t`).
+ *
+ * @example
+ * const model: StaticModel = { tag: "name", $: { attr: "value" }, c: [{ tag: "child" }], t: "some text" };
+ */
+export interface StaticModel {
+    readonly tag: string;
+    readonly $?: XmlAttributes;
+    readonly c?: readonly StaticModel[];
+    readonly t?: string;
+}
 
-function build(xmlStream, model) {
+function build(xmlStream: XmlStream, model: StaticModel): void {
     xmlStream.openNode(model.tag, model.$);
     if (model.c) {
-        model.c.forEach((child) => {
+        for (const child of model.c) {
             build(xmlStream, child);
-        });
+        }
     }
     if (model.t) {
         xmlStream.writeText(model.t);
@@ -25,20 +27,28 @@ function build(xmlStream, model) {
     xmlStream.closeNode();
 }
 
-class StaticXform extends BaseXform {
-    constructor(model) {
-        super();
+/**
+ * An optimisation for static (unimportant and unchanging) XML: renders a fixed element, built once, and skips it when
+ * parsing.
+ *
+ * It is stateless, apart from its static model, and so can be used as a singleton. Being stateless, it only tracks the
+ * end of its root element while parsing. Known issues: `parseOpen` always returns `true` (the parent must know when to
+ * start using this xform), and if the root tag is recursive, the parsing will behave unpredictably.
+ */
+class StaticXform extends BaseXform<never> {
+    /** The element rendered. */
+    private readonly _model: StaticModel;
+    /** Its XML, built on first render. */
+    private _xml?: string;
 
-        // This class is an optimisation for static (unimportant and unchanging) xml
-        // It is stateless - apart from its static model and so can be used as a singleton
-        // Being stateless - it will only track entry to and exit from it's root xml tag during parsing and nothing else
-        // Known issues:
-        //    since stateless - parseOpen always returns true. Parent xform must know when to start using this xform
-        //    if the root tag is recursive, the parsing will behave unpredictably
+    /** @param model - the element, rendered as is */
+    constructor(model: StaticModel) {
+        super();
         this._model = model;
     }
 
-    render(xmlStream) {
+    /** Writes the static element (the `model` argument is ignored). */
+    override render(xmlStream: XmlStream): void {
         if (!this._xml) {
             const stream = new XmlStream();
             build(stream, this._model);
@@ -47,19 +57,16 @@ class StaticXform extends BaseXform {
         xmlStream.writeXml(this._xml);
     }
 
-    parseOpen() {
+    /** @returns `true`: every element is accepted (see the class documentation) */
+    override parseOpen(): boolean {
         return true;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
-        switch (name) {
-            case this._model.tag:
-                return false;
-            default:
-                return true;
-        }
+    /** @returns `false` at the end tag of the static element */
+    override parseClose(name: string): boolean {
+        return name !== this._model.tag;
     }
 }
 

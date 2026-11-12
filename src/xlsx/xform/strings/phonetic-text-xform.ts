@@ -1,15 +1,30 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { RichTextRun } from "../../../types";
 import TextXform from "./text-xform";
 import RichTextXform from "./rich-text-xform";
 
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 
 // <rPh sb="0" eb="1">
 //   <t>(its pronounciation in KATAKANA)</t>
 // </rPh>
 
-class PhoneticTextXform extends BaseXform {
+/**
+ * A phonetic run (`<rPh>`): the reading of the base text characters `sb`..`eb`, as text or rich text runs. Parsing gives
+ * `NaN` for a missing or non-numeric `sb` / `eb`.
+ */
+export interface PhoneticTextModel {
+    sb: number;
+    eb: number;
+    text?: string;
+    richText?: RichTextRun[];
+}
+
+/** A phonetic run of a shared string (`<rPh>`). Shared strings parse it but do not keep it. */
+class PhoneticTextXform extends BaseXform<PhoneticTextModel> {
+    declare map: { readonly r: RichTextXform; readonly t: TextXform };
+
     constructor() {
         super();
 
@@ -19,27 +34,30 @@ class PhoneticTextXform extends BaseXform {
         };
     }
 
-    get tag() {
+    /** The element: `rPh`. */
+    get tag(): string {
         return "rPh";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: PhoneticTextModel): void {
         xmlStream.openNode(this.tag, {
             sb: model.sb || 0,
             eb: model.eb || 0,
         });
-        if (model && model.hasOwnProperty("richText") && model.richText) {
+        if (Object.hasOwn(model, "richText") && model.richText) {
             const { r } = this.map;
-            model.richText.forEach((text) => {
+            for (const text of model.richText) {
                 r.render(xmlStream, text);
-            });
-        } else if (model) {
-            this.map.t.render(xmlStream, model.text);
+            }
+        } else {
+            // a model without text throws (TextXform.render), as it always did
+            this.map.t.render(xmlStream, model.text!);
         }
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<rPh>` and its runs */
+    override parseOpen(node: SaxTag): boolean {
         const { name } = node;
         if (this.parser) {
             this.parser.parseOpen(node);
@@ -47,12 +65,12 @@ class PhoneticTextXform extends BaseXform {
         }
         if (name === this.tag) {
             this.model = {
-                sb: parseInt(node.attributes.sb, 10),
-                eb: parseInt(node.attributes.eb, 10),
+                sb: BaseXform.toIntValue(node.attributes.sb, NaN),
+                eb: BaseXform.toIntValue(node.attributes.eb, NaN),
             };
             return true;
         }
-        this.parser = this.map[name];
+        this.parser = ownEntry(this.map, name);
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -60,29 +78,26 @@ class PhoneticTextXform extends BaseXform {
         return false;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<rPh>` */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                switch (name) {
-                    case "r": {
-                        let rt = this.model.richText;
-                        if (!rt) {
-                            rt = this.model.richText = [];
-                        }
-                        rt.push(this.parser.model);
-                        break;
+                // a run closed (<rPh> created the model before its runs; a closed run has its model)
+                const model = this.model!;
+                if (this.parser === this.map.r) {
+                    let rt = model.richText;
+                    if (!rt) {
+                        rt = model.richText = [];
                     }
-                    case "t":
-                        this.model.text = this.parser.model;
-                        break;
-                    default:
-                        break;
+                    rt.push(this.map.r.model!);
+                } else {
+                    model.text = this.map.t.model!;
                 }
                 this.parser = undefined;
             }
