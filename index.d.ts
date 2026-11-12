@@ -542,7 +542,7 @@ export interface Cell extends Style, Address {
     addMergeRef(): void;
     releaseMergeRef(): void;
     merge(master: Cell, ignoreStyle?: boolean): void;
-    unmerge(): void;
+    unmerge(ignoreStyle?: boolean): void;
     isMergedTo(master: Cell): boolean;
     toString(): string;
 }

@@ -127,6 +127,11 @@ upstream PR code was merged) and has a regression test.
     - The `csv.createInputStream()` typing was removed (it has thrown since 4.0). Comment typos (#3003, #3081).
 - Data validations on whole columns or rows (`dataValidations.add("A:A", ...)`, `"1:3"`, `sqref="D:E"` in a file) crashed the writers, were
   ignored by `find()` and were dropped on read; they are kept as the rectangle they cover (`A1:A1048576`), never expanded per cell.
+- Merged cells after `spliceRows` / `insertRow(s)` / `duplicateRow` / `spliceColumns`: the merge index used by the writers was not moved
+  with the cells (merges written at their old place), `spliceRows` with deletions and insertions shifted merges by the number of inserted
+  rows instead of the net offset, and slaves could point at a replaced master. Merges now move as rectangles: they shrink when some of their
+  rows / columns are removed, widen when rows / columns are inserted inside them (as in Excel), disappear when reduced to one cell, and
+  `duplicateRow` copies the single-row merges of the duplicated row.
 
 ### Documentation
 
