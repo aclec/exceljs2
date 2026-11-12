@@ -1,10 +1,10 @@
 # generated output
-build
-coverage
-dist
-graphify-out
-node_modules
-out
+/build
+/coverage
+/dist
+/graphify-out
+/node_modules
+/out
 spec/out
 bun.lock
 
