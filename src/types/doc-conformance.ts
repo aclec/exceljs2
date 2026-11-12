@@ -121,11 +121,6 @@ export type WorksheetConforms = Assert<
     Check<
         Worksheet,
         Public.Worksheet,
-        // TODO(align) worksheet settings
-        | "properties"
-        | "views"
-        | "model"
-        | "pageSetup"
         // TODO(align) rows, columns and cells
         | "findCell"
         | "getCell"

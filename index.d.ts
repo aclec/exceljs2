@@ -89,9 +89,9 @@ export interface WorksheetViewNormal {
     state: "normal";
 
     /**
-     * Presentation style
+     * Presentation style: page break preview or page layout (the normal presentation when absent)
      */
-    style: "pageBreakPreview" | "pageLayout";
+    style?: "pageBreakPreview" | "pageLayout";
 }
 
 export interface WorksheetViewFrozen {
@@ -160,12 +160,38 @@ export interface WorksheetViewSplit {
 export type WorksheetView = WorksheetViewCommon & (WorksheetViewNormal | WorksheetViewFrozen | WorksheetViewSplit);
 
 /**
- * A view of `worksheet.views`: the fields of the normal, frozen and split views, all optional. A view read from a file
- * is not narrowed to the variant of its `state`; a {@link WorksheetView} can be assigned.
+ * A view of `worksheet.views`: the fields of the normal, frozen and split views (see {@link WorksheetView}), all
+ * optional. A view read from a file is not narrowed to the variant of its `state`; a {@link WorksheetView} can be
+ * assigned. A view read from a file has every field of {@link WorksheetViewCommon}, `workbookViewId`, `state`, and
+ * `xSplit` / `ySplit` / `topLeftCell` for a frozen or split view.
  */
-export type WorksheetViewModel = Partial<WorksheetViewCommon & Omit<WorksheetViewFrozen, "state"> & Omit<WorksheetViewSplit, "state">> & {
+export interface WorksheetViewModel extends Partial<WorksheetViewCommon> {
+    /** The view state: `"normal"` (the default: any other value is written as normal), `"frozen"` or `"split"`. */
     state?: WorksheetView["state"];
-};
+    /** Presentation style: page break preview or page layout (the normal presentation when absent). */
+    style?: "pageBreakPreview" | "pageLayout";
+    /**
+     * Frozen: how many columns to freeze (0 or undefined: rows only). Split: the position of the vertical splitter, in
+     * points (0 or undefined: no vertical split).
+     */
+    xSplit?: number;
+    /**
+     * Frozen: how many rows to freeze (0 or undefined: columns only). Split: the position of the horizontal splitter, in
+     * points (0 or undefined: no horizontal split).
+     */
+    ySplit?: number;
+    /** Frozen or split: the top-left cell of the bottom-right pane (frozen: the first unfrozen cell by default). */
+    topLeftCell?: string;
+    /** Split only: the active pane (the one of a frozen view follows from its splits). */
+    activePane?: "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+    /**
+     * The index of the workbook view (window) this view belongs to: `0` when written without one. Read from a file:
+     * `NaN` when the attribute is absent (malformed file).
+     */
+    workbookViewId?: number;
+    /** Whether the tab of the worksheet is selected (written only; not kept when a file is read). */
+    tabSelected?: boolean;
+}
 
 /**
  * The style option of `addRow` / `insertRow` and their plural forms: `"i"` copies the style of the row above (`"i+"`:
@@ -843,8 +869,10 @@ export interface ColumnDefinition {
 export interface PageSetup {
     /**
      * Whitespace on the borders of the page. Units are inches.
+     *
+     * `null` for a worksheet read from a file without `<pageMargins>` (no margins are then written).
      */
-    margins: Margins;
+    margins: Margins | null;
 
     /**
      * Orientation of the page - i.e. taller (`'portrait'`) or wider (`'landscape'`).
@@ -914,11 +942,11 @@ export interface PageSetup {
     draft: boolean;
 
     /**
-     * Where to place comments
-     *
-     * Default is `None`
+     * Where to print the comments: at the end of the sheet, as displayed, or not at all (`"None"`, the default; a file
+     * may also give its own spelling, `"none"`). `"asDisplyed"` (sic), the value of earlier versions, is still accepted
+     * and written as `asDisplayed`.
      */
-    cellComments: "atEnd" | "asDisplayed" | "None";
+    cellComments: "atEnd" | "asDisplayed" | "None" | "none";
 
     /**
      * Where to show errors
@@ -959,9 +987,27 @@ export interface PageSetup {
     showGridLines: boolean;
 
     /**
-     * Which number to use for the first page
+     * Which number to use for the first page. When set, it is written with `useFirstPageNumber`. A worksheet read from
+     * a file has `1` when the file gives none.
      */
     firstPageNumber: number;
+
+    /**
+     * Read from a file: whether the file uses `firstPageNumber` (else the pages are numbered automatically). Ignored when
+     * writing: `firstPageNumber` decides.
+     */
+    useFirstPageNumber: boolean;
+
+    /**
+     * Whether to print with the printer's default settings (written only when `true`; read from a file: `true` only
+     * when the file says so)
+     */
+    usePrinterDefaults: boolean;
+
+    /**
+     * How many copies to print. `1` by default
+     */
+    copies: number;
 
     /**
      * 	Whether to center the sheet data horizontally, `false` by default
@@ -1049,6 +1095,22 @@ export interface WorksheetProtection {
     pivotTables: boolean;
     spinCount: number;
 }
+
+/**
+ * The protection of a worksheet as `worksheet.sheetProtection` holds it: the {@link WorksheetProtection} options given
+ * to `protect()` (or read from the file), plus `sheet` (`true` once protected) and, with a password, its SHA-512 hash
+ * (`algorithmName` `"SHA-512"`, base64 `hashValue` and `saltValue`, `spinCount` iterations).
+ */
+export type WorksheetProtectionModel = Partial<WorksheetProtection> & {
+    /** Whether the sheet is protected. */
+    sheet?: boolean;
+    /** The hash algorithm of the password (`"SHA-512"`). */
+    algorithmName?: string;
+    /** The hash of the password, base64. */
+    hashValue?: string;
+    /** The random salt of the hash, base64. */
+    saltValue?: string;
+};
 export interface Image {
     extension: "jpeg" | "png" | "gif";
     base64?: string;
@@ -1076,9 +1138,20 @@ export interface Anchor extends IAnchor {
     /** The worksheet that gives the sizes of the cells. */
     worksheet: Worksheet;
 }
+/**
+ * A corner of an image given to `worksheet.addImage`: a fractional 0-based `col` / `row` (`{ col: 1.5, row: 0 }`: the
+ * middle of column B, row 1), or the anchor cell (`nativeCol` / `nativeRow`, 0-based) and the offsets inside it, in EMU
+ * (0 by default). An {@link Anchor} of `getImages()` is both.
+ */
+export type ImageAnchorPosition =
+    { col: number; row: number } | { nativeCol: number; nativeRow: number; nativeColOff?: number; nativeRowOff?: number };
+
+/** The position of an image given by two corners (a two-cell anchor). */
 export interface ImageRange {
-    tl: Anchor;
-    br: Anchor;
+    /** The top-left corner. */
+    tl: ImageAnchorPosition;
+    /** The bottom-right corner. */
+    br: ImageAnchorPosition;
 }
 
 /** An image of a worksheet (`worksheet.getImages()`). */
@@ -1097,8 +1170,11 @@ export interface WorksheetImage {
     };
 }
 
+/** The position of an image given by its top-left corner and its size (a one-cell anchor). */
 export interface ImagePosition {
-    tl: { col: number; row: number };
+    /** The top-left corner. */
+    tl: ImageAnchorPosition;
+    /** The size of the image, in pixels. */
     ext: { width: number; height: number };
 }
 
@@ -1155,26 +1231,140 @@ export interface Range extends Location {
 /** The header and footer of a worksheet: a {@link HeaderFooter} whose fields may also be `null` (the defaults). */
 export type WorksheetHeaderFooter = { [K in keyof HeaderFooter]?: HeaderFooter[K] | null };
 
+/** A manual page break after a row (`row.addPageBreak()`; `worksheet.rowBreaks`). */
 export interface RowBreak {
+    /** The row number (the break is after it). */
     id: number;
+    /** The last column of the break (0-based). */
     max: number;
-    min: number;
+    /** The first column of the break (0-based); absent for the first column. */
+    min?: number;
+    /** `1`: a manual break. */
     man: number;
 }
 
-export interface WorksheetModel {
-    id: number;
+/**
+ * A medium of a worksheet as `worksheet.model` holds it: the background image, or an image placed over the cells
+ * (anchor cells 0-based, offsets in EMU; `ext` in pixels). `imageId` is the id of `workbook.addImage`.
+ */
+export type WorksheetMediumModel =
+    | {
+          type: "background";
+          /** The id of the image in the workbook. */
+          imageId: number | string;
+      }
+    | {
+          type: "image";
+          /** The id of the image in the workbook. */
+          imageId: number | string;
+          /** Where the image is: its top-left corner, and its bottom-right corner (two-cell anchor) or its size. */
+          range: {
+              tl: Pick<IAnchor, "nativeCol" | "nativeColOff" | "nativeRow" | "nativeRowOff">;
+              br?: Pick<IAnchor, "nativeCol" | "nativeColOff" | "nativeRow" | "nativeRowOff">;
+              ext?: { width: number; height: number };
+              editAs?: ImageEditAs;
+          };
+          /**
+           * The hyperlink of the image (`hyperlink` is absent for an image read from a malformed file whose link has no
+           * relationship).
+           */
+          hyperlinks?: { hyperlink?: string; tooltip?: string };
+      };
+
+/**
+ * A table as `worksheet.model` holds it: the {@link TableProperties} given to `addTable` once validated, with the
+ * ranges of the table (`tableRef`, e.g. `"A1:C5"`) and of its auto filter. A table read from a file has no `ref` nor
+ * `rows` (its cells hold them), and a `null` style when the file has none.
+ */
+export interface WorksheetTableModel {
+    /** The name of the table. */
     name: string;
-    // dataValidations: this.dataValidations.model,
+    /** The display name. */
+    displayName?: string;
+    /** The top-left cell (a table added by `addTable`). */
+    ref?: string;
+    /** The range of the table, e.g. `"A1:C5"`. */
+    tableRef?: string;
+    /** The range of the auto filter of the table. */
+    autoFilterRef?: string;
+    /** Whether the table has a header row. */
+    headerRow?: boolean;
+    /** Whether the table has a totals row. */
+    totalsRow?: boolean;
+    /** The style of the table. */
+    style?: TableStyleProperties | null;
+    /** The columns. */
+    columns: TableColumnProperties[];
+    /** The rows of data (a table added by `addTable`). */
+    rows?: CellValue[][];
+}
+
+/**
+ * A range of columns (`min`..`max`, 1-based) sharing one definition, as `worksheet.model` holds them (`<col>` of the
+ * file). A column read from a file has no `width` (`undefined`) when the file gives none, and a `null` style for an
+ * unknown style.
+ */
+export interface WorksheetColumnModel {
+    /** The first column (1-based). */
+    min: number;
+    /** The last column (1-based). */
+    max: number;
+    /** The width, in characters. */
+    width?: number;
+    /** The style of the cells of the columns. */
+    style?: Partial<Style> | null;
+    /** Whether the columns are hidden. */
+    hidden?: boolean;
+    /** The outline level. */
+    outlineLevel?: number;
+    /** Whether the outline of the columns is collapsed. */
+    collapsed?: boolean;
+}
+
+/**
+ * The model of a worksheet (`worksheet.model`): its settings (shared with the worksheet, not copied), its cells (the
+ * rows and column ranges as models), its images, tables and conditional formattings. Setting `worksheet.model` replaces
+ * the worksheet with a model of this shape: note that the merged cells are then read from `mergeCells`, not `merges`.
+ */
+export interface WorksheetModel {
+    /** The id of the worksheet in the workbook. */
+    id: number;
+    /** The name of the worksheet. */
+    name: string;
+    /** Whether the worksheet is visible (not read by the setter). */
+    state: WorksheetState;
+    /** The data validations, by cell address or range (see {@link DataValidations}). */
+    dataValidations: DataValidations["model"];
+    /** Tab color, default row height, outline levels, etc. */
     properties: Partial<WorksheetProperties>;
+    /** The print settings. */
     pageSetup: Partial<PageSetup>;
-    /** Headers and footers of the printed pages (`null` texts by default). */
-    headerFooter: WorksheetHeaderFooter;
+    /** Headers and footers of the printed pages (`null` texts by default; `null` for a sheet read without them). */
+    headerFooter: WorksheetHeaderFooter | null;
+    /** The manual page breaks after rows (not read by the setter). */
     rowBreaks: RowBreak[];
-    views: WorksheetView[];
-    autoFilter: AutoFilter;
-    media: Media[];
-    merges: Range["range"][];
+    /** The views (`null` for a sheet read from a file without views). */
+    views: WorksheetViewModel[] | null;
+    /** The auto filter: `null` or `undefined` when there is none. */
+    autoFilter?: AutoFilter | null;
+    /** The images (and background image). */
+    media: WorksheetMediumModel[];
+    /** The protection: `null` or `undefined` when the worksheet is not protected. */
+    sheetProtection?: WorksheetProtectionModel | null;
+    /** The tables. */
+    tables: WorksheetTableModel[];
+    /** The conditional formattings. */
+    conditionalFormattings: ConditionalFormattingOptions[];
+    /** The column definitions, by ranges of columns; `undefined` when there are none. */
+    cols?: WorksheetColumnModel[];
+    /** The rows that have cells or properties, in order. */
+    rows: RowModel[];
+    /** The used range (the getter only; not read by the setter). */
+    dimensions: Range;
+    /** The merged ranges, e.g. `"A1:B2"` (the getter only; the setter reads `mergeCells`). */
+    merges: string[];
+    /** The merged ranges given to the setter (copy `merges` here to keep them); absent from the getter. */
+    mergeCells?: string[];
 }
 export type WorksheetState = "visible" | "hidden" | "veryHidden";
 
@@ -1380,10 +1570,10 @@ export interface Worksheet {
     pageSetup: Partial<PageSetup>;
 
     /**
-     * Worksheet Header and Footer
+     * Headers and footers of the printed pages (`null` texts by default). `null` for a worksheet read from a file without
+     * `<headerFooter>`.
      */
-    /** Headers and footers of the printed pages (`null` by default). */
-    headerFooter: WorksheetHeaderFooter;
+    headerFooter: WorksheetHeaderFooter | null;
 
     /**
      * Worksheet State
@@ -1396,15 +1586,28 @@ export interface Worksheet {
     properties: Partial<WorksheetProperties>;
 
     /**
-     * Open panes representing the sheet
+     * The views of the worksheet (frozen or split panes, zoom, grid lines...): empty by default, `null` for a worksheet
+     * read from a file without `<sheetViews>`.
      */
-    views: WorksheetViewModel[];
+    views: WorksheetViewModel[] | null;
+
+    /** The auto filter of the worksheet, `null` or `undefined` when there is none. */
+    autoFilter?: AutoFilter | null;
 
     /**
-     * Apply an auto filter to your worksheet.
+     * The protection of the worksheet (set by `protect()`, cleared by `unprotect()`): `null` or `undefined` when the
+     * worksheet is not protected.
      */
-    /** The auto filter, `null` or `undefined` when there is none. */
-    autoFilter?: AutoFilter | null;
+    sheetProtection: WorksheetProtectionModel | null | undefined;
+
+    /**
+     * The manual page breaks after rows, added by `row.addPageBreak()` (the page breaks of a file that is read are not
+     * kept).
+     */
+    rowBreaks: RowBreak[];
+
+    /** The conditional formattings (`addConditionalFormatting`), in order. */
+    conditionalFormattings: ConditionalFormattingOptions[];
 
     destroy(): void;
 
@@ -1664,9 +1867,12 @@ export interface Worksheet {
     addConditionalFormatting(cf: ConditionalFormattingOptions): void;
 
     /**
-     * delete conditionalFormattingOptions
+     * Removes conditional formattings: the one at an index (of `conditionalFormattings`), or those for which a filter
+     * returns a falsy value (it keeps the others); with no argument (or any other value), all of them.
      */
-    removeConditionalFormatting(filter: any): void;
+    removeConditionalFormatting(
+        filter?: number | ((cf: ConditionalFormattingOptions, index: number, all: ConditionalFormattingOptions[]) => unknown) | null
+    ): void;
 }
 
 export interface CalculationProperties {
@@ -1678,7 +1884,7 @@ export interface CalculationProperties {
 
 export interface WorksheetProperties {
     /**
-     * Color of the tab
+     * Color of the tab (a color read from a file may also have a `tint`, or be an `indexed` palette color)
      */
     tabColor: Partial<Color>;
 
@@ -1693,11 +1899,14 @@ export interface WorksheetProperties {
     outlineLevelRow: number;
 
     /**
-     * The outline properties which controls how it will summarize rows and columns
+     * Where the summary rows and columns of the outlines are (below / right of the details when absent). Written when one
+     * of them is set; read from a file, an attribute that the file does not give is `undefined`.
      */
     outlineProperties: {
-        summaryBelow: boolean;
-        summaryRight: boolean;
+        /** Whether the summary rows are below their details. */
+        summaryBelow?: boolean;
+        /** Whether the summary columns are right of their details. */
+        summaryRight?: boolean;
     };
     /**
      * Default row height (default: 15)
@@ -1713,15 +1922,22 @@ export interface WorksheetProperties {
      * default: 55
      */
     dyDescent: number;
-    showGridLines: boolean;
 }
 
+/** The options of `workbook.addWorksheet`: the initial settings of the worksheet. */
 export interface AddWorksheetOptions {
+    /** Tab color, default row height, outline levels, etc. */
     properties: Partial<WorksheetProperties>;
+    /** The print settings (merged with the defaults). */
     pageSetup: Partial<PageSetup>;
-    headerFooter: Partial<HeaderFooter>;
-    views: Array<Partial<WorksheetView>>;
+    /** Headers and footers of the printed pages (merged with the defaults). */
+    headerFooter: WorksheetHeaderFooter;
+    /** The views (frozen or split panes, zoom, grid lines...). */
+    views: WorksheetViewModel[];
+    /** Whether the worksheet is visible (`"visible"` by default). */
     state: WorksheetState;
+    /** The auto filter, e.g. `"A1:C1"`. */
+    autoFilter: AutoFilter | null;
 }
 
 export interface WorkbookProperties {

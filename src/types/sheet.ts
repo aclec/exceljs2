@@ -536,10 +536,12 @@ export interface WorksheetModel {
     dataValidations: DataValidationsModel;
     properties: WorksheetPropertiesModel;
     pageSetup: PageSetupModel;
-    headerFooter: HeaderFooterModel;
+    /** `null` for a worksheet read from a file without `<headerFooter>`. */
+    headerFooter: HeaderFooterModel | null;
     /** The manual page breaks between rows (`<rowBreaks>`). */
     rowBreaks?: RowBreakModel[];
-    views: SheetViewModel[];
+    /** `null` for a worksheet read from a file without `<sheetViews>`. */
+    views: SheetViewModel[] | null;
     autoFilter?: AutoFilterModel | null;
     media: WorksheetMediumModel[];
     sheetProtection?: SheetProtectionModel | null;

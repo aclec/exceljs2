@@ -98,12 +98,12 @@ class ListXform<TItem> extends BaseXform<TItem[]> {
     }
 
     /** Writes the list element and its items (the item xform gets the index of the item as third argument). */
-    override render(xmlStream: XmlStream, model: readonly TItem[] | undefined): void {
+    override render(xmlStream: XmlStream, model: readonly TItem[] | null | undefined): void {
         runSteps(this.renderSteps(xmlStream, model));
     }
 
     /** {@link render}, one item per step. */
-    *renderSteps(xmlStream: XmlStream, model: readonly TItem[] | undefined): Steps {
+    *renderSteps(xmlStream: XmlStream, model: readonly TItem[] | null | undefined): Steps {
         if (this.always || (model && model.length)) {
             xmlStream.openNode(this.tag, this.$);
             if (this.count) {

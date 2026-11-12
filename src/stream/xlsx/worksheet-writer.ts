@@ -18,14 +18,12 @@ import type { ZipEntry } from "../../utils/zip-stream";
 import type {
     AutoFilter,
     ConditionalFormattingOptions,
-    HeaderFooter,
     PageSetup,
     RowBreak,
     RowValues,
     WorksheetProperties,
     WorksheetProtection,
     WorksheetState,
-    WorksheetView,
 } from "../../../index";
 import type {
     CellPrepareOptions,
@@ -36,6 +34,7 @@ import type {
     MergeCellModel,
     PageSetupModel,
     SheetProtectionModel,
+    SheetViewModel,
     StyleRegistry,
 } from "../../types";
 import type WorkbookWriter from "./workbook-writer";
@@ -107,9 +106,9 @@ export interface WorksheetWriterOptions {
     properties?: Partial<WorksheetProperties>;
     state?: WorksheetState;
     pageSetup?: Partial<PageSetup>;
-    views?: Partial<WorksheetView>[];
+    views?: SheetViewModel[];
     autoFilter?: AutoFilter | null;
-    headerFooter?: Partial<HeaderFooter>;
+    headerFooter?: HeaderFooterModel;
 }
 
 // the error of an operation on the rows of a committed worksheet
@@ -182,7 +181,7 @@ class WorksheetWriter {
     private _formulae: Record<string, FormulaCellModel>;
     private _siFormulae: number;
     private _workbook: WorkbookWriter;
-    private _views: Partial<WorksheetView>[];
+    private _views: SheetViewModel[];
     private _media: unknown[];
     private _background?: { imageId?: number; rId?: string };
     private _stream?: ZipEntry;
@@ -409,7 +408,7 @@ class WorksheetWriter {
     }
 
     /** The sheet views (`views` option). */
-    get views(): Partial<WorksheetView>[] {
+    get views(): SheetViewModel[] {
         return this._views;
     }
 

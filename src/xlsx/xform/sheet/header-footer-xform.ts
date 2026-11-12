@@ -19,7 +19,7 @@ class HeaderFooterXform extends BaseXform<HeaderFooterModel> {
         return "headerFooter";
     }
 
-    override render(xmlStream: XmlStream, model: HeaderFooterModel | undefined): void {
+    override render(xmlStream: XmlStream, model: HeaderFooterModel | null | undefined): void {
         if (model) {
             xmlStream.addRollback();
 
