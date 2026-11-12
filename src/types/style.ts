@@ -6,92 +6,61 @@
 // attribute strings of the file unvalidated, so it may hold other values at runtime. Code that maps them (e.g. to XML)
 // must keep a default for unknown values.
 
-import type { Alignment, BorderStyle, FillPatterns, Font, Protection, Style } from "../../index";
+import type {
+    Alignment,
+    Border,
+    Borders,
+    Color,
+    DifferentialStyle,
+    FillGradientAngle,
+    FillGradientPath,
+    FillPattern,
+    FillPatterns,
+    Font,
+    GradientStop,
+    Protection,
+    Style,
+} from "../../index";
 import type { ValueType } from "../doc/enums";
 
 /**
- * A color: `{ argb }`, `{ theme, tint? }` or `{ indexed }` (color-xform). `{}` renders `auto="1"`; an `auto` color parses
- * as `undefined`.
+ * A color (color-xform): index.d.ts `Color`, all parts optional: `{ argb }`, `{ theme, tint? }` or `{ indexed }`. `{}`
+ * renders `auto="1"`; an `auto` color parses as `undefined`.
  *
  * Producer: color-xform parse, the application. Consumer: color-xform render.
- * Differs from index.d.ts `Color`, which lacks `tint` and `indexed`.
  */
-export interface ColorModel {
-    argb?: string;
-    theme?: number;
-    /** -1..1, with `theme` */
-    tint?: number;
-    /** legacy palette index */
-    indexed?: number;
-}
+export type ColorModel = Partial<Color>;
 
 /**
- * A font (font-xform). Only the elements present in the file become keys when parsing.
- *
- * Differs from index.d.ts `Font`: also `condense`, `extend`, `shadow` (parsed and rendered); `size` is parsed with
- * `parseInt` (IntegerXform: `sz="10.5"` reads as 10); `underline` parses as `true` or the raw `val` string; `color` may
- * have `tint` / `indexed`.
+ * A font (font-xform): index.d.ts `Font`, all parts optional. Only the elements present in the file become keys when
+ * parsing; `size` is parsed with `parseInt` (IntegerXform: `sz="10.5"` reads as 10); `underline` parses as `true` or
+ * the raw `val` string.
  */
-export interface FontModel extends Partial<Omit<Font, "color">> {
-    color?: ColorModel;
-    condense?: boolean;
-    extend?: boolean;
-    shadow?: boolean;
-}
+export type FontModel = Partial<Font>;
 
 /**
- * A gradient stop of a {@link FillModel} (`position` 0..1, parsed with parseFloat). A parsed stop has no `color` without
- * a `<color>` child, and `color: undefined` for an auto color.
+ * A gradient stop of a {@link FillModel} (index.d.ts `GradientStop`: `position` 0..1, parsed with parseFloat). A parsed
+ * stop has no `color` without a `<color>` child, and `color: undefined` for an auto color.
  */
-export interface GradientStopModel {
-    position: number;
-    color?: ColorModel;
-}
+export type GradientStopModel = GradientStop;
 
 /**
- * A fill (fill-xform): pattern or gradient. Rendering a fill of any other `type` writes nothing.
- *
- * Differs from index.d.ts `Fill`: a parsed gradient has no `gradient` key when it has neither `degree` nor
- * `type="path"`; `center` may have `right` / `bottom` (present only when they differ from `left` / `top`).
+ * A fill (fill-xform): pattern or gradient, index.d.ts `Fill` but for the pattern, which a parsed `<patternFill>` lacks
+ * without `patternType` (Excel writes the pattern fills of the dxfs so). Rendering a fill of any other `type` writes
+ * nothing. A parsed angle gradient always has `degree`; a parsed gradient has no `gradient` key when it has neither
+ * `degree` nor `type="path"`; a parsed path gradient always has `center`, whose `right` / `bottom` are present only when
+ * they differ from `left` / `top`.
  */
-export type FillModel =
-    | {
-          type: "pattern";
-          pattern: FillPatterns;
-          fgColor?: ColorModel;
-          bgColor?: ColorModel;
-      }
-    | {
-          type: "gradient";
-          gradient?: "angle" | "path";
-          /** angle gradients, integer degrees */
-          degree?: number;
-          /** path gradients */
-          center?: { left: number; top: number; right?: number; bottom?: number };
-          stops: GradientStopModel[];
-      };
+export type FillModel = (Omit<FillPattern, "pattern"> & { pattern?: FillPatterns }) | FillGradientAngle | FillGradientPath;
 
-/** One edge of a {@link BorderModel}: an edge with a color but no style is `{ color }`. */
-export interface BorderEdgeModel {
-    style?: BorderStyle;
-    color?: ColorModel;
-}
+/** One edge of a {@link BorderModel} (index.d.ts `Border`, all parts optional): an edge with a color but no style is `{ color }`. */
+export type BorderEdgeModel = Partial<Border>;
 
 /**
- * A border (border-xform).
- *
- * Differs from index.d.ts `Borders`: render also reads `color`, the default color of the edges; a parsed `diagonal` always
- * has `up` and `down`.
+ * A border (border-xform): index.d.ts `Borders`, all parts optional. Render also reads `color`, the default color of the
+ * edges (never parsed); a parsed `diagonal` always has `up` and `down`.
  */
-export interface BorderModel {
-    left?: BorderEdgeModel;
-    right?: BorderEdgeModel;
-    top?: BorderEdgeModel;
-    bottom?: BorderEdgeModel;
-    diagonal?: BorderEdgeModel & { up?: boolean; down?: boolean };
-    /** render only: default color of the edges */
-    color?: ColorModel;
-}
+export type BorderModel = Partial<Borders>;
 
 /**
  * An alignment (alignment-xform): index.d.ts `Alignment`. The XML `center` vertical alignment is `"middle"` in the
@@ -134,20 +103,12 @@ export interface XfModel {
 }
 
 /**
- * A differential format, `<dxf>` (dxf-xform): the style of a conditional formatting rule or a table column. Parsing
- * gives every part as a key: `null` when its element is absent (or sets only defaults); `fill` may be `{}` (a `<fill>`
- * without a known child) and `numFmt` `undefined` (a rejected format code). `numFmt` is the format code; render needs
- * `numFmtId`, which `StyleRegistry.addDxfStyle` adds (it mutates the style it is given).
+ * A differential format, `<dxf>` (dxf-xform): index.d.ts `DifferentialStyle`, the style of a conditional formatting
+ * rule or a table column. Parsing gives every part as a key: `null` when its element is absent (or sets only defaults);
+ * `fill` may be `{}` (a `<fill>` without a known child) and `numFmt` `undefined` (a rejected format code). `numFmt` is
+ * the format code; render needs `numFmtId`, which `StyleRegistry.addDxfStyle` adds (it mutates the style it is given).
  */
-export interface DxfModel {
-    alignment?: AlignmentModel | null;
-    border?: BorderModel | null;
-    fill?: FillModel | { type?: undefined } | null;
-    font?: FontModel | null;
-    numFmt?: string | null;
-    numFmtId?: number;
-    protection?: ProtectionModel | null;
-}
+export type DxfModel = DifferentialStyle;
 
 /**
  * The write side of the style manager (StylesXform, or StylesXform.Mock when styles are not written): registers styles

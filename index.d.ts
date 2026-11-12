@@ -183,6 +183,7 @@ export interface WorkbookView {
     visibility: string;
 }
 
+/** The pattern of a {@link FillPattern} (ECMA-376 ST_PatternType). */
 export type FillPatterns =
     | "none"
     | "solid"
@@ -204,27 +205,37 @@ export type FillPatterns =
     | "gray125"
     | "gray0625";
 
+/** A pattern fill: the pattern drawn with `fgColor` over `bgColor` (`"solid"`: `fgColor` only). */
 export interface FillPattern {
     type: "pattern";
     pattern: FillPatterns;
+    /** The color of the pattern (of the whole cell for `"solid"`). */
     fgColor?: Partial<Color>;
+    /** The background color under the pattern. */
     bgColor?: Partial<Color>;
 }
 
+/** A color of a gradient fill, at a position (0 to 1) of the gradient. */
 export interface GradientStop {
     position: number;
-    color: Partial<Color>;
+    /** The color; `undefined` for an automatic color read from a file (`<color auto="1"/>`). */
+    color?: Partial<Color>;
 }
 
+/**
+ * A linear gradient fill. A gradient read from a file without `degree` (0: left to right) has neither `gradient` nor
+ * `degree`.
+ */
 export interface FillGradientAngle {
     type: "gradient";
-    gradient: "angle";
+    /** `"angle"`; absent on a gradient read from a file without `degree`. */
+    gradient?: "angle";
 
     /**
-     * For 'angle' gradient, specifies the direction of the gradient. 0 is from the left to the right.
-     * Values from 1 - 359 rotates the direction clockwise
+     * For 'angle' gradient, specifies the direction of the gradient. 0 (the default, when absent) is from the left to
+     * the right. Values from 1 - 359 rotates the direction clockwise
      */
-    degree: number;
+    degree?: number;
 
     /**
      * Specifies the gradient colour sequence. Is an array of objects containing position and
@@ -234,15 +245,17 @@ export interface FillGradientAngle {
     stops: GradientStop[];
 }
 
+/** A path gradient fill: from a rectangle (`center`) to the edges of the cell. */
 export interface FillGradientPath {
     type: "gradient";
     gradient: "path";
 
     /**
-     * For 'path' gradient. Specifies the relative coordinates for the start of the path.
-     * 'left' and 'top' values range from 0 to 1
+     * For 'path' gradient. Specifies the relative coordinates (0 to 1) of the rectangle the path starts from: `left` and
+     * `top`, and `right` / `bottom` when they differ from `left` / `top` (`left` / `top` are written for them when they
+     * are absent).
      */
-    center: { left: number; top: number };
+    center: { left: number; top: number; right?: number; bottom?: number };
 
     /**
      * Specifies the gradient colour sequence. Is an array of objects containing position and
@@ -252,23 +265,36 @@ export interface FillGradientPath {
     stops: GradientStop[];
 }
 
+/** The fill of a cell: a pattern or a gradient. */
 export type Fill = FillPattern | FillGradientAngle | FillGradientPath;
 
+/** A font. A font read from a file has only the properties the file sets. */
 export interface Font {
     name: string;
+    /** The size in points. Read as an integer: a size of 10.5 in a file reads as 10. */
     size: number;
+    /** The font family (1 Roman, 2 Swiss, 3 Modern, 4 Script, 5 Decorative). */
     family: number;
     scheme: "minor" | "major" | "none";
+    /** The character set (e.g. 0 ANSI, 1 default, 128 Shift JIS). */
     charset: number;
     color: Partial<Color>;
     bold: boolean;
     italic: boolean;
+    /** `true` is a single underline; read from a file, `true` or the underline style of the file. */
     underline: boolean | "none" | "single" | "double" | "singleAccounting" | "doubleAccounting";
     vertAlign: "superscript" | "subscript";
     strike: boolean;
     outline: boolean;
+    /** Condensed text (a legacy Macintosh setting, read and written). */
+    condense: boolean;
+    /** Extended text (a legacy Macintosh setting, read and written). */
+    extend: boolean;
+    /** Shadowed text (a legacy Macintosh setting, read and written). */
+    shadow: boolean;
 }
 
+/** The style of a border edge (ECMA-376 ST_BorderStyle, without `"none"`). */
 export type BorderStyle =
     | "thin"
     | "dotted"
@@ -284,6 +310,10 @@ export type BorderStyle =
     | "mediumDashDotDot"
     | "mediumDashDot";
 
+/**
+ * A color: `argb`, `theme` (with an optional `tint`) or `indexed`; when several are set, only the first of them in this
+ * order is written. `{}` writes an automatic color; an automatic color read from a file is `undefined`.
+ */
 export interface Color {
     /**
      * Hex string for alpha-red-green-blue e.g. FF00FF00
@@ -294,24 +324,35 @@ export interface Color {
      * Choose a theme by index
      */
     theme: number;
+
+    /** With `theme`: lightens (0 to 1) or darkens (-1 to 0) the theme color. */
+    tint: number;
+
+    /** A color of the legacy indexed palette (64 is the system foreground color). */
+    indexed: number;
 }
 
+/** A border edge: a style and its color. An edge read from a file with a color but no style is `{ color }`. */
 export interface Border {
     style: BorderStyle;
     color: Partial<Color>;
 }
 
+/** The diagonal edge of a border: its line goes up (bottom-left to top-right) and / or down. */
 export interface BorderDiagonal extends Border {
     up: boolean;
     down: boolean;
 }
 
+/** The border of a cell, edge by edge. */
 export interface Borders {
     top: Partial<Border>;
     left: Partial<Border>;
     bottom: Partial<Border>;
     right: Partial<Border>;
     diagonal: Partial<BorderDiagonal>;
+    /** The color of the edges that have a style but no color (written only: a border read from a file has none). */
+    color: Partial<Color>;
 }
 
 export interface Margins {
@@ -328,22 +369,33 @@ export declare enum ReadingOrder {
     RightToLeft = 2,
 }
 
+/** The alignment of the content of a cell. */
 export interface Alignment {
     horizontal: "left" | "center" | "right" | "fill" | "justify" | "centerContinuous" | "distributed";
+    /** The vertical alignment (`"middle"` is the `center` of the file). */
     vertical: "top" | "middle" | "bottom" | "distributed" | "justify";
     wrapText: boolean;
     shrinkToFit: boolean;
     indent: number;
     readingOrder: "rtl" | "ltr";
+    /**
+     * The rotation in degrees (-90 to 90), or `"vertical"` (stacked letters). Read from a file, `undefined` for a value
+     * outside those.
+     */
     textRotation: number | "vertical";
 }
 
+/** The protection of a cell (effective when the worksheet is protected). */
 export interface Protection {
+    /** Whether the cell cannot be edited (`true` by default). */
     locked: boolean;
+    /** Whether the formula of the cell is hidden (`false` by default). */
     hidden: boolean;
 }
 
+/** The style of a cell, a row or a column. */
 export interface Style {
+    /** The number format code (`"0.00%"`, `"dd/mm/yyyy"`...). */
     numFmt: string;
     font: Partial<Font>;
     alignment: Partial<Alignment>;
@@ -352,6 +404,25 @@ export interface Style {
     fill: Fill;
 }
 
+/**
+ * A differential format: the style that a conditional formatting rule or a table column applies over the style of the
+ * cells. Read from a file, every part is a key: `null` when the file does not set it; `numFmt` is `undefined` for a
+ * format code longer than 255 characters; `fill` may be a pattern without `pattern` (Excel writes the pattern fills of
+ * these formats so, the color is `bgColor`) or `{}` (a `<fill>` without pattern nor gradient). Writing the workbook sets
+ * `numFmtId` on a format that has a `numFmt` (it mutates the object).
+ */
+export interface DifferentialStyle {
+    numFmt?: string | null;
+    /** The id of `numFmt`, set when the workbook is written. */
+    numFmtId?: number;
+    font?: Partial<Font> | null;
+    alignment?: Partial<Alignment> | null;
+    protection?: Partial<Protection> | null;
+    border?: Partial<Borders> | null;
+    fill?: Fill | (Omit<FillPattern, "pattern"> & { pattern?: FillPatterns }) | { type?: undefined } | null;
+}
+
+/** The comparison of a data validation of a number, a date or a text length (`"between"` by default). */
 export type DataValidationOperator =
     "between" | "notBetween" | "equal" | "notEqual" | "greaterThan" | "lessThan" | "greaterThanOrEqual" | "lessThanOrEqual";
 
@@ -382,18 +453,31 @@ export interface DataValidations {
     remove(address: string): void;
 }
 
+/** The validation of the values entered in a cell, with its input and error messages. */
 export interface DataValidation {
     type: DataValidationType;
-    /** The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`); absent for `"any"`. */
+    /**
+     * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`); absent for `"any"`. Read from a
+     * file: numbers for `whole`, `decimal` and `textLength`, Dates for `date`, else the text of the formula.
+     */
     formulae?: (string | number | Date)[];
+    /** Whether an empty cell is valid. */
     allowBlank?: boolean;
+    /** The comparison (not written for `list` nor for the default `"between"`). */
     operator?: DataValidationOperator;
+    /** The text of the error message. */
     error?: string;
+    /** The title of the error message. */
     errorTitle?: string;
+    /** The kind of the error message: `"stop"` (the default), `"warning"` or `"information"`. */
     errorStyle?: string;
+    /** The text of the input message. */
     prompt?: string;
+    /** The title of the input message. */
     promptTitle?: string;
+    /** Whether the error message is shown for an invalid value. */
     showErrorMessage?: boolean;
+    /** Whether the input message is shown when the cell is selected. */
     showInputMessage?: boolean;
 }
 
@@ -1178,9 +1262,11 @@ export interface WorksheetModel {
 }
 export type WorksheetState = "visible" | "hidden" | "veryHidden";
 
+/** The comparison of a `cellIs` rule. */
 export type CellIsOperators =
     "equal" | "notEqual" | "greaterThan" | "greaterThanOrEqual" | "lessThan" | "lessThanOrEqual" | "between" | "notBetween";
 
+/** The test of a `containsText` rule. */
 export type ContainsTextOperators =
     | "containsText"
     | "notContainsText"
@@ -1191,9 +1277,14 @@ export type ContainsTextOperators =
     | "containsErrors"
     | "notContainsErrors";
 
+/** The period of a `timePeriod` rule. */
 export type TimePeriodTypes =
     "lastWeek" | "thisWeek" | "nextWeek" | "yesterday" | "today" | "tomorrow" | "last7Days" | "lastMonth" | "thisMonth" | "nextMonth";
 
+/**
+ * The icon set of an `iconSet` rule. `3Triangles`, `3Stars` and `5Boxes` (Excel 2010) are written in the x14 extension of
+ * the worksheet.
+ */
 export type IconSetTypes =
     | "5Arrows"
     | "5ArrowsGray"
@@ -1217,29 +1308,45 @@ export type IconSetTypes =
     | "3TrafficLights2"
     | "3Triangles";
 
+/** The kind of a threshold ({@link Cvfo}); `autoMin` / `autoMax` are data bar thresholds (Excel 2010). */
 export type CfvoTypes = "percentile" | "percent" | "num" | "min" | "max" | "formula" | "autoMin" | "autoMax";
 
+/** A threshold of a color scale, a data bar or an icon set (`<cfvo>`, conditional format value object). */
 export interface Cvfo {
     type: CfvoTypes;
     /**
-     * A number, or a formula or cell reference such as "$A$1" (type formula, or num / percent / percentile)
+     * A number, or a formula or cell reference such as "$A$1" (type formula, or num / percent / percentile); read from a
+     * file, a number when the text is a number.
      */
     value?: number | string;
 }
+
+/** A formula of a conditional formatting rule (read from a file: the text of the formula). */
+export type CfFormula = string | number | boolean;
+
+/** The fields of every conditional formatting rule. */
 export interface ConditionalFormattingBaseRule {
     /**
      * Rules without a priority are given one (after the highest existing priority) when written
      */
     priority?: number;
-    style?: Partial<Style>;
+    /**
+     * The format applied to the cells (`expression`, `cellIs`, `top10`, `aboveAverage`, `containsText` and `timePeriod`
+     * rules). A rule read from a file has the format of the file (see {@link DifferentialStyle}); writing the workbook
+     * sets `numFmtId` on it when it has a `numFmt`.
+     */
+    style?: DifferentialStyle;
     /**
      * When true, lower-priority rules are not evaluated for a cell this rule applies to
      */
     stopIfTrue?: boolean;
 }
+
+/** A rule that formats the cells for which a formula is true. */
 export interface ExpressionRuleType extends ConditionalFormattingBaseRule {
     type: "expression";
-    formulae?: any[];
+    /** The formula (only the first one is written), relative to the top-left cell of the range. */
+    formulae?: CfFormula[];
     /**
      * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
      * other sheets (always done when a formula contains a sheet reference such as Other!A1).
@@ -1248,9 +1355,11 @@ export interface ExpressionRuleType extends ConditionalFormattingBaseRule {
     x14?: boolean;
 }
 
+/** A rule that compares the value of the cells with one or two formulae. */
 export interface CellIsRuleType extends ConditionalFormattingBaseRule {
     type: "cellIs";
-    formulae?: any[];
+    /** The values compared with (two for `between` / `notBetween`). */
+    formulae?: CfFormula[];
     operator?: CellIsOperators;
     /**
      * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
@@ -1260,33 +1369,75 @@ export interface CellIsRuleType extends ConditionalFormattingBaseRule {
     x14?: boolean;
 }
 
+/** A rule that formats the top (or bottom) values of the range. */
 export interface Top10RuleType extends ConditionalFormattingBaseRule {
     type: "top10";
-    rank: number;
-    percent: boolean;
-    bottom: boolean;
+    /** The number (or the percentage, with `percent`) of values; 10 when absent. */
+    rank?: number;
+    /** Whether `rank` is a percentage (`false` when absent). */
+    percent?: boolean;
+    /** Whether the bottom values are formatted instead of the top ones (`false` when absent). */
+    bottom?: boolean;
 }
 
+/** A rule that formats the values above (or below) the average of the range. */
 export interface AboveAverageRuleType extends ConditionalFormattingBaseRule {
     type: "aboveAverage";
-    aboveAverage: boolean;
+    /** `false` formats the values below the average (`true` when absent). */
+    aboveAverage?: boolean;
 }
 
+/** A rule that colors the cells on a scale of 2 or 3 colors. */
 export interface ColorScaleRuleType extends ConditionalFormattingBaseRule {
     type: "colorScale";
-    cfvo?: Cvfo[];
-    color?: Partial<Color>[];
+    /** The thresholds of the scale, from the lowest (required: writing a rule without them throws). */
+    cfvo: Cvfo[];
+    /**
+     * The color of each threshold (required: writing a rule without them throws); `undefined` for an automatic color read
+     * from a file.
+     */
+    color: (Partial<Color> | undefined)[];
 }
 
+/**
+ * A custom icon of an icon set (Excel 2010): the icon of another icon set shown for a threshold, e.g.
+ * `{ iconSet: "3Flags", iconId: 0 }`.
+ */
+export interface CfIcon {
+    /** The icon set the icon comes from (`"NoIcons"`: no icon). */
+    iconSet: IconSetTypes;
+    /**
+     * The 0-based index of the icon in `iconSet`. Writing the rule sets it to the index of the icon in `icons` (it mutates
+     * it).
+     */
+    iconId?: number;
+}
+
+/** A rule that shows an icon in the cells, by threshold. */
 export interface IconSetRuleType extends ConditionalFormattingBaseRule {
     type: "iconSet";
+    /** Whether the value is shown with the icon (`true` when absent). */
     showValue?: boolean;
+    /** Whether the order of the icons is reversed. */
     reverse?: boolean;
+    /**
+     * Write the rule in the x14 extension of the worksheet, with its `icons` (`custom="1"` is written when the rule has
+     * `icons`). Not set on the rules read from a file: they have `icons` instead.
+     */
     custom?: boolean;
-    iconSet?: IconSetTypes;
-    cfvo?: Cvfo[];
+    /**
+     * The icon set (`"3TrafficLights1"` when absent). A rule read from a file without icon set (the default) has
+     * `"3TrafficLights"`: not written in `<conditionalFormatting>` (the default), but written as is in the x14
+     * extension.
+     */
+    iconSet?: IconSetTypes | "3TrafficLights";
+    /** The thresholds, one per icon, from the lowest (required: writing a rule without them throws). */
+    cfvo: Cvfo[];
+    /** The custom icons, one per threshold: written in the x14 extension, with `custom`. Set on the rules read from it. */
+    icons?: CfIcon[];
 }
 
+/** A rule that formats the cells whose text contains a text, begins or ends with it, or that are blank or errors. */
 export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
     type: "containsText";
     /**
@@ -1300,7 +1451,7 @@ export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
     /**
      * Written instead of the formula derived from the operator and text
      */
-    formulae?: any[];
+    formulae?: CfFormula[];
     /**
      * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
      * other sheets (always done when a formula contains a sheet reference such as Other!A1).
@@ -1309,30 +1460,41 @@ export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
     x14?: boolean;
 }
 
+/** A rule that formats the dates of a period relative to today. */
 export interface TimePeriodRuleType extends ConditionalFormattingBaseRule {
     type: "timePeriod";
     timePeriod?: TimePeriodTypes;
     /**
      * Written instead of the formula derived from the time period
      */
-    formulae?: any[];
+    formulae?: CfFormula[];
     /**
      * Write the rule in the x14 extension of the worksheet (set on the rules read from that extension only)
      */
     x14?: boolean;
 }
 
+/** A rule that draws a bar in the cells, proportional to their value. */
 export interface DataBarRuleType extends ConditionalFormattingBaseRule {
     type: "dataBar";
+    /** Whether the bars are a gradient (`true` when absent). */
     gradient?: boolean;
+    /** The length of the shortest bar, in percent of the cell (0 when absent). */
     minLength?: number;
+    /** The length of the longest bar, in percent of the cell (100 when absent). */
     maxLength?: number;
+    /** Whether the value is shown with the bar (`true` when absent). */
     showValue?: boolean;
+    /** Whether the bars have a border (`false` when absent). */
     border?: boolean;
+    /** Whether negative bars have the color of the positive ones (`false` when absent). */
     negativeBarColorSameAsPositive?: boolean;
+    /** Whether negative bars have the border color of the positive ones (`true` when absent). */
     negativeBarBorderColorSameAsPositive?: boolean;
+    /** The position of the axis between negative and positive bars (`"auto"` when absent). */
     axisPosition?: "auto" | "middle" | "none";
     direction?: "context" | "leftToRight" | "rightToLeft";
+    /** The thresholds of the shortest and longest bars (`autoMin` / `autoMax` when absent). */
     cfvo?: Cvfo[];
     /**
      * Colour of the bars
@@ -1344,6 +1506,7 @@ export interface DataBarRuleType extends ConditionalFormattingBaseRule {
     axisColor?: Partial<Color>;
 }
 
+/** A conditional formatting rule, by `type`. */
 export type ConditionalFormattingRule =
     | ExpressionRuleType
     | CellIsRuleType
@@ -1357,7 +1520,9 @@ export type ConditionalFormattingRule =
 
 export type RowValues = CellValue[] | { [key: string]: CellValue } | undefined | null;
 
+/** The conditional formatting of a range (`worksheet.addConditionalFormatting`). */
 export interface ConditionalFormattingOptions {
+    /** The range (`"A1:E7"`; several ranges separated by spaces). */
     ref: string;
     rules: ConditionalFormattingRule[];
 }
@@ -2137,6 +2302,7 @@ export class Workbook {
     getImage(id: number): Image;
 }
 
+/** The style of a table (`TableProperties.style`). */
 export interface TableStyleProperties {
     /**
      * The colour theme of the table, or null for no table style
@@ -2226,6 +2392,7 @@ export interface TableStyleProperties {
     showColumnStripes?: boolean;
 }
 
+/** A column of a new table (`TableProperties.columns`, `table.addColumn`). */
 export interface TableColumnProperties {
     /**
      * The name of the column, also used in the header
@@ -2257,6 +2424,7 @@ export interface TableColumnProperties {
     style?: Partial<Style>;
 }
 
+/** The definition of a new table (`worksheet.addTable`). */
 export interface TableProperties {
     /**
      * The name of the table
@@ -2290,16 +2458,16 @@ export interface TableProperties {
      */
     columns: TableColumnProperties[];
     /**
-     * Rows of data
+     * Rows of data: the values of the cells of each row, by column
      */
-    rows: any[][];
+    rows: CellValue[][];
 }
 
 /**
- * The style of a table column as the table holds it: a differential format (the style parts it sets; `null` for a part a
- * loaded file does not set, `numFmtId` once registered).
+ * The style of a table column as the table holds it: the `style` of its {@link TableColumnProperties}, or the
+ * differential format read from a file (`null` for the parts the file does not set).
  */
-export type TableColumnStyle = { [K in keyof Style]?: Partial<Style>[K] | null } & { numFmtId?: number };
+export type TableColumnStyle = DifferentialStyle;
 
 /** A column of a table (`table.getColumn(i)`): changes to `name` and to the totals row need `table.commit()`. */
 export interface TableColumn {

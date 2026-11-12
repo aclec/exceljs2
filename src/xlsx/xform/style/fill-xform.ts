@@ -1,6 +1,6 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
-import type { FillPatterns } from "../../../../index";
+import type { FillGradientPath, FillPatterns } from "../../../../index";
 import type { FillModel, GradientStopModel } from "../../../types";
 import BaseXform, { ownEntry } from "../base-xform";
 
@@ -10,8 +10,17 @@ import ColorXform from "./color-xform";
 type PatternFillModel = Extract<FillModel, { type: "pattern" }>;
 /** A gradient fill model. */
 type GradientFillModel = Extract<FillModel, { type: "gradient" }>;
-/** A gradient fill model as GradientFillXform parses it: without `type`, which FillXform adds. */
-type ParsedGradientFillModel = Omit<GradientFillModel, "type"> & { type?: "gradient" };
+/**
+ * A gradient fill model as GradientFillXform parses it: without `type`, which FillXform adds; `degree` is set with
+ * `gradient: "angle"`, `center` with `gradient: "path"`.
+ */
+interface ParsedGradientFillModel {
+    type?: "gradient";
+    gradient?: "angle" | "path";
+    degree?: number;
+    center?: FillGradientPath["center"];
+    stops: GradientStopModel[];
+}
 
 /**
  * The model of a {@link FillXform}: a fill, or `{}` (a `<fill>` without a known child parses as `{}`; rendering a model
@@ -243,7 +252,7 @@ class GradientFillXform extends BaseXform<ParsedGradientFillModel> {
                     model.degree = parseInt(degree, 10);
                 } else if (type === "path") {
                     model.gradient = "path";
-                    const center: NonNullable<GradientFillModel["center"]> = {
+                    const center: FillGradientPath["center"] = {
                         left: left ? parseFloat(left) : 0,
                         top: top ? parseFloat(top) : 0,
                     };
@@ -403,7 +412,8 @@ class FillXform extends BaseXform<FillXformModel> {
                 if (this.parser === this.map.patternFill) {
                     this.model = Object.assign(this.map.patternFill.model!, { type: this.map.patternFill.name });
                 } else {
-                    this.model = Object.assign(this.map.gradientFill.model!, { type: this.map.gradientFill.name });
+                    // a parsed path gradient has its center (see ParsedGradientFillModel)
+                    this.model = Object.assign(this.map.gradientFill.model!, { type: this.map.gradientFill.name }) as GradientFillModel;
                 }
                 this.parser = undefined;
             }
