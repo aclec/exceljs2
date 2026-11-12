@@ -3606,10 +3606,11 @@ export namespace stream {
              */
             sharedStrings?: "cache" | "emit" | "ignore";
             /**
-             * The hyperlinks of the worksheets: `cache`: the `<hyperlink>` elements in `worksheetReader.hyperlinks` (the
-             * targets of external links, in the relationship parts, are not read); `emit`: `hyperlink` events of the
-             * worksheet readers, and `hyperlinks` events (a {@link HyperlinkReader} per worksheet, for the targets) of the
-             * workbook reader; `ignore`.
+             * The hyperlinks of the worksheets: `cache`: the `<hyperlink>` elements in `worksheetReader.hyperlinks`, with
+             * the targets of the external links (read from the relationship parts: see {@link WorksheetHyperlink.target});
+             * `emit`: `hyperlink` events of the worksheet readers, and `hyperlinks` events (a {@link HyperlinkReader} per
+             * worksheet, for the targets) of the workbook reader; `ignore`. The cells of the rows do not get the
+             * hyperlinks (a worksheet lists its hyperlinks after its rows).
              * @default 'ignore'
              */
             hyperlinks?: "cache" | "emit" | "ignore";
@@ -3741,7 +3742,10 @@ export namespace stream {
             ): AsyncGenerator<WorkbookReaderEvent, void, undefined>;
         }
 
-        /** A `<hyperlink>` of a worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes present. */
+        /**
+         * A `<hyperlink>` of a worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes present, and with
+         * `hyperlinks: "cache"` the target of its relationship.
+         */
         interface WorksheetHyperlink {
             /** The cell reference (`"A1"`). */
             ref: string | undefined;
@@ -3753,6 +3757,15 @@ export namespace stream {
             tooltip?: string;
             /** The text displayed. */
             display?: string;
+            /**
+             * `hyperlinks: "cache"`: the link of an external hyperlink (the `Target` of its relationship `rId`), set once
+             * the relationships part of the worksheet is read: when the worksheet is read if that part comes first in the
+             * file, else when the reader reaches it (at the latest when the iteration of the workbook ends). Absent when
+             * the relationship is missing.
+             */
+            target?: string;
+            /** `hyperlinks: "cache"`: the `TargetMode` of the relationship (`"External"` for a link outside the package). */
+            targetMode?: string;
         }
 
         /** The events of a {@link WorksheetReader} (emitted by {@link WorksheetReader.read}), and their arguments. */
@@ -3790,7 +3803,8 @@ export namespace stream {
             /** The `worksheets` and `hyperlinks` options of the workbook reader. */
             readonly options: Partial<Pick<WorkbookStreamReaderOptions, "worksheets" | "hyperlinks">>;
             /**
-             * `hyperlinks: "cache"`: the hyperlinks read so far, keyed by cell reference (an object without prototype).
+             * `hyperlinks: "cache"`: the hyperlinks read so far, keyed by cell reference (an object without prototype),
+             * with their targets (see {@link WorksheetHyperlink.target}).
              */
             hyperlinks?: Record<string, WorksheetHyperlink>;
             /** The sheet format properties (outline levels, default sizes), read from `<sheetFormatPr>`. */
@@ -3870,7 +3884,8 @@ export namespace stream {
          * The hyperlink relationships (link targets) of a worksheet: the `hyperlinks` event of the {@link WorkbookReader},
          * with `hyperlinks: "emit"`. {@link read} emits them one by one (`hyperlink` events). The cache members
          * ({@link hyperlinks}, {@link count}, {@link each}) are filled only by a reader of the `"cache"` option, which the
-         * workbook reader never hands out: they stay empty.
+         * workbook reader never hands out (with `hyperlinks: "cache"`, it gives the targets to the hyperlinks of the
+         * worksheet readers instead): they stay empty.
          */
         interface HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
             /** The workbook reader. */

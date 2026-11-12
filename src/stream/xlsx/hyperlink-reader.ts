@@ -42,9 +42,51 @@ export interface HyperlinkReaderEvents {
     error: [error: unknown];
 }
 
+/** The hyperlink relationships of a worksheet keyed by relationship id (no prototype: the ids come from the file). */
+export type HyperlinkRelationships = Record<string, HyperlinkRelationship>;
+
+/**
+ * Reads the hyperlink relationships of a relationships part, one by one.
+ *
+ * @throws Error on malformed XML
+ */
+export async function* readHyperlinkRelationships(iterator: SaxInput): AsyncGenerator<HyperlinkRelationship, void, undefined> {
+    for await (const events of parseSax(iterator)) {
+        for (const event of events) {
+            if (event.eventType === "opentag") {
+                const node = event.value;
+                if (node.name === "Relationship" && node.attributes.Type === RelType.Hyperlink) {
+                    yield {
+                        type: RelationshipType.Styles,
+                        rId: node.attributes.Id,
+                        target: node.attributes.Target,
+                        targetMode: node.attributes.TargetMode,
+                    };
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Reads the hyperlink relationships of a relationships part, keyed by relationship id (the last one of an id wins).
+ *
+ * @throws Error on malformed XML
+ */
+export async function cacheHyperlinkRelationships(iterator: SaxInput): Promise<HyperlinkRelationships> {
+    // keyed by relationship ids from the file
+    const relationships = Object.create(null) as HyperlinkRelationships;
+    for await (const relationship of readHyperlinkRelationships(iterator)) {
+        // String(): the key of a relationship without Id is "undefined", as before
+        relationships[String(relationship.rId)] = relationship;
+    }
+    return relationships;
+}
+
 /**
  * Reads the hyperlink relationships of a worksheet, for the streaming {@link WorkbookReader}: emitted one by one
- * (`hyperlinks: "emit"`), or cached in {@link hyperlinks} keyed by relationship id (`hyperlinks: "cache"`).
+ * (`hyperlinks: "emit"`), or cached in {@link hyperlinks} keyed by relationship id (`hyperlinks: "cache"`; the workbook
+ * reader does not hand such readers out: it gives the targets to the hyperlinks of the worksheet readers).
  */
 class HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
     /** The workbook reader that the worksheet belongs to. */
@@ -57,7 +99,7 @@ class HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
     readonly options: Pick<WorkbookReaderOptions, "hyperlinks">;
 
     /** `hyperlinks: "cache"`: the relationships read, keyed by relationship id (no prototype: the ids come from the file). */
-    hyperlinks?: Record<string, HyperlinkRelationship>;
+    hyperlinks?: HyperlinkRelationships;
 
     private _reading?: Promise<void>;
 
@@ -97,38 +139,12 @@ class HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
 
     private async _read(): Promise<void> {
         const { iterator, options } = this;
-        const emitHyperlinks = options.hyperlinks === "emit";
-        let hyperlinks: Record<string, HyperlinkRelationship> | null = null;
-        if (options.hyperlinks === "cache") {
-            // keyed by relationship ids from the file
-            this.hyperlinks = hyperlinks = Object.create(null) as Record<string, HyperlinkRelationship>;
-        }
-
-        if (!emitHyperlinks && !hyperlinks) {
-            this.emit("finished");
-            return;
-        }
-
         try {
-            for await (const events of parseSax(iterator)) {
-                for (const event of events) {
-                    if (event.eventType === "opentag") {
-                        const node = event.value;
-                        if (node.name === "Relationship" && node.attributes.Type === RelType.Hyperlink) {
-                            const relationship: HyperlinkRelationship = {
-                                type: RelationshipType.Styles,
-                                rId: node.attributes.Id,
-                                target: node.attributes.Target,
-                                targetMode: node.attributes.TargetMode,
-                            };
-                            if (hyperlinks) {
-                                // String(): the key of a relationship without Id is "undefined", as before
-                                hyperlinks[String(relationship.rId)] = relationship;
-                            } else {
-                                this.emit("hyperlink", relationship);
-                            }
-                        }
-                    }
+            if (options.hyperlinks === "cache") {
+                this.hyperlinks = await cacheHyperlinkRelationships(iterator);
+            } else if (options.hyperlinks === "emit") {
+                for await (const relationship of readHyperlinkRelationships(iterator)) {
+                    this.emit("hyperlink", relationship);
                 }
             }
             this.emit("finished");

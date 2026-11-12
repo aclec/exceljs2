@@ -49,7 +49,10 @@ export function columnOfReference(r: string): number {
 // value of a t="d" cell: a Date, or the text when it is not a valid ISO 8601 date (see iso-date)
 const parseIsoDate = (text: string): Date | string => parseIsoDateOrUndefined(text) || text;
 
-/** A `<hyperlink>` of the worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes of CT_Hyperlink present. */
+/**
+ * A `<hyperlink>` of the worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes of CT_Hyperlink present,
+ * and with `hyperlinks: "cache"` the target of its relationship.
+ */
 export interface WorksheetHyperlink {
     /** the cell reference (`A1`) */
     ref: string | undefined;
@@ -59,6 +62,14 @@ export interface WorksheetHyperlink {
     location?: string;
     tooltip?: string;
     display?: string;
+    /**
+     * `hyperlinks: "cache"`: the link (`Target` of the relationship `rId` of the worksheet's relationships part), set
+     * once that part is read: when the worksheet is read if the part comes before it in the file, else when the reader
+     * reaches it (at the latest when the workbook has been read). Absent when the relationship is missing.
+     */
+    target?: string;
+    /** `hyperlinks: "cache"`: the `TargetMode` of the relationship (`"External"` for a link outside the package). */
+    targetMode?: string;
 }
 
 /** The arguments of the {@link WorksheetReader} constructor. */
@@ -141,12 +152,15 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
     // no prototype: keys come from data (e.g. CSV headers) and may be '__proto__' or 'constructor'
     private _keys: Record<string, Column>;
     private _dimensions: Range;
+    // the number of the worksheet part (the `id` given), for its relationships part
+    private readonly _partNumber: string;
 
     constructor({ workbook, id, iterator, options }: WorksheetReaderOptions) {
         super();
 
         this.workbook = workbook;
         this.id = id;
+        this._partNumber = String(id);
         this.iterator = iterator;
         this.options = options || {};
 
@@ -432,9 +446,13 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                         }
                         if (emitHyperlinks) {
                             worksheetEvents.push({ eventType: "hyperlink", value: hyperlink });
-                        } else {
+                        } else if (hyperlinks) {
                             // String(): a hyperlink without ref is keyed "undefined", as before
-                            hyperlinks![String(hyperlink.ref)] = hyperlink;
+                            hyperlinks[String(hyperlink.ref)] = hyperlink;
+                            if (hyperlink.rId !== undefined) {
+                                // the target, from the relationships part of the worksheet (now, or once it is read)
+                                this.workbook._cacheHyperlinkTarget(this._partNumber, hyperlink);
+                            }
                         }
                     }
                 } else if (event.eventType === "text") {
