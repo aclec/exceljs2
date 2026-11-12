@@ -3170,7 +3170,8 @@ export interface TableColumn {
 
 /**
  * A table of a worksheet (`worksheet.addTable`, `worksheet.getTable`). Its rows and columns live in the cells of the
- * worksheet: change them with the methods below, then `commit()`.
+ * worksheet: change them with the methods below, then `commit()`. A table read from a file has no data rows of its own
+ * (they are the cells of its worksheet): the methods that change its rows, columns or position throw an Error.
  */
 export interface Table {
     /** The table name (unique in the workbook, used in structured references). */
@@ -3184,7 +3185,7 @@ export interface Table {
     headerRow: boolean | undefined;
     /** Whether the table has a totals row; needs `commit()` once changed. */
     totalsRow: boolean | undefined;
-    /** The table style (`"TableStyleMedium2"`), or `null` for none. */
+    /** The table style (`"TableStyleMedium2"`), or `null` for none (also for a table read from a file without one). */
     theme: TableStyleProperties["theme"];
     showFirstColumn: boolean | undefined;
     showLastColumn: boolean | undefined;
@@ -3192,31 +3193,39 @@ export interface Table {
     showColumnStripes: boolean | undefined;
     /** The number of columns. */
     readonly width: number;
-    /** The number of data rows. */
+    /** The number of data rows (of a table read from a file: those of its range). */
     readonly height: number;
 
     /**
-     * Commit changes (writes the table to the cells of the worksheet)
+     * Commit changes (writes the table to the cells of the worksheet); does nothing without a change.
+     * @throws Error for invalid table properties (e.g. a row with more values than the table has columns, a table that
+     *   does not fit in the sheet): the cells are not changed then
      */
     commit(): void;
     /**
      * Remove rows of data (0-based index; 1 row by default)
+     * @throws Error for a table read from a file
      */
     removeRows(rowIndex: number, count?: number): void;
     /**
      * Add a row of data, either insert at rowNumber (0-based) or append
+     * @throws Error for more values than the table has columns (the table is not changed); for a table read from a file
      */
     addRow(values: CellValue[], rowNumber?: number): void;
     /**
      * Get column (0-based index)
+     * @throws Error for an index that is not a column of the table
      */
     getColumn(colIndex: number): TableColumn;
     /**
-     * Add a new column, including column defn and values; inserts at colIndex (0-based) or adds to the right
+     * Add a new column, including column defn and values (one per data row); inserts at colIndex (0-based) or adds to
+     * the right
+     * @throws Error for more values than the table has rows (the table is not changed); for a table read from a file
      */
     addColumn(column: TableColumnProperties, values: CellValue[], colIndex?: number): void;
     /**
      * Remove columns with their data (0-based index; 1 column by default)
+     * @throws Error for a table read from a file
      */
     removeColumns(colIndex: number, count?: number): void;
 }
