@@ -40,6 +40,29 @@ describe("DataValidations", () => {
             expect(Object.keys(dataValidations.model).sort()).to.deep.equal(["B2:D2", "B3", "B4:D4", "C3", "D3"]);
         });
 
+        it("keeps the existing keys that a split would overwrite", () => {
+            const OTHER = { type: "any" };
+            const dataValidations = new DataValidations();
+            dataValidations.add("B1", WHOLE);
+            dataValidations.add("A1:B1", LIST);
+            dataValidations.add("A1", OTHER);
+            expect(dataValidations.find("B1")).to.equal(WHOLE);
+            expect(dataValidations.find("A1")).to.equal(OTHER);
+            expect(dataValidations.model).to.deep.equal({ B1: WHOLE, A1: OTHER });
+        });
+
+        it("overrides many cells of a whole-column range in linear time", () => {
+            const dataValidations = new DataValidations({ "A1:A1048576": LIST });
+            const start = Date.now();
+            for (let row = 1; row <= 20000; row++) {
+                dataValidations.add(`A${row * 7}`, WHOLE); // leaves a range key above each cell
+            }
+            expect(Date.now() - start).to.be.below(250);
+            expect(dataValidations.find("A140000")).to.equal(WHOLE);
+            expect(dataValidations.find("A139999")).to.equal(LIST);
+            expect(dataValidations.find("A140001")).to.equal(LIST);
+        });
+
         it("is overridden by splitting the range around it", () => {
             const dataValidations = new DataValidations({ "A1:A1048576": LIST });
             dataValidations.add("A7", WHOLE);
