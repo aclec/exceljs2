@@ -553,8 +553,8 @@ export interface CellRichTextValue {
 export interface CellHyperlinkValue {
     /**
      * The value shown: any value of a cell, such as a number or a rich text (a hyperlink read from a file shows the value
-     * of its cell, whatever its type). It must be truthy: a value with an empty or zero `text` is not a hyperlink (it is
-     * held as a JSON value, see {@link CellValue}).
+     * of its cell, whatever its type); `cell.text` is its text, as for a cell of that value. It may be empty (`""`), not
+     * null.
      */
     text: string | number | boolean | Date | CellErrorValue | CellRichTextValue;
     hyperlink: string;
@@ -622,10 +622,12 @@ export interface CellSharedStringValue {
  * The value of a cell. Reading gives `null` for an empty cell (never `undefined`); setting `undefined` or `null` empties
  * the cell.
  *
- * The kind of an object value is told by its truthy marker properties, in this order: `text` and `hyperlink`
- * (hyperlink), `formula` or `sharedFormula` (formula), `richText`, `sharedString`, `error`. Any other object (outside
- * this type: an untyped value, such as one returned by the CSV `map` option) is held as a JSON value: its type is
- * String, it is returned as is, and it is written as its JSON text (read back as a string).
+ * The kind of an object value is told by its marker properties, by their presence and type (an empty text or formula,
+ * a shared string 0 count), in this order: a `text` (not null) and a string `hyperlink` (hyperlink), a string `formula`
+ * or `sharedFormula` (formula; an empty formula is a formula cell without formula, `formulaType` None), an array
+ * `richText`, a number `sharedString`, a string `error`. Any other object (outside this type: an untyped value, such as
+ * one returned by the CSV `map` option) is held as a JSON value: its type is String, it is returned as is, and it is
+ * written as its JSON text (read back as a string).
  */
 export type CellValue =
     | null
@@ -736,6 +738,11 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     readonly isHyperlink: boolean;
     /** The target of a hyperlink cell, `undefined` for other cells. */
     readonly hyperlink: string | undefined;
+    /**
+     * The text of the value, not formatted by `numFmt`: a string as is, the `toString()` of a number, a boolean or a
+     * date, the code of an error, the runs of a rich text, the text of a hyperlink (as for a cell of that value), the
+     * result of a formula; `""` for an empty cell.
+     */
     readonly text: string;
     /** The text of the cell ({@link text}), HTML-escaped. */
     readonly html: string;

@@ -877,6 +877,44 @@ describe("WorkbookReader (stream)", () => {
         expect(sheet.rows[0].values).to.deep.equal(expected);
     });
 
+    it("gives the cells of the shared string 0 a shared string value (sharedStrings: emit)", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("B1").value = "other";
+        });
+        const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer), { sharedStrings: "emit" });
+        const cells = [];
+        for await (const worksheet of reader) {
+            for await (const row of worksheet) {
+                row.eachCell((cell) => cells.push([cell.address, cell.type, cell.value]));
+            }
+        }
+        expect(cells).to.deep.equal([
+            ["A1", ExcelJS.ValueType.SharedString, { sharedString: 0 }],
+            ["B1", ExcelJS.ValueType.SharedString, { sharedString: 1 }],
+        ]);
+    });
+
+    it("gives a shared formula clone a formula value (without formula) and its result", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("B1").value = { formula: "A1&1", result: "hello1", shareType: "shared", ref: "B1:B2" };
+            ws.getCell("B2").value = { sharedFormula: "B1", result: 0 };
+        });
+        const [sheet] = await readAll(chunkedStream(buffer));
+        const clone = sheet.rows[1].values[2];
+        expect(clone).to.deep.equal({ formula: "", result: 0 });
+        const cells = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+            for await (const row of worksheet) {
+                const cell = row.getCell(2);
+                cells.push([cell.type, cell.formulaType, cell.result, cell.text]);
+            }
+        }
+        expect(cells).to.deep.equal([
+            [ExcelJS.ValueType.Formula, ExcelJS.FormulaType.Master, "hello1", "hello1"],
+            [ExcelJS.ValueType.Formula, ExcelJS.FormulaType.None, 0, "0"],
+        ]);
+    });
+
     it("emits shared strings in sharedStrings: emit mode", async () => {
         const buffer = await baseWorkbookBuffer((wb, ws) => {
             ws.getCell("B1").value = { richText: [{ font: { bold: true }, text: "bold" }] };

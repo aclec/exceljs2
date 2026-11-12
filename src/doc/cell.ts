@@ -67,8 +67,9 @@ export interface SharedStringRef {
  * formula), a shared string, or any other object, held as a JSON value (its `type` is String, it is written as its JSON
  * text). Setting `undefined` empties the cell (the value is then `null`).
  *
- * The kind of value is told by its type, then by truthy marker properties, in this order: `text` and `hyperlink`
- * (hyperlink), `formula` or `sharedFormula` (formula), `richText`, `sharedString`, `error`.
+ * The kind of value is told by its type, then by its marker properties (their presence and type, not their truthiness),
+ * in this order: a `text` (not null) and a string `hyperlink` (hyperlink), a string `formula` or `sharedFormula`
+ * (formula), an array `richText`, a number `sharedString`, a string `error`.
  */
 export type CellValue =
     | null
@@ -448,11 +449,10 @@ class Cell {
 
     /** Turns a string value into a hyperlink (the string is its text); does nothing for another value. */
     _upgradeToHyperlink(hyperlink: string): void {
-        // if this cell is a string, turn it into a Hyperlink
-        if (this._value.type === ValueType.String) {
+        // if this cell is a string, turn it into a Hyperlink (not a JSON value, whose type is String too)
+        if (this._value instanceof StringValue) {
             this._value = new HyperlinkValue(this, {
-                // a JSON value (also of type String) gives its raw value
-                text: this._value.value as HyperlinkValueObject["text"],
+                text: this._value.value,
                 hyperlink,
             });
         }
@@ -781,7 +781,7 @@ class RichTextValue implements CellValueHolder {
 
     /** The text of the runs, joined. */
     toString(): string {
-        return this.model.value.richText.map((t) => t.text).join("");
+        return richTextText(this.model.value);
     }
 
     get type(): typeof ValueType.RichText {
@@ -935,9 +935,9 @@ class HyperlinkValue implements CellValueHolder {
 
     release(): void {}
 
-    /** The text (as it is: a loaded hyperlink's text may be another value than a string). */
+    /** The text shown: that of its text value (see {@link hyperlinkText}). */
     toString(): string {
-        return this.model.text as string;
+        return hyperlinkText(this.model.text);
     }
 }
 
@@ -1020,9 +1020,31 @@ class MergeValue implements CellValueHolder {
     }
 }
 
-/** The text of a formula result: the code of an error, the `toString()` of another value. */
-function resultText(result: FormulaResult): string {
+/** The text of a formula result: the code of an error, the `toString()` of another value; "" without result. */
+function resultText(result: FormulaResult | undefined): string {
+    if (result === undefined || result === null) {
+        return "";
+    }
     return typeof result === "object" && "error" in result ? result.error : result.toString();
+}
+
+/** The text of a rich text: the text of its runs, joined. */
+function richTextText(value: RichTextObject): string {
+    return value.richText.map((t) => t.text).join("");
+}
+
+/**
+ * The text shown by a hyperlink: its text as the cell of that value would show it (a string as is, the `toString()` of
+ * a number, a boolean or a date, the code of an error, the runs of a rich text).
+ */
+function hyperlinkText(text: HyperlinkCellModel["text"]): string {
+    if (typeof text === "string") {
+        return text;
+    }
+    if (typeof text === "number" || typeof text === "boolean" || text instanceof Date) {
+        return text.toString();
+    }
+    return "richText" in text ? richTextText(text) : text.error;
 }
 
 /** A cell reference or range in a formula (for `dependencies`), with an optional sheet name. */
@@ -1162,14 +1184,7 @@ class FormulaValue implements CellValueHolder {
         if (v instanceof Date) {
             return ValueType.Date;
         }
-        const probe = v as ValueProbe;
-        if (probe.text && probe.hyperlink) {
-            return ValueType.Hyperlink;
-        }
-        if (probe.formula) {
-            return ValueType.Formula;
-        }
-
+        // a boolean or an error result
         return ValueType.Null;
     }
 
@@ -1193,16 +1208,14 @@ class FormulaValue implements CellValueHolder {
     }
 
     toCsvString(): string {
-        const { result } = this.model;
-        return result ? resultText(result) : "";
+        return resultText(this.model.result);
     }
 
     release(): void {}
 
     /** The text of the result ("" when there is none; the code of an error). */
     toString(): string {
-        const { result } = this.model;
-        return result ? resultText(result) : "";
+        return resultText(this.model.result);
     }
 }
 
@@ -1416,20 +1429,10 @@ type AnyValue =
     | ErrorValue
     | JSONValue;
 
-/** The marker properties that tell the kind of an object value. */
-interface ValueProbe {
-    readonly text?: unknown;
-    readonly hyperlink?: unknown;
-    readonly formula?: unknown;
-    readonly sharedFormula?: unknown;
-    readonly richText?: unknown;
-    readonly sharedString?: unknown;
-    readonly error?: unknown;
-}
-
 /**
  * The type of a value (see {@link CellValue}): `undefined` for a JSON value (any other object), which has no ValueType
- * (`Cell.Types.JSON` is undefined).
+ * (`Cell.Types.JSON` is undefined). The markers of an object value are told by their presence and type (an empty text,
+ * formula or error code, a shared string 0 are values), as typed in index.d.ts.
  */
 function getValueType(value: unknown): ValueType | undefined {
     if (value === null || value === undefined) {
@@ -1447,21 +1450,26 @@ function getValueType(value: unknown): ValueType | undefined {
     if (value instanceof Date) {
         return ValueType.Date;
     }
-    // any other value: an object, or a symbol / bigint / function (held as a JSON value)
-    const probe = value as ValueProbe;
-    if (probe.text && probe.hyperlink) {
+    if (typeof value !== "object") {
+        // a symbol, a bigint or a function: held as a JSON value
+        return undefined;
+    }
+    if ("hyperlink" in value && typeof value.hyperlink === "string" && "text" in value && value.text !== undefined && value.text !== null) {
         return ValueType.Hyperlink;
     }
-    if (probe.formula || probe.sharedFormula) {
+    if (
+        ("formula" in value && typeof value.formula === "string") ||
+        ("sharedFormula" in value && typeof value.sharedFormula === "string")
+    ) {
         return ValueType.Formula;
     }
-    if (probe.richText) {
+    if ("richText" in value && Array.isArray(value.richText)) {
         return ValueType.RichText;
     }
-    if (probe.sharedString) {
+    if ("sharedString" in value && typeof value.sharedString === "number") {
         return ValueType.SharedString;
     }
-    if (probe.error) {
+    if ("error" in value && typeof value.error === "string") {
         return ValueType.Error;
     }
     return undefined;
