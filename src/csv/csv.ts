@@ -275,14 +275,13 @@ class CSV {
                 ((value: DocCellValue): unknown => {
                     if (value && typeof value === "object") {
                         // the properties of the value objects of index.d.ts (hyperlink, formula, error)
-                        const property = (key: string): unknown => Reflect.get(value, key);
-                        const text = property("text");
-                        const hyperlink = property("hyperlink");
+                        const text = "text" in value ? value.text : undefined;
+                        const hyperlink = "hyperlink" in value ? value.hyperlink : undefined;
                         if (text || hyperlink) {
                             return hyperlink || text || "";
                         }
-                        const result = property("result");
-                        if (property("formula") || result) {
+                        const result = "result" in value ? value.result : undefined;
+                        if (("formula" in value && value.formula) || result) {
                             return result || "";
                         }
                         if (value instanceof Date) {
@@ -291,9 +290,8 @@ class CSV {
                             }
                             return dateUTC ? dayjs.utc(value).format() : dayjs(value).format();
                         }
-                        const error = property("error");
-                        if (error) {
-                            return error;
+                        if ("error" in value && value.error) {
+                            return value.error;
                         }
                         return JSON.stringify(value);
                     }
