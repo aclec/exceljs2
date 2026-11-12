@@ -2,7 +2,7 @@
 // legal-but-unusual XML must load, malformed parts must not crash with a TypeError.
 // Fixtures are built with ExcelJS and patched with xlsx-tamper so they stay readable.
 const JSZip = require('jszip');
-const {baseWorkbookBuffer, tamper} = require('../../utils/xlsx-tamper');
+const {baseWorkbookBuffer, tamper, readPart} = require('../../utils/xlsx-tamper');
 
 const ExcelJS = verquire('exceljs');
 
@@ -213,6 +213,16 @@ describe('xlsx read robustness', function() {
       expect(ws.getColumn(2).width).to.equal(9);
       expect(ws.getColumn(3).width).to.equal(20);
       expect(ws.getColumn(4).width).to.equal(12);
+    });
+
+    it('does not give columns defined without a width an explicit width', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.properties.defaultColWidth = 20;
+        ws.columns = [{header: 'Id', key: 'id'}, {header: 'Name', key: 'name', width: 9}];
+      });
+      expect(await readPart(buffer, SHEET)).to.not.match(/<col min="1"/);
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getColumn(2).width).to.equal(9);
     });
 
     it('keeps image anchors positioned as before', async () => {
