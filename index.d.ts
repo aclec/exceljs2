@@ -1165,11 +1165,25 @@ export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
      * Written instead of the formula derived from the operator and text
      */
     formulae?: any[];
+    /**
+     * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
+     * other sheets (always done when a formula contains a sheet reference such as Other!A1).
+     * Set on the rules read from that extension only.
+     */
+    x14?: boolean;
 }
 
 export interface TimePeriodRuleType extends ConditionalFormattingBaseRule {
     type: "timePeriod";
     timePeriod?: TimePeriodTypes;
+    /**
+     * Written instead of the formula derived from the time period
+     */
+    formulae?: any[];
+    /**
+     * Write the rule in the x14 extension of the worksheet (set on the rules read from that extension only)
+     */
+    x14?: boolean;
 }
 
 export interface DataBarRuleType extends ConditionalFormattingBaseRule {

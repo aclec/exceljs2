@@ -164,7 +164,7 @@ const render = (model) => {
 describe("CfRuleExtXform", () => {
     testXformHelper(expectations);
 
-    describe("formula rules (expression, cellIs)", () => {
+    describe("formula rules (expression, cellIs, containsText, timePeriod)", () => {
         it("are extension rules when flagged x14 or when a formula references another sheet", () => {
             const isExt = (type, formulae, x14) => CfRuleExtXform.isExt({ type, formulae, x14 });
             expect(isExt("expression", ["A1=1"])).to.equal(false);
@@ -183,9 +183,13 @@ describe("CfRuleExtXform", () => {
             expect(isExt("expression", ["AND(A1<>#NULL!,Other!A1)"])).to.equal(true);
             expect(isExt("cellIs", [5])).to.equal(false);
             expect(isExt("cellIs", undefined)).to.equal(false);
+            // text and time period rules have formulae too
+            expect(isExt("containsText", ["Other!A1"])).to.equal(true);
+            expect(isExt("containsText", ["A1"])).to.equal(false);
+            expect(isExt("timePeriod", ["FLOOR(A1,1)=TODAY()"], true)).to.equal(true);
             // other rule types keep their own rules
-            expect(isExt("containsText", ["Other!A1"], true)).to.equal(false);
             expect(isExt("top10", undefined, true)).to.equal(false);
+            expect(isExt("aboveAverage", undefined, true)).to.equal(false);
         });
 
         it("render type, priority, stopIfTrue, operator and id in schema order, then the formulae and the inline dxf", () => {
