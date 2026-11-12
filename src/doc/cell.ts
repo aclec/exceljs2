@@ -8,7 +8,7 @@
 import type { CellErrorValue, Comment, Style } from "../../index";
 import colCache from "../utils/col-cache";
 import { escapeHtml } from "../utils/under-dash";
-import { FormulaType, ValueType } from "./enums";
+import { ErrorValue as ErrorCode, FormulaType, ValueType } from "./enums";
 import { slideFormula, checkFormulaLength } from "../utils/shared-formula";
 import Note from "./note";
 import type DataValidations from "./data-validations";
@@ -25,6 +25,7 @@ import type {
     MergeCellModel,
     NullCellModel,
     NumberCellModel,
+    RichTextRun,
     RichTextValue as RichTextObject,
     SharedStringCellModel,
     StringCellModel,
@@ -157,7 +158,7 @@ class Cell {
         this._address = address;
 
         // TODO: lazy evaluation of this._value
-        this._value = new NullValue(this);
+        this._value = new NullValue({ address, type: ValueType.Null });
 
         this.style = this._mergeStyle(row.style, column.style, {});
 
@@ -363,7 +364,7 @@ class Cell {
     /** Merges this cell into `master`: its value is dropped, and it takes the master's style unless `ignoreStyle`. */
     merge(master: Cell, ignoreStyle?: boolean): void {
         this._value.release();
-        this._value = new MergeValue(this, master);
+        this._value = new MergeValue(this, master, { address: this.address, type: ValueType.Merge, master: master.address });
         if (!ignoreStyle) {
             this.style = master.style;
         }
@@ -373,7 +374,7 @@ class Cell {
     unmerge(ignoreStyle?: boolean): void {
         if (this.type === ValueType.Merge) {
             this._value.release();
-            this._value = new NullValue(this);
+            this._value = new NullValue({ address: this.address, type: ValueType.Null });
             if (!ignoreStyle) {
                 this.style = this._mergeStyle(this._row.style, this._column.style, {});
             }
@@ -417,10 +418,10 @@ class Cell {
             return;
         }
 
+        // the holder is created first: an invalid value throws, leaving the cell as it was
+        const holder = valueHolder(this, v);
         this._value.release();
-
-        // assign value
-        this._value = createValue(getValueType(v), this, v);
+        this._value = holder;
     }
 
     /** The note: a string, or a comment. */
@@ -451,7 +452,9 @@ class Cell {
     _upgradeToHyperlink(hyperlink: string): void {
         // if this cell is a string, turn it into a Hyperlink (not a JSON value, whose type is String too)
         if (this._value instanceof StringValue) {
-            this._value = new HyperlinkValue(this, {
+            this._value = new HyperlinkValue({
+                address: this.address,
+                type: ValueType.Hyperlink,
                 text: this._value.value,
                 hyperlink,
             });
@@ -559,16 +562,22 @@ class Cell {
     /**
      * Sets the cell from a model, adopted by reference. The model of a merged cell names its master by address (the
      * master is created if needed). The style is taken by reference (`{}` when there is none).
-     * @throws Error for an unknown value type
+     * @throws Error for an unknown value type, or the model of a merged cell without master
      */
     set model(value: CellModel) {
-        this._value.release();
-        // the model of a merged cell names its master by address (see MergeValue)
-        const master = value.type === ValueType.Merge && value.master ? this.worksheet.getCell(value.master) : undefined;
-        const holder = createValue(value.type, this, master);
-        // the holder was created for the type of the model, whose class takes it as its model
-        (holder as { model: CellModel }).model = value;
-        this._value = holder;
+        if (value.type === ValueType.Merge) {
+            // the model of a merged cell names its master by address (see MergeValue)
+            if (!value.master) {
+                throw new Error(`The model of the merged cell ${value.address} has no master`);
+            }
+            this._value.release();
+            this._value = new MergeValue(this, this.worksheet.getCell(value.master), value);
+        } else {
+            // the holder is created first: an unknown type throws, leaving the cell as it was
+            const holder = modelHolder(this, value);
+            this._value.release();
+            this._value = holder;
+        }
 
         if (value.comment) {
             switch (value.comment.type) {
@@ -589,11 +598,11 @@ class Cell {
 // =============================================================================
 // Internal Value Types
 //
-// Each holds the model of the cell value (`model`), created by its constructor. The Cell model setter creates the holder
-// of the model's type, then replaces its model with the given one. The class names are visible (spec, debugging).
+// Each holds the model of the cell value (`model`), given to its constructor: built from a value by `valueHolder()`, or
+// adopted by reference from the Cell model setter (`modelHolder()`). The class names are visible (spec, debugging).
 
 /**
- * The contract of the value holders of a {@link Cell}: one class per value type, chosen by `createValue()`. The cell
+ * The contract of the value holders of a {@link Cell}: one class per value type, chosen by `valueHolder()` / `modelHolder()`. The cell
  * delegates `value`, `type`, `effectiveType`, `model`, `toCsvString()` and `toString()` to its holder; the members documented
  * here apply to every implementation.
  */
@@ -620,11 +629,8 @@ interface CellValueHolder {
 class NullValue implements CellValueHolder {
     model: NullCellModel;
 
-    constructor(cell: Cell) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Null,
-        };
+    constructor(model: NullCellModel) {
+        this.model = model;
     }
 
     get value(): null {
@@ -666,12 +672,8 @@ class NullValue implements CellValueHolder {
 class NumberValue implements CellValueHolder {
     model: NumberCellModel;
 
-    constructor(cell: Cell, value: number) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Number,
-            value,
-        };
+    constructor(model: NumberCellModel) {
+        this.model = model;
     }
 
     get value(): number {
@@ -713,12 +715,8 @@ class NumberValue implements CellValueHolder {
 class StringValue implements CellValueHolder {
     model: StringCellModel & { value: string };
 
-    constructor(cell: Cell, value: string) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.String,
-            value,
-        };
+    constructor(model: StringCellModel & { value: string }) {
+        this.model = model;
     }
 
     get value(): string {
@@ -763,12 +761,8 @@ class StringValue implements CellValueHolder {
 class RichTextValue implements CellValueHolder {
     model: StringCellModel & { value: RichTextObject };
 
-    constructor(cell: Cell, value: RichTextObject) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.String,
-            value,
-        };
+    constructor(model: StringCellModel & { value: RichTextObject }) {
+        this.model = model;
     }
 
     get value(): RichTextObject {
@@ -811,12 +805,8 @@ class RichTextValue implements CellValueHolder {
 class DateValue implements CellValueHolder {
     model: DateCellModel;
 
-    constructor(cell: Cell, value: Date) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Date,
-            value,
-        };
+    constructor(model: DateCellModel) {
+        this.model = model;
     }
 
     get value(): Date {
@@ -858,18 +848,8 @@ class DateValue implements CellValueHolder {
 class HyperlinkValue implements CellValueHolder {
     model: HyperlinkCellModel;
 
-    /** @param value - nothing from the Cell model setter, which replaces the model right after */
-    constructor(cell: Cell, value?: HyperlinkValueObject) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Hyperlink,
-            // without a value, the placeholder model has neither text nor hyperlink
-            text: (value ? value.text : undefined) as HyperlinkCellModel["text"],
-            hyperlink: (value ? value.hyperlink : undefined) as string,
-        };
-        if (value && value.tooltip) {
-            this.model.tooltip = value.tooltip;
-        }
+    constructor(model: HyperlinkCellModel) {
+        this.model = model;
     }
 
     /** `{ text, hyperlink, tooltip? }` (a new object). */
@@ -884,15 +864,9 @@ class HyperlinkValue implements CellValueHolder {
         return v;
     }
 
-    /** NB: replaces the model with one without address and type (unused by the library). */
+    /** Replaces the model with one of the value, at the same address (unused by the library). */
     set value(value: HyperlinkValueObject) {
-        this.model = {
-            text: value.text,
-            hyperlink: value.hyperlink,
-        } as HyperlinkCellModel;
-        if (value.tooltip) {
-            this.model.tooltip = value.tooltip;
-        }
+        this.model = hyperlinkModel(this.model.address, value.text, value.hyperlink, value.tooltip);
     }
 
     /** The text shown for the link (as it is: a loaded hyperlink's text may be another value than a string). */
@@ -949,17 +923,12 @@ class MergeValue implements CellValueHolder {
     /** The master of the merge. */
     _master: Cell;
 
-    constructor(cell: Cell, master: Cell) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Merge,
-            master: master ? master.address : undefined,
-        };
+    /** @param model - the model of the merged cell: it names the master by address */
+    constructor(cell: Cell, master: Cell, model: MergeCellModel) {
+        this.model = model;
         this._cell = cell;
         this._master = master;
-        if (master) {
-            master.addMergeRef(cell);
-        }
+        master.addMergeRef(cell);
     }
 
     /** The master's value. */
@@ -970,9 +939,7 @@ class MergeValue implements CellValueHolder {
     /** Sets the master's value; a Cell given as the value becomes the new master. */
     set value(value: CellValue | Cell | undefined) {
         if (value instanceof Cell) {
-            if (this._master) {
-                this._master.releaseMergeRef(this._cell);
-            }
+            this._master.releaseMergeRef(this._cell);
             value.addMergeRef(this._cell);
             this._master = value;
         } else {
@@ -1059,19 +1026,9 @@ class FormulaValue implements CellValueHolder {
     /** The translated formula of a shared formula clone, once computed. */
     declare _translatedFormula?: string | undefined;
 
-    /** @param value - nothing from the Cell model setter, which replaces the model right after */
-    constructor(cell: Cell, value?: FormulaValueObject) {
+    constructor(cell: Cell, model: FormulaCellModel) {
         this.cell = cell;
-
-        this.model = {
-            address: cell.address,
-            type: ValueType.Formula,
-            shareType: value ? value.shareType : undefined,
-            ref: value ? value.ref : undefined,
-            formula: value ? value.formula : undefined,
-            sharedFormula: value ? value.sharedFormula : undefined,
-            result: value ? value.result : undefined,
-        };
+        this.model = model;
     }
 
     /** The formula fields of a model or value that are set (not undefined: falsy results such as 0 are values). */
@@ -1091,9 +1048,9 @@ class FormulaValue implements CellValueHolder {
         return this._copyModel(this.model);
     }
 
-    /** NB: replaces the model with one without address and type (unused by the library). */
+    /** Replaces the model with one of the formula fields of the value that are set, at the same address (unused by the library). */
     set value(value: FormulaValueObject) {
-        this.model = this._copyModel(value) as FormulaCellModel;
+        this.model = { address: this.model.address, type: ValueType.Formula, ...this._copyModel(value) };
     }
 
     /**
@@ -1101,31 +1058,27 @@ class FormulaValue implements CellValueHolder {
      * @throws Error for a value that is not null, a string, a number or a date
      */
     validate(value: unknown): void {
-        switch (getValueType(value)) {
-            case ValueType.Null:
-            case ValueType.String:
-            case ValueType.Number:
-            case ValueType.Date:
-                break;
-            case ValueType.Merge:
-            case ValueType.Hyperlink:
-            case ValueType.Formula:
-            case ValueType.SharedString:
-            case ValueType.RichText:
-            case ValueType.Boolean:
-            case ValueType.Error:
-            case undefined:
-                throw new Error("Cannot process that type of result value");
+        const holder = valueHolder(this.cell, value);
+        if (!(
+            holder instanceof NullValue ||
+            holder instanceof StringValue ||
+            holder instanceof NumberValue ||
+            holder instanceof DateValue
+        )) {
+            throw new Error("Cannot process that type of result value");
         }
     }
 
     /**
-     * The ranges and cells that the formula mentions (`null` for none).
+     * The ranges and cells that the formula mentions (`null` for none: also for a shared formula clone whose master is
+     * missing or has no formula).
      * @throws Error for a formula longer than the Excel limit
      */
     get dependencies(): { ranges: RegExpMatchArray | null; cells: RegExpMatchArray | null } {
-        // the formula of a master; a clone without master has none, and throws, as it always did
-        const formula = this.formula as string;
+        const { formula } = this;
+        if (formula === undefined) {
+            return { ranges: null, cells: null };
+        }
         checkFormulaLength(formula);
         // find all the ranges and cells mentioned in the formula
         const ranges = formula.match(formulaRangeRegex);
@@ -1196,13 +1149,17 @@ class FormulaValue implements CellValueHolder {
         this.model.address = value;
     }
 
-    /** The master's formula translated to this cell (computed once), for a shared formula clone. */
+    /**
+     * The master's formula translated to this cell (computed once), for a shared formula clone; undefined when the
+     * master is missing or has no formula.
+     */
     _getTranslatedFormula(): string | undefined {
         if (!this._translatedFormula && this.model.sharedFormula) {
             const { worksheet } = this.cell;
             const master = worksheet.findCell(this.model.sharedFormula);
-            // a master without formula throws in slideFormula, as it always did
-            this._translatedFormula = master && slideFormula(master.formula as string, master.address, this.model.address);
+            const masterFormula = master && master.formula;
+            this._translatedFormula =
+                master && masterFormula !== undefined ? slideFormula(masterFormula, master.address, this.model.address) : undefined;
         }
         return this._translatedFormula;
     }
@@ -1223,12 +1180,8 @@ class FormulaValue implements CellValueHolder {
 class SharedStringValue implements CellValueHolder {
     model: SharedStringCellModel;
 
-    constructor(cell: Cell, value: SharedStringCellModel["value"]) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.SharedString,
-            value,
-        };
+    constructor(model: SharedStringCellModel) {
+        this.model = model;
     }
 
     get value(): SharedStringCellModel["value"] {
@@ -1271,12 +1224,8 @@ class SharedStringValue implements CellValueHolder {
 class BooleanValue implements CellValueHolder {
     model: BooleanCellModel;
 
-    constructor(cell: Cell, value: boolean) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Boolean,
-            value,
-        };
+    constructor(model: BooleanCellModel) {
+        this.model = model;
     }
 
     get value(): boolean {
@@ -1319,12 +1268,8 @@ class BooleanValue implements CellValueHolder {
 class ErrorValue implements CellValueHolder {
     model: ErrorCellModel;
 
-    constructor(cell: Cell, value: CellErrorValue) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.Error,
-            value,
-        };
+    constructor(model: ErrorCellModel) {
+        this.model = model;
     }
 
     get value(): CellErrorValue {
@@ -1369,13 +1314,8 @@ class ErrorValue implements CellValueHolder {
 class JSONValue implements CellValueHolder {
     model: StringCellModel & { value: string; rawValue: object };
 
-    constructor(cell: Cell, value: object) {
-        this.model = {
-            address: cell.address,
-            type: ValueType.String,
-            value: JSON.stringify(value),
-            rawValue: value,
-        };
+    constructor(model: StringCellModel & { value: string; rawValue: object }) {
+        this.model = model;
     }
 
     get value(): object {
@@ -1429,85 +1369,231 @@ type AnyValue =
     | ErrorValue
     | JSONValue;
 
+// =============================================================================
+// Creation of the value holders
+
+/** The error codes of a cell value (`{ error }`, index.d.ts `CellErrorValue`). */
+const errorCodes: ReadonlySet<string> = new Set<string>(Object.values(ErrorCode));
+
+/** Whether a string is an error code (`"#N/A"`, `"#REF!"`...). */
+function isErrorCode(code: string): code is CellErrorValue["error"] {
+    return errorCodes.has(code);
+}
+
+/** Whether a value is an error value: an object whose `error` is an error code. */
+function isCellErrorValue(value: unknown): value is CellErrorValue {
+    return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string" && isErrorCode(value.error);
+}
+
 /**
- * The type of a value (see {@link CellValue}): `undefined` for a JSON value (any other object), which has no ValueType
- * (`Cell.Types.JSON` is undefined). The markers of an object value are told by their presence and type (an empty text,
- * formula or error code, a shared string 0 are values), as typed in index.d.ts.
+ * Whether a value is a run of rich text: an object with a string `text`, and a `font` object or none (the font is a style
+ * object, taken as it is, as `cell.font` takes one).
  */
-function getValueType(value: unknown): ValueType | undefined {
-    if (value === null || value === undefined) {
-        return ValueType.Null;
-    }
-    if (value instanceof String || typeof value === "string") {
-        return ValueType.String;
-    }
-    if (typeof value === "number") {
-        return ValueType.Number;
-    }
-    if (typeof value === "boolean") {
-        return ValueType.Boolean;
-    }
-    if (value instanceof Date) {
-        return ValueType.Date;
-    }
-    if (typeof value !== "object") {
-        // a symbol, a bigint or a function: held as a JSON value
+function isRichTextRun(run: unknown): run is RichTextRun {
+    return (
+        typeof run === "object" &&
+        run !== null &&
+        "text" in run &&
+        typeof run.text === "string" &&
+        (!("font" in run) || run.font === undefined || (typeof run.font === "object" && run.font !== null))
+    );
+}
+
+/** Whether an object is a rich text value: its `richText` is an array of runs. */
+function isRichTextObject(value: object): value is RichTextObject {
+    return "richText" in value && Array.isArray(value.richText) && value.richText.every(isRichTextRun);
+}
+
+/** Whether a value is a `{ sharedString }` value (a number index). */
+function isSharedStringRef(value: object): value is SharedStringRef {
+    return "sharedString" in value && typeof value.sharedString === "number";
+}
+
+/** Whether a value is a formula result: a string, a number, a boolean, a Date or an error value. */
+function isFormulaResult(value: unknown): value is FormulaResult {
+    return (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        value instanceof Date ||
+        isCellErrorValue(value)
+    );
+}
+
+/** Whether a value is the text of a hyperlink: a formula result (see {@link isFormulaResult}) or a rich text. */
+function isHyperlinkText(value: unknown): value is HyperlinkCellModel["text"] {
+    return isFormulaResult(value) || (typeof value === "object" && value !== null && isRichTextObject(value));
+}
+
+const isString = (value: unknown): value is string => typeof value === "string";
+const isShareType = (value: unknown): value is "shared" | "array" => value === "shared" || value === "array";
+
+/**
+ * An optional field of a value object (`kind` value, field `name`): undefined when absent, undefined or null.
+ * @throws Error when it is of another type than `expected`
+ */
+function optionalField<T>(kind: string, name: string, field: unknown, is: (value: unknown) => value is T, expected: string): T | undefined {
+    if (field === undefined || field === null) {
         return undefined;
     }
+    if (is(field)) {
+        return field;
+    }
+    throw new Error(`Invalid ${kind} value: its ${name} must be ${expected}`);
+}
+
+/** The model of a hyperlink (the tooltip only when not empty). */
+function hyperlinkModel(
+    address: string,
+    text: HyperlinkCellModel["text"],
+    hyperlink: string,
+    tooltip: string | undefined
+): HyperlinkCellModel {
+    const model: HyperlinkCellModel = { address, type: ValueType.Hyperlink, text, hyperlink };
+    if (tooltip) {
+        model.tooltip = tooltip;
+    }
+    return model;
+}
+
+const RESULT_TYPES = "a string, a number, a boolean, a Date or an error value";
+
+/**
+ * The holder of an object value (see {@link CellValue}): a Date, a String object (held as its string), or the kind told
+ * by its markers (their presence and type: an empty text, formula or error code, a shared string 0 are values), in this
+ * order: hyperlink, formula, rich text, shared string, error; any other object is a JSON value.
+ * @throws Error for a value of a kind with a field of the wrong type (a hyperlink text, a formula result, a rich text
+ *   run, an error code...)
+ */
+function objectHolder(cell: Cell, address: string, value: object): AnyValue {
+    if (value instanceof Date) {
+        return new DateValue({ address, type: ValueType.Date, value });
+    }
+    if (value instanceof String) {
+        return new StringValue({ address, type: ValueType.String, value: value.valueOf() });
+    }
     if ("hyperlink" in value && typeof value.hyperlink === "string" && "text" in value && value.text !== undefined && value.text !== null) {
-        return ValueType.Hyperlink;
+        if (!isHyperlinkText(value.text)) {
+            throw new Error(`Invalid hyperlink value: its text must be ${RESULT_TYPES}, or a rich text`);
+        }
+        const tooltip = optionalField("hyperlink", "tooltip", "tooltip" in value ? value.tooltip : undefined, isString, "a string");
+        return new HyperlinkValue(hyperlinkModel(address, value.text, value.hyperlink, tooltip));
     }
     if (
         ("formula" in value && typeof value.formula === "string") ||
         ("sharedFormula" in value && typeof value.sharedFormula === "string")
     ) {
-        return ValueType.Formula;
+        return new FormulaValue(cell, {
+            address,
+            type: ValueType.Formula,
+            shareType: optionalField(
+                "formula",
+                "shareType",
+                "shareType" in value ? value.shareType : undefined,
+                isShareType,
+                '"shared" or "array"'
+            ),
+            ref: optionalField("formula", "ref", "ref" in value ? value.ref : undefined, isString, "a string"),
+            formula: optionalField("formula", "formula", "formula" in value ? value.formula : undefined, isString, "a string"),
+            sharedFormula: optionalField(
+                "formula",
+                "sharedFormula",
+                "sharedFormula" in value ? value.sharedFormula : undefined,
+                isString,
+                "a string"
+            ),
+            result: optionalField("formula", "result", "result" in value ? value.result : undefined, isFormulaResult, RESULT_TYPES),
+        });
     }
     if ("richText" in value && Array.isArray(value.richText)) {
-        return ValueType.RichText;
+        if (!isRichTextObject(value)) {
+            throw new Error("Invalid rich text value: each run must be an object with a string text (and a font object)");
+        }
+        return new RichTextValue({ address, type: ValueType.String, value });
     }
-    if ("sharedString" in value && typeof value.sharedString === "number") {
-        return ValueType.SharedString;
+    if (isSharedStringRef(value)) {
+        return new SharedStringValue({ address, type: ValueType.SharedString, value });
     }
     if ("error" in value && typeof value.error === "string") {
-        return ValueType.Error;
+        if (!isCellErrorValue(value)) {
+            throw new Error(`Invalid error value: ${value.error} is not an error code (${[...errorCodes].join(", ")})`);
+        }
+        return new ErrorValue({ address, type: ValueType.Error, value });
     }
-    return undefined;
+    return new JSONValue({ address, type: ValueType.String, value: JSON.stringify(value), rawValue: value });
 }
 
 /**
- * The value holder of a type (`undefined`: a JSON value).
- *
- * `value` is of the kind of `type` (as classified by {@link getValueType}), or comes from the Cell model setter: the
- * master of a merge or `undefined`, the holder's model being replaced right after. Hence the casts below.
+ * The holder of a value (see {@link CellValue}): null and undefined empty the cell.
+ * @throws Error for a bigint, a symbol or a function, and for an invalid object value (see {@link objectHolder})
+ */
+function valueHolder(cell: Cell, value: unknown): AnyValue {
+    const { address } = cell;
+    if (value === null || value === undefined) {
+        return new NullValue({ address, type: ValueType.Null });
+    }
+    if (typeof value === "string") {
+        return new StringValue({ address, type: ValueType.String, value });
+    }
+    if (typeof value === "number") {
+        return new NumberValue({ address, type: ValueType.Number, value });
+    }
+    if (typeof value === "boolean") {
+        return new BooleanValue({ address, type: ValueType.Boolean, value });
+    }
+    if (typeof value === "object") {
+        return objectHolder(cell, address, value);
+    }
+    // a bigint, a symbol or a function
+    throw new Error(`Invalid cell value: a ${typeof value} is not a cell value`);
+}
+
+/** Whether the value of a string model is a string (else a rich text). */
+function hasStringValue(model: StringCellModel): model is StringCellModel & { value: string } {
+    return typeof model.value === "string";
+}
+
+/** Whether the value of a string model is a rich text (an object with a `richText` array: its runs are not checked). */
+function hasRichTextValue(model: StringCellModel): model is StringCellModel & { value: RichTextObject } {
+    const { value } = model;
+    return typeof value === "object" && value !== null && Array.isArray(value.richText);
+}
+
+/**
+ * The holder of a cell model (but a merged cell's, see the Cell model setter), which adopts the model by reference. A
+ * String or RichText model holds a string or a rich text, whatever its type: the model of a rich text value has the type
+ * String (see {@link RichTextValue}); with another value (a malformed file: a shared string index without a shared
+ * strings part), the cell is empty (a Null model, not adopted).
  * @throws Error for an unknown type
  */
-function createValue(type: ValueType | undefined, cell: Cell, value: unknown): AnyValue {
-    switch (type) {
+function modelHolder(cell: Cell, model: Exclude<CellModel, MergeCellModel>): AnyValue {
+    const { type } = model;
+    switch (model.type) {
         case ValueType.Null:
-            return new NullValue(cell);
+            return new NullValue(model);
         case ValueType.Number:
-            return new NumberValue(cell, value as number);
+            return new NumberValue(model);
         case ValueType.String:
-            return new StringValue(cell, value as string);
-        case ValueType.Date:
-            return new DateValue(cell, value as Date);
-        case ValueType.Hyperlink:
-            return new HyperlinkValue(cell, value as HyperlinkValueObject | undefined);
-        case ValueType.Formula:
-            return new FormulaValue(cell, value as FormulaValueObject | undefined);
-        case ValueType.Merge:
-            return new MergeValue(cell, value as Cell);
-        case undefined:
-            return new JSONValue(cell, value as object);
-        case ValueType.SharedString:
-            return new SharedStringValue(cell, value as SharedStringCellModel["value"]);
         case ValueType.RichText:
-            return new RichTextValue(cell, value as RichTextObject);
+            if (hasStringValue(model)) {
+                return new StringValue(model);
+            }
+            if (hasRichTextValue(model)) {
+                return new RichTextValue(model);
+            }
+            return new NullValue({ address: model.address, type: ValueType.Null });
+        case ValueType.Date:
+            return new DateValue(model);
+        case ValueType.Hyperlink:
+            return new HyperlinkValue(model);
+        case ValueType.Formula:
+            return new FormulaValue(cell, model);
+        case ValueType.SharedString:
+            return new SharedStringValue(model);
         case ValueType.Boolean:
-            return new BooleanValue(cell, value as boolean);
+            return new BooleanValue(model);
         case ValueType.Error:
-            return new ErrorValue(cell, value as CellErrorValue);
+            return new ErrorValue(model);
         default:
             throw new Error(`Could not create Value of type ${String(type)}`);
     }

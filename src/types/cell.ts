@@ -32,7 +32,7 @@ export type FormulaResult = string | number | boolean | Date | CellErrorValue;
 
 /** Fields of every cell model. */
 interface CellModelBase {
-    /** The cell reference (`A1`). Absent from the models of hyperlink / formula values once their value was set. */
+    /** The cell reference (`A1`). */
     address: string;
     /** The style: always set by `Cell.model` (`{}` when none); set by reconcile only for a known style id. */
     style?: StyleModel;
