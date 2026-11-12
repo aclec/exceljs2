@@ -54,6 +54,20 @@ describe("stream I/O regressions", () => {
         });
     });
 
+    describe("WorksheetWriter", () => {
+        it("finds an uncommitted cell (findCell read address.column, which does not exist)", async () => {
+            await streamedBuffer((wb) => {
+                const ws = wb.addWorksheet("F");
+                const cell = ws.getCell("B2");
+                expect(ws.findCell("B2")).to.equal(cell);
+                expect(ws.findCell(2, 2)).to.equal(cell);
+                expect(ws.findCell("C2")).to.equal(undefined);
+                expect(ws.findCell("B3")).to.equal(undefined);
+                ws.commit();
+            });
+        });
+    });
+
     describe("WorkbookReader", () => {
         it('reads a cell with a hyperlink listed before <sheetData> (hyperlinks: "cache") without losing its value', async () => {
             const base = await baseWorkbookBuffer((wb, ws) => {

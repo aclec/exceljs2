@@ -309,8 +309,8 @@ class XLSX {
         };
         for (const name of Object.keys(model.drawings)) {
             const drawing = model.drawings[name]!;
-            // part names and relationship ids come from the file: the hashes have no prototype
-            const drawingRel = model.drawingRels[name];
+            // part names and relationship ids come from the file: ignore inherited members
+            const drawingRel = Object.hasOwn(model.drawingRels, name) ? model.drawingRels[name] : undefined;
             if (drawingRel) {
                 const rels = (drawingOptions.rels = drawingRel.reduce<Record<string, RelationshipModel>>(
                     (o, rel) => {
@@ -575,7 +575,7 @@ class XLSX {
                 }
                 switch (entryName) {
                     case "_rels/.rels":
-                        model.globalRels = await parseRelationships(stream);
+                        model.globalRels = (await this.parseRels(stream)) ?? undefined;
                         break;
 
                     case "xl/workbook.xml": {
@@ -589,7 +589,7 @@ class XLSX {
                     }
 
                     case "xl/_rels/workbook.xml.rels":
-                        model.workbookRels = await parseRelationships(stream);
+                        model.workbookRels = (await this.parseRels(stream)) ?? undefined;
                         break;
 
                     case "xl/sharedStrings.xml":

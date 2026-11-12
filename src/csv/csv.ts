@@ -180,7 +180,8 @@ class CSV {
                 .on(
                     "headers",
                     guard(() => {
-                        // the header names become the first row, and the column keys
+                        // the header names become the first row, and the column keys (the parser emits 'headers' only
+                        // with the headers option, which setHeaders handles)
                         // TS-WAVE2 / index.d.ts: a null header name is kept as is (Column.header is typed string)
                         worksheet.columns = headers!.map((header) => (header ? { header: header[0] as string, key: header[1] } : {}));
                     })
@@ -318,9 +319,9 @@ class CSV {
     /**
      * Writes a worksheet as CSV, as {@link write}.
      *
-     * @returns the CSV bytes (`null` for an empty output)
+     * @returns the CSV bytes
      */
-    async writeBuffer(options?: Partial<CsvWriteOptions>): Promise<Buffer | null> {
+    async writeBuffer(options?: Partial<CsvWriteOptions>): Promise<Buffer> {
         const stream = new StreamBuf();
         await this.write(stream, options);
         return stream.read();
