@@ -17,6 +17,9 @@ export type VmlTextboxRenderModel = Pick<NoteModel, "note">;
  * `undefined`.
  */
 class VmlTextboxXform extends BaseXform<VmlTextboxModel | VmlTextboxRenderModel> {
+    /** The parsed margins (render takes a note: see the type parameter). */
+    declare model: VmlTextboxModel | null | undefined;
+
     get tag(): string {
         return "v:textbox";
     }

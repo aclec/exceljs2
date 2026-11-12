@@ -98,12 +98,15 @@ export interface CommentRefsEntry {
 // ---------------------------------------------------------------------------------------------------------------------
 // Workbook part
 
-/** A `<sheet>` of `xl/workbook.xml` (book/sheet-xform). `name` is XML-decoded; `id` is `NaN` if `sheetId` is not a number. */
+/**
+ * A `<sheet>` of `xl/workbook.xml` (book/sheet-xform). `name` is XML-decoded; `id` is `NaN` if `sheetId` is not a number.
+ * `rId` is required by the schema, but a parsed file may lack it (the sheet is then skipped); it is set on write.
+ */
 export interface SheetDefModel {
     id: number;
     name: string;
     state?: string;
-    rId: string;
+    rId?: string;
 }
 
 /**
@@ -130,6 +133,63 @@ export interface WorkbookViewModel {
     firstSheet?: number;
 }
 
+/** A `<pivotCache>` of `xl/workbook.xml` (book/workbook-pivot-cache-xform): render reads a {@link PivotTableModel}. */
+export interface WorkbookPivotCacheModel {
+    cacheId?: string;
+    rId?: string;
+}
+
+/**
+ * `xl/workbook.xml` as book/workbook-xform parses it: the lists absent from the file are `undefined` (`definedNames`
+ * absent); `properties` is `{ date1904 }` (`{}` without `<workbookPr>`); `calcProperties` is always `{}`.
+ */
+export interface WorkbookPartModel {
+    sheets?: SheetDefModel[];
+    properties: Partial<WorkbookProperties>;
+    views?: WorkbookViewModel[];
+    calcProperties: Partial<CalculationProperties>;
+    definedNames?: DefinedNameModel[];
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Pivot tables
+
+/**
+ * A cache field of a pivot table (src/doc/pivot-table.ts): a column of the source, named by its header cell value, and,
+ * for a row or column field, its distinct values (sorted); `null` for the other fields.
+ */
+export interface PivotCacheFieldModel {
+    /** The header value (any cell value: written with `String()`). */
+    name: unknown;
+    sharedItems: unknown[] | null;
+}
+
+/** The source worksheet of a pivot table, as the pivot xforms read it (a src/doc Worksheet). */
+export interface PivotSourceSheetModel {
+    readonly name: string;
+    readonly dimensions: { readonly shortRange: string };
+    /** The values of the rows: indexed by row number, each row by column number (1-based, index 0 unused). */
+    getSheetValues(): unknown[][];
+}
+
+/**
+ * A pivot table (src/doc/pivot-table.ts `makePivotTable`), rendered by the pivot-table xforms (which do not parse).
+ * `rows` / `columns` / `values` are indexes into `cacheFields`.
+ */
+export interface PivotTableModel {
+    sourceSheet: PivotSourceSheetModel;
+    rows: number[];
+    columns: number[];
+    /** exactly one value field */
+    values: number[];
+    metric: "sum";
+    cacheFields: PivotCacheFieldModel[];
+    /** the id of the pivot cache in `xl/workbook.xml` */
+    cacheId: string;
+    /** write (xlsx.ts): the relationship id of the pivot cache definition from the workbook */
+    rId?: string;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Workbook
 
@@ -152,8 +212,8 @@ export interface WorkbookModel extends CoreModel {
     /** theme part name (`theme1`) → XML */
     themes?: Record<string, string>;
     media: MediaModel[];
-    /** PARTIAL: the document's PivotTable objects. */
-    pivotTables: unknown[];
+    /** The pivot tables of the worksheets (at most one). */
+    pivotTables: PivotTableModel[];
 }
 
 /**

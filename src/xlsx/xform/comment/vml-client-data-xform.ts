@@ -13,7 +13,7 @@ const POSITION_TYPE = ["twoCells", "oneCells", "absolute"] as const;
 /** What {@link VmlClientDataXform} renders: a note of the comments part (see `CommentRefModel`). */
 export type VmlClientDataRenderModel = Pick<CommentRefModel, "note" | "refAddress"> & { anchor?: VmlAnchorRect };
 
-/** The parsed model of a {@link VmlClientDataXform} (the model of the xform is this, or the note it renders). */
+/** The parsed model of a {@link VmlClientDataXform}. */
 export type VmlClientDataModel = Pick<VmlNoteShapeModel, "anchor" | "editAs"> & {
     protection: { locked?: string; lockText?: string };
 };
@@ -23,6 +23,9 @@ export type VmlClientDataModel = Pick<VmlNoteShapeModel, "anchor" | "editAs"> & 
  * protection and its cell (0-based `<x:Row>` / `<x:Column>`).
  */
 class VmlClientDataXform extends BaseXform<VmlClientDataModel | VmlClientDataRenderModel> {
+    /** The parsed data (render takes a note: see the type parameter). */
+    declare model: VmlClientDataModel | null | undefined;
+
     declare map: {
         readonly "x:Anchor": VmlAnchorXform;
         readonly "x:Locked": VmlProtectionXform;
@@ -109,8 +112,7 @@ class VmlClientDataXform extends BaseXform<VmlClientDataModel | VmlClientDataRen
     /** Completes the model from the children, at the end of the element. */
     normalizeModel(): void {
         // the model was created when the element opened
-        const { model } = this;
-        if (!model || !("protection" in model)) return;
+        const model = this.model!;
         const position = Object.assign({}, this.map["x:MoveWithCells"].model, this.map["x:SizeWithCells"].model);
         const len = Object.keys(position).length;
         model.editAs = POSITION_TYPE[len];

@@ -1,26 +1,37 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { XmlAttributes } from "../../../utils/xml-stream";
+import XmlStream from "../../../utils/xml-stream";
+import type { PivotTableModel } from "../../../types";
 import BaseXform from "../base-xform";
 import CacheField from "./cache-field";
-import XmlStream from "../../../utils/xml-stream";
 
-class PivotCacheDefinitionXform extends BaseXform {
+/**
+ * The pivot cache definition of a pivot table, `xl/pivotCache/pivotCacheDefinition1.xml`: its source range and its cache
+ * fields. Render only (parsing is not supported: the inherited no-op methods).
+ */
+class PivotCacheDefinitionXform extends BaseXform<PivotTableModel> {
+    /** The namespaces of `<pivotCacheDefinition>`. */
+    static readonly PIVOT_CACHE_DEFINITION_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+        "mc:Ignorable": "xr",
+        "xmlns:xr": "http://schemas.microsoft.com/office/spreadsheetml/2014/revision",
+    };
+
+    declare map: Record<string, never>;
+
     constructor() {
         super();
 
         this.map = {};
     }
 
-    prepare(model) {
-        // TK
-    }
-
-    get tag() {
+    get tag(): string {
         // http://www.datypic.com/sc/ooxml/e-ssml_pivotCacheDefinition.html
         return "pivotCacheDefinition";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: PivotTableModel): void {
         const { sourceSheet, cacheFields } = model;
 
         xmlStream.openXml(XmlStream.StdDocAttributes);
@@ -45,35 +56,12 @@ class PivotCacheDefinitionXform extends BaseXform {
 
         xmlStream.openNode("cacheFields", { count: cacheFields.length });
         // Note: keeping this pretty-printed for now to ease debugging.
+        // (the values of the fields are encoded by CacheField.render)
         xmlStream.writeXml(cacheFields.map((cacheField) => new CacheField(cacheField).render()).join("\n    "));
         xmlStream.closeNode();
 
         xmlStream.closeNode();
     }
-
-    parseOpen(node) {
-        // TK
-    }
-
-    parseText(text) {
-        // TK
-    }
-
-    parseClose(name) {
-        // TK
-    }
-
-    reconcile(model, options) {
-        // TK
-    }
 }
-
-PivotCacheDefinitionXform.PIVOT_CACHE_DEFINITION_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-    "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
-    "mc:Ignorable": "xr",
-    "xmlns:xr": "http://schemas.microsoft.com/office/spreadsheetml/2014/revision",
-};
 
 export default PivotCacheDefinitionXform;

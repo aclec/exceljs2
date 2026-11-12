@@ -22,7 +22,7 @@ import type {
 } from "../../index";
 import type { CellModel, ColModel, ParsedCellModel, RowModel } from "./cell";
 import type { DxfModel } from "./style";
-import type { MediaModel, RelationshipModel } from "./book";
+import type { MediaModel, PivotTableModel, RelationshipModel } from "./book";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Notes (cell comments)
@@ -304,8 +304,8 @@ export interface WorksheetModel {
     media: WorksheetMediumModel[];
     sheetProtection?: SheetProtectionModel | null;
     tables: TableModel[];
-    /** PARTIAL: the document's PivotTable objects (src/doc/pivot-table.ts); absent after a load. */
-    pivotTables?: unknown[];
+    /** The document's pivot tables (src/doc/pivot-table.ts); absent after a load. */
+    pivotTables?: PivotTableModel[];
     conditionalFormattings: ConditionalFormattingModel[];
     /** `undefined` when there is no column definition. */
     cols?: ColModel[];

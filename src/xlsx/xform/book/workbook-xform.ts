@@ -1,10 +1,20 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
+import type { CalculationProperties, WorkbookProperties, WorksheetState } from "../../../../index";
+import type { SaxInput, SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type {
+    DefinedNameModel,
+    MediaModel,
+    ParsedWorksheetModel,
+    PageSetupModel,
+    RelationshipModel,
+    SheetDefModel,
+    WorkbookPartModel,
+    WorkbookPivotCacheModel,
+    WorkbookReadModel,
+    WorkbookViewModel,
+} from "../../../types";
 
-import XmlStream from "../../../utils/xml-stream";
-
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 import StaticXform from "../static-xform";
 import ListXform from "../list-xform";
 import DefinedNameXform from "./defined-name-xform";
@@ -23,7 +33,7 @@ const MAX_SHEET_ID = 65535;
 // area or print title is a defined name, in which a relative reference would depend on the active cell. Anything else is
 // kept as given.
 const CELL_REF = /^\$?([A-Za-z]{1,3})?\$?(\d+)?$/;
-function absoluteRef(ref) {
+function absoluteRef(ref: string): string {
     const match = CELL_REF.exec(ref);
     if (!match || (!match[1] && !match[2])) {
         return ref;
@@ -32,12 +42,12 @@ function absoluteRef(ref) {
 }
 
 // the absolute form of a range (A1:B2, A:C, 1:3) or of a cell
-const absoluteRange = (range) => range.split(":").map(absoluteRef).join(":");
+const absoluteRange = (range: string): string => range.split(":").map(absoluteRef).join(":");
 
 // Keeps valid ids; gives the lowest free ids to sheets whose id is not an integer in 1..MAX_SHEET_ID or is
 // already used by an earlier sheet (which used to replace that sheet).
-function renumberSheets(sheets) {
-    const used = new Set();
+function renumberSheets(sheets: readonly SheetDefModel[]): void {
+    const used = new Set<number>();
     const invalid = sheets.filter((sheet) => {
         const valid = Number.isInteger(sheet.id) && sheet.id >= 1 && sheet.id <= MAX_SHEET_ID && !used.has(sheet.id);
         if (valid) {
@@ -46,16 +56,75 @@ function renumberSheets(sheets) {
         return !valid;
     });
     let id = 1;
-    invalid.forEach((sheet) => {
+    for (const sheet of invalid) {
         while (used.has(id)) {
             id++;
         }
         sheet.id = id;
         used.add(id);
-    });
+    }
 }
 
-class WorkbookXform extends BaseXform {
+/** A worksheet as {@link WorkbookXform} writes it: its `<sheet>` and its print areas and titles. */
+export interface WorkbookSheetWriteModel extends SheetDefModel {
+    readonly pageSetup?: Pick<PageSetupModel, "printArea" | "printTitlesRow" | "printTitlesColumn"> | null;
+}
+
+/**
+ * What {@link WorkbookXform} prepares and renders: the workbook model of xlsx.ts or of the stream WorkbookWriter.
+ * prepare sets `sheets` (the worksheets), adds the print areas and titles to `definedNames` and names the media.
+ */
+export interface WorkbookXformWriteModel {
+    worksheets: WorkbookSheetWriteModel[];
+    sheets?: readonly WorkbookSheetWriteModel[];
+    definedNames: DefinedNameModel[];
+    views: readonly WorkbookViewModel[];
+    properties: Partial<WorkbookProperties>;
+    calcProperties: Partial<CalculationProperties>;
+    media?: readonly MediaModel[];
+    /** a `<pivotCache>` per pivot table */
+    pivotTables?: readonly WorkbookPivotCacheModel[];
+}
+
+/**
+ * The workbook part, `xl/workbook.xml`: the worksheets (`<sheets>`), the defined names (with the print areas and titles
+ * of the worksheets), the views and the properties.
+ *
+ * - Write: {@link prepare} then {@link render} a {@link WorkbookXformWriteModel}.
+ * - Read: parsing gives a {@link WorkbookPartModel} (the model of this xform); {@link reconcile} then completes the read
+ *   model of xlsx.ts (worksheet names / ids / states, print areas and titles, media indexes).
+ */
+class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteModel | WorkbookReadModel> {
+    /** The namespaces of `<workbook>`. */
+    static readonly WORKBOOK_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+        "mc:Ignorable": "x15",
+        "xmlns:x15": "http://schemas.microsoft.com/office/spreadsheetml/2010/11/main",
+    };
+
+    /** The fixed parts of the workbook part. */
+    static readonly STATIC_XFORMS = {
+        fileVersion: new StaticXform({
+            tag: "fileVersion",
+            $: { appName: "xl", lastEdited: 5, lowestEdited: 5, rupBuild: 9303 },
+        }),
+    };
+
+    /** The parsed part (prepare / render / reconcile take other models: see the type parameter). */
+    declare model: WorkbookPartModel | null | undefined;
+
+    declare map: {
+        readonly fileVersion: StaticXform;
+        readonly workbookPr: WorkbookPropertiesXform;
+        readonly bookViews: ListXform<WorkbookViewModel>;
+        readonly sheets: ListXform<SheetDefModel>;
+        readonly definedNames: ListXform<DefinedNameModel>;
+        readonly calcPr: WorkbookCalcPropertiesXform;
+        readonly pivotCaches: ListXform<WorkbookPivotCacheModel>;
+    };
+
     constructor() {
         super();
 
@@ -82,13 +151,15 @@ class WorkbookXform extends BaseXform {
         };
     }
 
-    prepare(model) {
-        model.sheets = model.worksheets;
+    /** Sets `sheets`, adds the print areas and titles of the worksheets to the defined names, names the media. */
+    override prepare(model: WorkbookXformWriteModel): void {
+        const sheets = model.worksheets;
+        model.sheets = sheets;
 
         // collate all the print areas from all of the sheets and add them to the defined names
-        const printAreas = [];
+        const printAreas: DefinedNameModel[] = [];
         let index = 0; // sheets is sparse array - calc index manually
-        model.sheets.forEach((sheet) => {
+        sheets.forEach((sheet) => {
             // quoted sheet name for a formula reference: embedded quotes are doubled
             const sheetRef = `'${sheet.name.replace(/'/g, "''")}'`;
             if (sheet.pageSetup && sheet.pageSetup.printArea) {
@@ -102,7 +173,7 @@ class WorkbookXform extends BaseXform {
             }
 
             if (sheet.pageSetup && (sheet.pageSetup.printTitlesRow || sheet.pageSetup.printTitlesColumn)) {
-                const ranges = [];
+                const ranges: string[] = [];
 
                 if (sheet.pageSetup.printTitlesColumn) {
                     ranges.push(`${sheetRef}!${absoluteRange(sheet.pageSetup.printTitlesColumn)}`);
@@ -112,7 +183,7 @@ class WorkbookXform extends BaseXform {
                     ranges.push(`${sheetRef}!${absoluteRange(sheet.pageSetup.printTitlesRow)}`);
                 }
 
-                const definedName = {
+                const definedName: DefinedNameModel = {
                     name: "_xlnm.Print_Titles",
                     ranges,
                     localSheetId: index,
@@ -132,7 +203,7 @@ class WorkbookXform extends BaseXform {
         });
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: WorkbookXformWriteModel): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode("workbook", WorkbookXform.WORKBOOK_ATTRIBUTES);
 
@@ -147,7 +218,14 @@ class WorkbookXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns the parsed part */
+    override async parseStream(stream: SaxInput): Promise<WorkbookPartModel | null | undefined> {
+        await super.parseStream(stream);
+        return this.model;
+    }
+
+    /** @returns `true`: every element of the part is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -155,22 +233,24 @@ class WorkbookXform extends BaseXform {
         switch (node.name) {
             case "workbook":
                 return true;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 return true;
+            }
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -178,46 +258,56 @@ class WorkbookXform extends BaseXform {
             return true;
         }
         switch (name) {
-            case "workbook":
-                this.model = {
-                    sheets: this.map.sheets.model,
+            case "workbook": {
+                // (`?? undefined`: the lists are null only after a reset, which this xform never does)
+                const model: WorkbookPartModel = {
+                    sheets: this.map.sheets.model ?? undefined,
                     properties: this.map.workbookPr.model || {},
-                    views: this.map.bookViews.model,
+                    views: this.map.bookViews.model ?? undefined,
                     calcProperties: {},
                 };
                 if (this.map.definedNames.model) {
-                    this.model.definedNames = this.map.definedNames.model;
+                    model.definedNames = this.map.definedNames.model;
                 }
+                this.model = model;
 
                 return false;
+            }
             default:
                 // not quite sure how we get here!
                 return true;
         }
     }
 
-    reconcile(model) {
+    /**
+     * Completes the read model of xlsx.ts: the name, id and state of each worksheet (renumbering invalid or duplicate
+     * ids), its print areas and titles (the other defined names stay in `definedNames`), and the index of each medium.
+     */
+    override reconcile(model: WorkbookReadModel): void {
         // keyed by ids from the file: no prototype, so that an id such as "constructor" is unknown
-        const rels = (model.workbookRels || []).reduce((map, rel) => {
-            map[rel.Id] = rel;
-            return map;
-        }, Object.create(null));
+        const rels = (model.workbookRels || []).reduce<Record<string, RelationshipModel>>(
+            (map, rel) => {
+                map[rel.Id] = rel;
+                return map;
+            },
+            Object.create(null) as Record<string, RelationshipModel>
+        );
 
         renumberSheets(model.sheets || []);
 
         // reconcile sheet ids, rIds and names
-        const worksheets = [];
-        let worksheet;
+        const worksheets: ParsedWorksheetModel[] = [];
+        let worksheet: ParsedWorksheetModel | undefined;
         let index = 0;
 
         (model.sheets || []).forEach((sheet) => {
-            const rel = rels[sheet.rId];
+            const rel = sheet.rId === undefined ? undefined : rels[sheet.rId];
             if (!rel || typeof rel.Target !== "string") {
                 return;
             }
             // if rel.Target start with `[space]/xl/` or `/xl/` , then it will be replaced with `''` and spliced behind `xl/`,
             // otherwise it will be spliced directly behind `xl/`. i.g.
-            worksheet = model.worksheetHash[`xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`];
+            worksheet = ownEntry(model.worksheetHash, `xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`);
             // If there are "chartsheets" in the file, rel.Target will
             // come out as chartsheets/sheet1.xml or similar here, and
             // that won't be in model.worksheetHash.
@@ -226,29 +316,31 @@ class WorkbookXform extends BaseXform {
             if (worksheet) {
                 worksheet.name = sheet.name;
                 worksheet.id = sheet.id;
-                worksheet.state = sheet.state;
+                // unvalidated
+                worksheet.state = sheet.state as WorksheetState | undefined;
                 worksheets[index++] = worksheet;
             }
         });
 
         // reconcile print areas
-        const definedNames = [];
+        const definedNames: DefinedNameModel[] = [];
         // the areas of each worksheet, joined once at the end: legacy files may hold several Print_Area names
         // for the same sheet, and re-joining the accumulated area for each name was quadratic
-        const printAreas = new Map();
-        _.each(model.definedNames, (definedName) => {
+        const printAreas = new Map<ParsedWorksheetModel, string[]>();
+        for (const definedName of model.definedNames || []) {
             if (definedName.name === "_xlnm.Print_Area") {
-                worksheet = worksheets[definedName.localSheetId];
+                worksheet = sheetAt(worksheets, definedName.localSheetId);
                 if (worksheet) {
                     if (!worksheet.pageSetup) {
                         worksheet.pageSetup = {};
                     }
                     // keep the reference as written (minus sheet and $): an area may be a cell, a range,
                     // or whole columns/rows (A:C, 1:3); #REF! areas are dropped
-                    if (!printAreas.has(worksheet)) {
-                        printAreas.set(worksheet, worksheet.pageSetup.printArea ? [worksheet.pageSetup.printArea] : []);
+                    let areas = printAreas.get(worksheet);
+                    if (!areas) {
+                        areas = worksheet.pageSetup.printArea ? [worksheet.pageSetup.printArea] : [];
+                        printAreas.set(worksheet, areas);
                     }
-                    const areas = printAreas.get(worksheet);
                     definedName.ranges.forEach((range) => {
                         const area = range.slice(range.lastIndexOf("!") + 1).replace(/\$/g, "");
                         if (area && !area.startsWith("#")) {
@@ -257,7 +349,7 @@ class WorkbookXform extends BaseXform {
                     });
                 }
             } else if (definedName.name === "_xlnm.Print_Titles") {
-                worksheet = worksheets[definedName.localSheetId];
+                worksheet = sheetAt(worksheets, definedName.localSheetId);
                 if (worksheet) {
                     if (!worksheet.pageSetup) {
                         worksheet.pageSetup = {};
@@ -286,7 +378,7 @@ class WorkbookXform extends BaseXform {
             } else {
                 definedNames.push(definedName);
             }
-        });
+        }
         printAreas.forEach((areas, sheet) => {
             sheet.pageSetup.printArea = areas.join("&&");
         });
@@ -299,18 +391,9 @@ class WorkbookXform extends BaseXform {
     }
 }
 
-WorkbookXform.WORKBOOK_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-    "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
-    "mc:Ignorable": "x15",
-    "xmlns:x15": "http://schemas.microsoft.com/office/spreadsheetml/2010/11/main",
-};
-WorkbookXform.STATIC_XFORMS = {
-    fileVersion: new StaticXform({
-        tag: "fileVersion",
-        $: { appName: "xl", lastEdited: 5, lowestEdited: 5, rupBuild: 9303 },
-    }),
-};
+// the worksheet at a localSheetId of a defined name (absent or not an index: none)
+function sheetAt(worksheets: readonly ParsedWorksheetModel[], localSheetId: number | undefined): ParsedWorksheetModel | undefined {
+    return localSheetId === undefined ? undefined : worksheets[localSheetId];
+}
 
 export default WorkbookXform;

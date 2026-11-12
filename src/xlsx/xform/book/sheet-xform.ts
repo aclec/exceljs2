@@ -1,10 +1,15 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import utils from "../../../utils/utils";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { SheetDefModel } from "../../../types";
+import { xmlDecode } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
-class WorksheetXform extends BaseXform {
-    render(xmlStream, model) {
+/**
+ * A `<sheet sheetId name state r:id>` of `xl/workbook.xml` (see {@link SheetDefModel}). The name is XML-decoded when
+ * parsed.
+ */
+class WorksheetXform extends BaseXform<SheetDefModel> {
+    override render(xmlStream: XmlStream, model: SheetDefModel): void {
         xmlStream.leafNode("sheet", {
             sheetId: model.id,
             name: model.name,
@@ -13,22 +18,25 @@ class WorksheetXform extends BaseXform {
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<sheet>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "sheet") {
+            const { attributes } = node;
             this.model = {
-                name: utils.xmlDecode(node.attributes.name),
-                id: parseInt(node.attributes.sheetId, 10),
-                state: node.attributes.state,
-                rId: node.attributes["r:id"],
+                // name is required (CT_Sheet): without it, xmlDecode throws (the load fails)
+                name: xmlDecode(attributes.name!),
+                id: BaseXform.toIntValue(attributes.sheetId, NaN),
+                state: attributes.state,
+                rId: attributes["r:id"],
             };
             return true;
         }
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

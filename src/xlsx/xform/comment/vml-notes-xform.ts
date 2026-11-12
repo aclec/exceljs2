@@ -1,4 +1,4 @@
-import type { SaxTag } from "../../../utils/parse-sax";
+import type { SaxInput, SaxTag } from "../../../utils/parse-sax";
 import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
 import type { VmlNotesModel } from "../../../types";
 
@@ -15,10 +15,12 @@ export interface VmlNotesRenderModel {
 
 /**
  * The VML drawing of the notes of a worksheet, `xl/drawings/vmlDrawingN.vml`: one hidden shape per note (it is what
- * draws the triangle of a commented cell). Parsed as the list of the shapes ({@link VmlNotesModel}); the model of the
- * xform is that, or the notes it renders.
+ * draws the triangle of a commented cell). Parsed as the list of the shapes ({@link VmlNotesModel}).
  */
 class VmlNotesXform extends BaseXform<VmlNotesModel | VmlNotesRenderModel> {
+    /** The parsed shapes (render takes the notes of a worksheet: see the type parameter). */
+    declare model: VmlNotesModel | null | undefined;
+
     /** The namespaces of the root element. */
     static readonly DRAWING_ATTRIBUTES: XmlAttributes = {
         "xmlns:v": "urn:schemas-microsoft-com:vml",
@@ -61,6 +63,12 @@ class VmlNotesXform extends BaseXform<VmlNotesModel | VmlNotesRenderModel> {
 
     get tag(): string {
         return "xml";
+    }
+
+    /** @returns the parsed shapes */
+    override async parseStream(stream: SaxInput): Promise<VmlNotesModel | null | undefined> {
+        await super.parseStream(stream);
+        return this.model;
     }
 
     override render(xmlStream: XmlStream, model: VmlNotesRenderModel): void {
@@ -127,10 +135,9 @@ class VmlNotesXform extends BaseXform<VmlNotesModel | VmlNotesRenderModel> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // a shape outside the root element (no model) is ignored
-                const shape = this.map["v:shape"].model;
-                if (this.model && shape && "margins" in shape) {
-                    // the model was created when the root element opened
-                    (this.model as VmlNotesModel).comments.push(shape);
+                if (this.model) {
+                    // the shape has its model: its element was opened
+                    this.model.comments.push(this.map["v:shape"].model!);
                 }
                 this.parser = undefined;
             }

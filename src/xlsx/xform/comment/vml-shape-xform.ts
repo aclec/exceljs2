@@ -8,9 +8,12 @@ import VmlClientDataXform, { type VmlClientDataRenderModel } from "./vml-client-
 
 /**
  * The VML shape of a note, `<v:shape>`: a hidden box with its text box and its Excel data (`<x:ClientData>`). Rendered
- * for a note of the comments part, parsed as a {@link VmlNoteShapeModel} (the model of the xform is one or the other).
+ * for a note of the comments part, parsed as a {@link VmlNoteShapeModel}.
  */
 class VmlShapeXform extends BaseXform<VmlNoteShapeModel | VmlClientDataRenderModel> {
+    /** The parsed shape (render takes a note: see the type parameter). */
+    declare model: VmlNoteShapeModel | null | undefined;
+
     declare map: { readonly "v:textbox": VmlTextboxXform; readonly "x:ClientData": VmlClientDataXform };
 
     constructor() {
@@ -85,17 +88,13 @@ class VmlShapeXform extends BaseXform<VmlNoteShapeModel | VmlClientDataRenderMod
         switch (name) {
             case this.tag: {
                 // the model was created when the element opened; the children were reset then (null when absent)
-                const { model } = this;
-                if (model && "margins" in model) {
-                    const tb = this.map["v:textbox"].model;
-                    const textbox = tb && "inset" in tb ? tb : null;
-                    const cd = this.map["x:ClientData"].model;
-                    const clientData = cd && "protection" in cd ? cd : null;
-                    model.margins.inset = textbox && textbox.inset;
-                    model.protection = clientData && clientData.protection;
-                    model.anchor = clientData && clientData.anchor;
-                    model.editAs = clientData && clientData.editAs;
-                }
+                const model = this.model!;
+                const textbox = this.map["v:textbox"].model;
+                const clientData = this.map["x:ClientData"].model;
+                model.margins.inset = textbox && textbox.inset;
+                model.protection = clientData && clientData.protection;
+                model.anchor = clientData && clientData.anchor;
+                model.editAs = clientData && clientData.editAs;
                 return false;
             }
             default:
