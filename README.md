@@ -108,7 +108,9 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
  instead of being scanned with regular expressions.
 * **Decompressed size (zip bombs).** Both readers count the bytes they inflate and reject a file
  as soon as a part is larger than `maxEntrySize`, all parts together are larger than
- `maxUncompressedSize`, or a part over 10 MiB is compressed more than `maxCompressionRatio`:1.
+ `maxUncompressedSize`, or a part over 10 MiB, or all the parts read once they exceed 10 MiB together,
+ are compressed more than `maxCompressionRatio`:1. Archives whose entries share their data (overlapping
+ zip bombs) are rejected, and `xlsx.load` only inflates the parts it reads.
  Defaults: 1 GiB per part, 2 GiB in total for `xlsx.load` / `read` / `readFile` (which keep every
  part in memory; Node.js cannot parse a part over about 512 MiB anyway); 16 GiB per part and 32 GiB
  in total for the streaming `WorkbookReader` (which also bounds its temporary files); a ratio of
