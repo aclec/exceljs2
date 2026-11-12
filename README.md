@@ -52,16 +52,21 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 
 * **Grid bounds.** Cell references must lie within the Excel grid: rows 1 to 1,048,576 and columns
  A to XFD (1 to 16,384). References outside it throw an error, and the `min`/`max` of `<col>`
- definitions read from a file are clamped to the last column.
+ definitions read from a file are clamped to the last column. A `<row r>` outside the grid rejects
+ the file, and a `sheetId` that is not a unique integer from 1 to 65,535 is renumbered.
+* **Number formats.** Custom number formats longer than Excel's limit of 255 characters are
+ ignored when a file is read.
 * **Merged cells.** At most 1,048,576 cells (one full column) can be covered by merges in one
- worksheet. `mergeCells` throws beyond that, and so does loading a file that exceeds it.
+ worksheet, and in a whole workbook loaded from a file. `mergeCells` throws beyond that, and so
+ does loading a file that exceeds it.
  Checking for overlapping merges takes time proportional to the merged area, not to the number of merges.
 * **Data validations.** Validations read from a file are expanded to one entry per cell in
- `worksheet.dataValidations.model` until 100,000 cells have been expanded for the worksheet. Ranges
+ `worksheet.dataValidations.model` until 100,000 cells have been expanded for the workbook. Ranges
  that do not fit (for example a whole column) are kept as a single range key such as `'B1:B1048576'`.
  `sqref` tokens that are not cell references are ignored.
  `cell.dataValidation` resolves both forms and both are written back to the file.
-* **Defined names.** Defined-name ranges larger than 100,000 cells are kept as a single rectangle
+* **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
+ once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
  and column splices, but are not enumerated by `definedNames.forEach()`, and removing a name from any
  cell of such a range removes the whole range.
@@ -2270,6 +2275,13 @@ const worksheet = await workbook.csv.readFile(filename, options);
 ```
 
 The CSV parser uses [fast-csv](https://www.npmjs.com/package/fast-csv) to read the CSV file.
+
+With `parserOptions.headers` (`true`, an array of names or a function), the header names become the column keys
+(`worksheet.getColumn('Name')`) **and the first row of the worksheet**: with an array of names for a file that has no header row,
+that row is inserted and the data starts at row 2. Every column keeps its values, even when header names are empty or repeated:
+the keys of repeated names are numbered (`a`, `a_2`, `a_3`...), and a column whose name in the array is `undefined` is skipped.
+A header row with more than 16,384 names (the width of a worksheet) rejects the `read()` promise.
+
 The formatterOptions in the options passed to the above write function will be passed to the @fast-csv/format module to write csv data.
  Please refer to the fast-csv README.md for details.
 

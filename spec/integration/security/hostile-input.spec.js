@@ -20,6 +20,22 @@ async function timed(fn) {
     return { result, ms: Date.now() - start };
 }
 
+// a workbook with sheets Sheet1..SheetN, and patches applying fragment(i) after the sheetData of each
+async function sheetsBuffer(count) {
+    return baseWorkbookBuffer((wb) => {
+        for (let i = 2; i <= count; i++) {
+            wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+        }
+    });
+}
+function afterEachSheetData(count, fragment) {
+    const patches = {};
+    for (let i = 1; i <= count; i++) {
+        patches[`xl/worksheets/sheet${i}.xml`] = (xml) => afterSheetData(xml)(fragment(i));
+    }
+    return patches;
+}
+
 describe("hostile input", function () {
     this.timeout(20000);
 
@@ -46,6 +62,27 @@ describe("hostile input", function () {
             });
             expect(error).to.be.an("error");
             expect(error.message).to.match(/Out of bounds/);
+        });
+
+        it("caps the merged cells of the whole workbook, not of each worksheet", async () => {
+            // each worksheet is under the cap of 1048576 merged cells, the workbook is not
+            const buffer = await tamper(
+                await sheetsBuffer(2),
+                afterEachSheetData(2, () => '<mergeCells count="1"><mergeCell ref="B1:B524289"/></mergeCells>')
+            );
+            const { result: error, ms } = await timed(() => load(buffer).catch((e) => e));
+            expect(error).to.be.an("error");
+            expect(error.message).to.match(/merged cells/);
+            expect(ms).to.be.below(2000); // rejected before the cells are created
+        });
+
+        it("still loads merges spread over several worksheets", async () => {
+            const buffer = await tamper(
+                await sheetsBuffer(3),
+                afterEachSheetData(3, () => '<mergeCells count="1"><mergeCell ref="B2:K1001"/></mergeCells>')
+            );
+            const wb = await load(buffer);
+            wb.eachSheet((ws) => expect(ws.getCell("K1001").master.address).to.equal("B2"));
         });
 
         it("loads many small merges in linear time", async () => {
@@ -120,6 +157,67 @@ describe("hostile input", function () {
             expect(Object.getPrototypeOf(ws.dataValidations.model)).to.equal(Object.prototype);
         });
 
+        it("shares the expansion budget between the worksheets of a workbook", async () => {
+            const buffer = await tamper(
+                await sheetsBuffer(3),
+                afterEachSheetData(
+                    3,
+                    () =>
+                        '<dataValidations count="1"><dataValidation type="list" sqref="A1:CV1000">' +
+                        '<formula1>"a"</formula1></dataValidation></dataValidations>'
+                )
+            );
+            const wb = await load(buffer);
+            // 100,000 cells: the first worksheet uses the whole budget, the others keep a range key
+            expect(Object.keys(wb.getWorksheet("Sheet1").dataValidations.model)).to.have.length(100000);
+            expect(Object.keys(wb.getWorksheet("Sheet2").dataValidations.model)).to.deep.equal(["A1:CV1000"]);
+            expect(Object.keys(wb.getWorksheet("Sheet3").dataValidations.model)).to.deep.equal(["A1:CV1000"]);
+            wb.eachSheet((ws) => {
+                expect(ws.getCell("CV1000").dataValidation).to.deep.include({ type: "list" });
+                expect(ws.getCell("CW1000").dataValidation).to.equal(undefined);
+            });
+        });
+
+        it("keeps whole-column validations on several worksheets", async () => {
+            const buffer = await tamper(
+                await sheetsBuffer(3),
+                afterEachSheetData(
+                    3,
+                    (i) =>
+                        `<dataValidations count="1"><dataValidation type="whole" operator="greaterThan" sqref="C1:C1048576">` +
+                        `<formula1>${i}</formula1></dataValidation></dataValidations>`
+                )
+            );
+            const wb = await load(buffer);
+            const out = await load(await wb.xlsx.writeBuffer());
+            [1, 2, 3].forEach((i) => {
+                expect(out.getWorksheet(`Sheet${i}`).getCell("C77").dataValidation).to.deep.include({ formulae: [i] });
+            });
+        });
+
+        it("keeps removals and overrides of cells inside a range key after a write", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                [SHEET]: (xml) =>
+                    afterSheetData(xml)(
+                        '<dataValidations count="1"><dataValidation type="list" sqref="B1:C1048576">' +
+                            '<formula1>"a,b"</formula1></dataValidation></dataValidations>'
+                    ),
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            ws.dataValidations.remove("B5");
+            ws.getCell("C7").dataValidation = { type: "whole", operator: "greaterThan", formulae: [3] };
+            const out = await ws.workbook.xlsx.writeBuffer();
+            const ws2 = (await load(out)).getWorksheet("Sheet1");
+            expect(ws2.getCell("B5").dataValidation).to.equal(undefined);
+            expect(ws2.getCell("C7").dataValidation).to.deep.include({ type: "whole", formulae: [3] });
+            ["B4", "B6", "C5", "B7", "C6", "C8", "C1048576"].forEach((address) => {
+                expect(ws2.getCell(address).dataValidation, address).to.deep.include({ type: "list" });
+            });
+            // no overlapping sqref is written
+            const sqrefs = [...(await readPart(out, SHEET)).matchAll(/sqref="([^"]+)"/g)].map((m) => m[1]);
+            expect(sqrefs).to.have.members(["B1:C4", "C5", "B6:C6", "B7", "B8:C1048576", "C7"]);
+        });
+
         it("does not write validations that were removed", async () => {
             const wb = new ExcelJS.Workbook();
             const ws = wb.addWorksheet("s");
@@ -129,6 +227,156 @@ describe("hostile input", function () {
             const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
             expect(xml).to.include('<dataValidations count="1">');
             expect(xml).to.include('sqref="A1"');
+        });
+    });
+
+    describe("row numbers", () => {
+        const withRow = (r) => ({ [SHEET]: (xml) => xml.replace("</sheetData>", `<row r="${r}"/></sheetData>`) });
+
+        it("rejects an empty row beyond the last Excel row instead of creating a sparse row array", async () => {
+            for (const r of ["1048577", "4294967294", "0", "-3"]) {
+                const buffer = await tamper(await baseWorkbookBuffer(), withRow(r));
+                const error = await load(buffer).catch((e) => e);
+                expect(error, r).to.be.an("error");
+                expect(error.message).to.match(/Out of bounds. Excel supports rows from 1 to 1048576/);
+            }
+        });
+
+        it("rejects it in the streaming reader too", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), withRow("4294967294"));
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]));
+            const read = async () => {
+                for await (const ws of reader) {
+                    for await (const row of ws) {
+                        expect(row.number).to.equal(1);
+                    }
+                }
+            };
+            const error = await read().catch((e) => e);
+            expect(error).to.be.an("error");
+            expect(error.message).to.match(/Out of bounds. Excel supports rows from 1 to 1048576/);
+        });
+
+        it("still reads the last Excel row", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                [SHEET]: (xml) => xml.replace("</sheetData>", '<row r="1048576"><c r="A1048576"><v>5</v></c></row></sheetData>'),
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            expect(ws.getCell("A1048576").value).to.equal(5);
+        });
+    });
+
+    describe("sheet ids", () => {
+        const withSheetIds = (...ids) => ({
+            "xl/workbook.xml": (xml) => {
+                let i = 0;
+                return xml.replace(/sheetId="\d+"/g, () => `sheetId="${ids[i++]}"`);
+            },
+        });
+        const twoSheets = () =>
+            baseWorkbookBuffer((wb) => {
+                wb.addWorksheet("Sheet2").getCell("A1").value = "two";
+            });
+
+        it("renumbers a huge sheetId instead of creating a sparse worksheet array", async () => {
+            // (up to 4294967294 in a file: 10 million is enough to show the cost and stays bounded)
+            const buffer = await tamper(await baseWorkbookBuffer(), withSheetIds("10000000"));
+            const { result: wb, ms } = await timed(async () => {
+                const book = await load(buffer);
+                book.getWorksheet("Sheet1");
+                book.addWorksheet("added");
+                await book.xlsx.writeBuffer();
+                return book;
+            });
+            expect(ms).to.be.below(500);
+            expect(wb.worksheets.map((ws) => [ws.id, ws.name])).to.deep.equal([
+                [1, "Sheet1"],
+                [2, "added"],
+            ]);
+        });
+
+        it("keeps ids up to 65535 and renumbers invalid or duplicate ones to free ids", async () => {
+            const check = async (ids, expected) => {
+                const wb = await load(await tamper(await twoSheets(), withSheetIds(...ids)));
+                expect(
+                    wb.worksheets.map((ws) => [ws.id, ws.name]),
+                    ids.join()
+                ).to.deep.equal(expected);
+                expect(wb.getWorksheet("Sheet2").getCell("A1").value).to.equal("two");
+            };
+            await check(
+                ["7", "65535"],
+                [
+                    [7, "Sheet1"],
+                    [65535, "Sheet2"],
+                ]
+            );
+            // a duplicate id used to replace the first worksheet with the second
+            await check(
+                ["3", "3"],
+                [
+                    [3, "Sheet1"],
+                    [1, "Sheet2"],
+                ]
+            );
+            await check(
+                ["65536", "1"],
+                [
+                    [2, "Sheet1"],
+                    [1, "Sheet2"],
+                ]
+            );
+            await check(
+                ["0", "x"],
+                [
+                    [1, "Sheet1"],
+                    [2, "Sheet2"],
+                ]
+            );
+        });
+    });
+
+    describe("number formats", () => {
+        // a numeric cell styled with the custom format formatCode
+        const withNumFmt = (formatCode, cells = 1) => ({
+            "xl/styles.xml": (xml) =>
+                xml
+                    .replace(/<numFmts[^>]*>/, (open) => `${open}<numFmt numFmtId="200" formatCode="${formatCode}"/>`)
+                    .replace(/<cellXfs count="(\d+)">(.*?)<\/cellXfs>/s, (m, count, xfs) => {
+                        const xf = '<xf numFmtId="200" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>';
+                        return `<cellXfs count="${+count + 1}">${xfs}${xf}</cellXfs>`;
+                    }),
+            [SHEET]: (xml) => {
+                const rows = Array.from({ length: cells }, (_, i) => `<row r="${i + 2}"><c r="A${i + 2}" s="XF"><v>1</v></c></row>`);
+                return xml.replace("</sheetData>", `${rows.join("")}</sheetData>`);
+            },
+        });
+        const build = async (formatCode, cells) => {
+            // a base whose styles.xml has a <numFmts> element and two cell formats
+            const base = await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B1").numFmt = "0.000";
+            });
+            const styles = await readPart(base, "xl/styles.xml");
+            const xfIndex = (styles.match(/<cellXfs[^>]*>(.*?)<\/cellXfs>/s)[1].match(/<xf /g) || []).length;
+            const patches = withNumFmt(formatCode, cells);
+            const sheetPatch = patches[SHEET];
+            patches[SHEET] = (xml) => sheetPatch(xml).replace(/s="XF"/g, `s="${xfIndex}"`);
+            return tamper(base, patches);
+        };
+
+        it("keeps custom formats up to the Excel limit of 255 characters", async () => {
+            const formatCode = `yyyy-mm-dd${" ".repeat(245)}`;
+            const ws = (await load(await build(formatCode))).getWorksheet("Sheet1");
+            expect(ws.getCell("A2").numFmt).to.equal(formatCode);
+            expect(ws.getCell("A2").value).to.be.an.instanceof(Date);
+        });
+
+        it("ignores custom formats longer than 255 characters", async () => {
+            const { result: wb, ms } = await timed(async () => load(await build("[".repeat(20000), 50)));
+            expect(ms).to.be.below(2000);
+            const ws = wb.getWorksheet("Sheet1");
+            expect(ws.getCell("A2").numFmt).to.equal(undefined);
+            expect(ws.getCell("A51").value).to.equal(1);
         });
     });
 
@@ -156,6 +404,26 @@ describe("hostile input", function () {
             expect(ms).to.be.below(5000);
             expect(wb.getWorksheet("Sheet1").getCell("Z99").names).to.deep.equal(["everything"]);
             expect(wb.definedNames.model).to.deep.equal([{ name: "everything", ranges: ["Sheet1!$A$1:$XFD$1048576"] }]);
+        });
+
+        it("shares the expansion budget between the names of a workbook", async () => {
+            const names = [0, 1, 2].map((i) => `<definedName name="n${i}">Sheet1!$A$1:$CV$1000</definedName>`).join("");
+            const wb = await load(await tamper(await baseWorkbookBuffer(), withDefinedNames(names)));
+            // 100,000 cells: the first name uses the whole budget, the others are kept as rectangles
+            expect(Object.keys(wb.definedNames.rangeMap)).to.deep.equal(["n1", "n2"]);
+            expect(wb.getWorksheet("Sheet1").getCell("CV1000").names).to.deep.equal(["n0", "n1", "n2"]);
+            expect(wb.definedNames.model).to.deep.equal(["n0", "n1", "n2"].map((name) => ({ name, ranges: ["Sheet1!$A$1:$CV$1000"] })));
+        });
+
+        it("lists the names of a workbook with many large ranges in linear time", async () => {
+            const names = Array.from({ length: 40000 }, (_, i) => `<definedName name="n${i}">Sheet1!$A$1:$A$1048576</definedName>`);
+            const wb = await load(await tamper(await baseWorkbookBuffer(), withDefinedNames(names.join(""))));
+            const { result: model, ms } = await timed(() => wb.definedNames.model);
+            expect(model).to.have.length(40000);
+            expect(ms).to.be.below(300); // was 640 ms: names.includes for every name
+            const { result: cellNames, ms: cellMs } = await timed(() => wb.getWorksheet("Sheet1").getCell("A5").names);
+            expect(cellNames).to.have.length(40000);
+            expect(cellMs).to.be.below(300);
         });
 
         it("shifts and removes large ranges with row splices", () => {

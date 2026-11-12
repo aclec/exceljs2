@@ -34,6 +34,53 @@ describe("utils", () => {
                 expect(utils.isDateFmt(fmt)).to.be.false();
             });
         });
+
+        // the former implementation, quadratic on '[[[[...' (only run on short strings here)
+        const reference = (fmt) => {
+            if (!fmt) {
+                return false;
+            }
+            return /[ymdhMsb]+/.test(fmt.replace(/\[[^\]]*]/g, "").replace(/"[^"]*"/g, ""));
+        };
+
+        it("matches the regular expression implementation", () => {
+            const fixed = [
+                "[h]:mm",
+                '"d"0',
+                "[$-409]d-mmm",
+                '0"[y]"',
+                '"["y"]"',
+                '[y"]"d',
+                '["y]"',
+                "[[y]",
+                "[y",
+                '"y',
+                "]y]",
+                "0.00",
+                "General",
+            ];
+            fixed.forEach((fmt) => expect(utils.isDateFmt(fmt), fmt).to.equal(reference(fmt)));
+            // a fixed pseudo-random sequence over the characters that matter
+            const alphabet = '[]"yd0 ';
+            let seed = 42;
+            for (let i = 0; i < 5000; i++) {
+                let fmt = "";
+                const length = i % 12;
+                for (let j = 0; j < length; j++) {
+                    seed = (seed * 1103515245 + 12345) % 2147483648;
+                    fmt += alphabet[seed % alphabet.length];
+                }
+                expect(utils.isDateFmt(fmt), fmt).to.equal(reference(fmt));
+            }
+        });
+
+        it("runs in linear time on unbalanced brackets and quotes", () => {
+            const start = Date.now();
+            expect(utils.isDateFmt("[".repeat(100000))).to.be.false();
+            expect(utils.isDateFmt('"'.repeat(100000))).to.be.false();
+            expect(utils.isDateFmt(`${"[".repeat(100000)}y`)).to.be.true();
+            expect(Date.now() - start).to.be.below(300);
+        });
     });
 
     describe("dateToExcel", () => {

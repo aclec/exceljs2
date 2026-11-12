@@ -58,13 +58,26 @@ differently. See also the [Security & limits](README.md#security--limits) sectio
 
 Cell references must be within rows 1 to 1,048,576 and columns A to XFD (16,384), the size of an Excel worksheet. A reference with a larger
 row (for example `A1048577`) now throws `Out of bounds. Excel supports rows from 1 to 1048576`; 4.x only checked the column. `<col min max>`
-definitions read from a file are clamped to column 16,384.
+definitions read from a file are clamped to column 16,384, and a `<row r>` outside 1 to 1,048,576 rejects the file (document and streaming
+readers).
 
-### Merged cells are capped per worksheet
+### Sheet ids are renumbered when out of range
+
+Worksheets are stored by `sheetId`. A `sheetId` read from a file is kept when it is an integer from 1 to 65,535 that no earlier sheet uses;
+otherwise (a huge, zero, non-numeric or duplicate id) the sheet gets the lowest free id. 4.x kept huge ids, which made `workbook.worksheets`
+and `getWorksheet()` slow, and a duplicate id replaced the earlier worksheet.
+
+### Long number formats are ignored
+
+Excel limits number format codes to 255 characters. A custom `formatCode` longer than that is ignored when a file is read: its cells read as
+General (`cell.numFmt` is `undefined`).
+
+### Merged cells are capped
 
 A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()` throws
-`Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that, and `xlsx.load` / `xlsx.read` reject a file that contains
-such merges.
+`Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. A file loaded with `xlsx.load` / `xlsx.read` can have at
+most 1,048,576 merged cells **in all its worksheets together**, and is rejected with
+`Cannot merge <range>: the workbook would exceed 1048576 merged cells` otherwise.
 
 The check for overlapping merges now takes time proportional to the area being merged instead of the number of existing merges, so files
 with tens of thousands of merges load quickly. The `Cannot merge already merged cells` error is unchanged.
@@ -72,7 +85,7 @@ with tens of thousands of merges load quickly. The `Cannot merge already merged 
 ### Large data-validation ranges stay ranges
 
 In 4.x, every `sqref` range read from a file was expanded to one entry per cell in `worksheet.dataValidations.model`, so
-`sqref="A1:XFD1048576"` could exhaust memory. In 5.0, ranges are expanded until 100,000 cells have been expanded for the worksheet; ranges
+`sqref="A1:XFD1048576"` could exhaust memory. In 5.0, ranges are expanded until 100,000 cells have been expanded for the workbook; ranges
 that do not fit are stored under a single **range key**:
 
 ```js
@@ -82,8 +95,8 @@ worksheet.dataValidations.model;
 ```
 
 `cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected:
-removing or changing the validation of one cell inside a range key (`dataValidations.remove(address)`, `cell.dataValidation = ...`) is kept
-when the file is written. Code that reads `dataValidations.model` directly must handle keys of the form `'A1:B2'`.
+setting or removing the validation of a cell inside a range key replaces that key by the rectangles around the cell. Code that reads
+`dataValidations.model` directly must handle keys of the form `'A1:B2'`.
 
 Also:
 
@@ -93,7 +106,8 @@ Also:
 ### Large defined-name ranges stay ranges
 
 Defined names are stored one entry per cell so that they follow row and column splices. A defined-name range covering more than **100,000
-cells** (for example `Sheet1!$A$1:$XFD$1048576`) is now kept as a single rectangle instead. Such ranges:
+cells** (for example `Sheet1!$A$1:$XFD$1048576`) is now kept as a single rectangle instead, and so are the ranges read from a file once
+100,000 cells have been expanded for all its names. Such ranges:
 
 - are returned by `workbook.definedNames.model`, `getRanges(name)` and `cell.names`;
 - move or shrink with `spliceRows` / `spliceColumns`;
