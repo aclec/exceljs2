@@ -136,6 +136,19 @@ function records(buffer) {
     return result;
 }
 
+// APPNOTE 4.4.1.4 / 4.4.22: when the ZIP64 end of central directory record is written, the fields of the classic record
+// hold 0xFFFF / 0xFFFFFFFF. Readers such as JSZip (ExcelJS 4.x) only look for the ZIP64 records when they do: with the
+// real values they take the ZIP64 records for data prepended to the archive and fail.
+function expectZip64EndOfCentralDirectory(buffer) {
+    const end = buffer.length - 22;
+    expect(buffer.readUInt32LE(end)).to.equal(0x06054b50);
+    expect(buffer.readUInt32LE(end - 20)).to.equal(SIG_ZIP64_LOCATOR);
+    expect(buffer.readUInt32LE(end - 20 - 56)).to.equal(SIG_ZIP64_EOCD);
+    // entries on this disk, entries, size and offset of the central directory
+    expect([8, 10].map((offset) => buffer.readUInt16LE(end + offset))).to.deep.equal([0xffff, 0xffff]);
+    expect([12, 16].map((offset) => buffer.readUInt32LE(end + offset))).to.deep.equal([0xffffffff, 0xffffffff]);
+}
+
 async function writeZip(options, build) {
     const zip = new ZipWriter(options);
     const chunks = [];
@@ -215,7 +228,21 @@ describe("Zip writer ZIP64", function () {
         expect(found.zip64Locator).to.equal(1);
         expect(found.local.every((entry) => entry.zip64Extra)).to.equal(true);
         expect(found.central.every((entry) => entry.zip64Extra)).to.equal(true);
+        expectZip64EndOfCentralDirectory(buffer);
         await checkArchive(buffer, expected);
+    });
+
+    it("marks the fields of the end of central directory record as ZIP64 whenever it writes the ZIP64 records", async () => {
+        // forced, past the size limit, past the entry count limit only
+        for (const options of [
+            { forceZip64: true },
+            { _zip64Limits: { size: 1000, entries: 8 } },
+            { _zip64Limits: { size: 2 ** 32, entries: 8 } },
+        ]) {
+            const { buffer, expected } = await writeZip(options, mixedEntries);
+            expectZip64EndOfCentralDirectory(buffer);
+            await checkArchive(buffer, expected);
+        }
     });
 
     it("reads back a workbook streamed into a ZIP64 archive", async () => {

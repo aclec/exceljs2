@@ -61,6 +61,34 @@ describe("parseSax", () => {
         ]);
     });
 
+    describe("nesting depth", () => {
+        const nested = (depth) => `${"<a>".repeat(depth)}${"</a>".repeat(depth)}`;
+
+        it("reads elements nested 1000 deep", async () => {
+            let opened = 0;
+            for await (const events of parseSax([nested(1000)])) {
+                opened += events.filter(({ eventType }) => eventType === "opentag").length;
+            }
+            expect(opened).to.equal(1000);
+        });
+
+        it("rejects deeper elements, whatever the chunks", async () => {
+            for (const iterable of [[nested(1001)], chunks(Buffer.from(`<root>${"<a/>".repeat(5000)}${nested(1000)}</root>`), 7)]) {
+                let error;
+                try {
+                    // eslint-disable-next-line no-unused-vars
+                    for await (const events of parseSax(iterable)) {
+                        // parse
+                    }
+                } catch (err) {
+                    error = err;
+                }
+                expect(error).to.be.an.instanceOf(Error);
+                expect(error.message).to.equal("XML elements are nested more than 1000 deep");
+            }
+        });
+    });
+
     it("accepts Uint8Array and string chunks", async () => {
         const bytes = new Uint8Array(buffer);
         const result = await parse([bytes.subarray(0, 50), bytes.subarray(50), "<!-- trailing -->"]);

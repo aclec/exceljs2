@@ -98,6 +98,58 @@ async function bigSheetFirstBuffer(rows = 3000) {
     return reorderZip(buffer, (name) => (isWorksheet(name) ? 0 : 1));
 }
 
+// records the files the reader opens: file handles (fs.promises.open) and read streams
+function trackOpenedFiles() {
+    const handles = [];
+    const streams = [];
+    const { open } = fs.promises;
+    const { createReadStream } = fs;
+    fs.promises.open = async (...args) => {
+        const handle = await open.apply(fs.promises, args);
+        handles.push(handle);
+        return handle;
+    };
+    fs.createReadStream = (...args) => {
+        const stream = createReadStream.apply(fs, args);
+        streams.push(stream);
+        return stream;
+    };
+    return {
+        handles,
+        streams,
+        restore() {
+            fs.promises.open = open;
+            fs.createReadStream = createReadStream;
+        },
+    };
+}
+
+// for each removal (fs.promises.rm), the number of files in `files` still open at that time
+function trackRemovals(files) {
+    const openFiles = [];
+    const { rm } = fs.promises;
+    fs.promises.rm = (...args) => {
+        openFiles.push(files.handles.filter((handle) => handle.fd !== -1).length);
+        return rm.apply(fs.promises, args);
+    };
+    return {
+        openFiles,
+        restore() {
+            fs.promises.rm = rm;
+        },
+    };
+}
+
+// a workbook of `count` worksheets stored before the parts they depend on
+async function manySheetsFirstBuffer(count) {
+    const buffer = await baseWorkbookBuffer((wb) => {
+        for (let i = 2; i <= count; i++) {
+            wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+        }
+    });
+    return reorderZip(buffer, (name) => (isWorksheet(name) ? 0 : 1));
+}
+
 describe("WorkbookReader (stream)", () => {
     describe("temp files for worksheets read before shared strings", () => {
         let tracker;
@@ -106,6 +158,45 @@ describe("WorkbookReader (stream)", () => {
         });
         afterEach(() => {
             tracker.restore();
+        });
+
+        it("spools the worksheets to one file, and reads a worksheet only when the consumer does", async () => {
+            const buffer = await manySheetsFirstBuffer(300);
+            const files = trackOpenedFiles();
+            const names = [];
+            let rows = 0;
+            try {
+                for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                    names.push(worksheet.name);
+                    if (worksheet.name !== "Sheet300") continue;
+                    // eslint-disable-next-line no-unused-vars
+                    for await (const row of worksheet) {
+                        rows++;
+                    }
+                }
+            } finally {
+                files.restore();
+            }
+            expect(names).to.have.length(300);
+            expect(rows).to.equal(1);
+            // one file descriptor whatever the number of worksheets (thousands used to fail with EMFILE)
+            expect(files.handles.length + files.streams.length).to.equal(1);
+            expect(tracker.created).to.have.length(1);
+            expect(fs.existsSync(tracker.created[0])).to.equal(false);
+        });
+
+        it("does not spool the worksheets when they are ignored", async () => {
+            const buffer = await manySheetsFirstBuffer(3);
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer), { worksheets: "ignore", entries: "emit" });
+            const entries = [];
+            reader.on("entry", (entry) => entries.push(entry));
+            await new Promise((resolve, reject) => {
+                reader.on("end", resolve);
+                reader.on("error", reject);
+                reader.read();
+            });
+            expect(tracker.created).to.have.length(0);
+            expect(entries.filter((entry) => entry.type === "worksheet")).to.have.length(3);
         });
 
         it("removes the temp dir when the consumer stops early", async () => {
@@ -125,14 +216,9 @@ describe("WorkbookReader (stream)", () => {
             expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
-        it("closes the spooled worksheet files when the consumer stops early", async () => {
-            const opened = [];
-            const original = fs.createReadStream;
-            fs.createReadStream = (...args) => {
-                const stream = original.apply(fs, args);
-                opened.push(stream);
-                return stream;
-            };
+        it("closes the spooled worksheet file when the consumer stops early", async () => {
+            const files = trackOpenedFiles();
+            const removed = trackRemovals(files);
             try {
                 const buffer = await bigSheetFirstBuffer();
                 const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer));
@@ -141,11 +227,12 @@ describe("WorkbookReader (stream)", () => {
                     if (worksheet.name === "Second") break;
                 }
             } finally {
-                fs.createReadStream = original;
+                files.restore();
+                removed.restore();
             }
-            expect(opened).to.have.length(2);
-            // closed (not only destroyed) before the directory is removed: Windows cannot remove open files
-            opened.forEach((stream) => expect(stream.closed).to.equal(true));
+            expect(files.handles).to.have.length(1);
+            // closed before the directory is removed: Windows cannot remove open files
+            expect(removed.openFiles).to.deep.equal([0]);
             expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
@@ -179,21 +266,14 @@ describe("WorkbookReader (stream)", () => {
                     // read
                 }
             }
-            await readAll(chunkedStream(buffer), { worksheets: "ignore" });
-            expect(tracker.created).to.have.length(2);
-            tracker.created.forEach((dir) => expect(fs.existsSync(dir)).to.equal(false));
+            expect(tracker.created).to.have.length(1);
+            expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
-        it("closes the file of a spooled worksheet that the consumer skipped once its reader is collected", async function () {
+        it("closes the spooled worksheet file once the reader of a skipped worksheet is collected", async function () {
             this.timeout(10000);
             const gc = exposeGc();
-            const opened = [];
-            const original = fs.createReadStream;
-            fs.createReadStream = (...args) => {
-                const stream = original.apply(fs, args);
-                opened.push(stream);
-                return stream;
-            };
+            const files = trackOpenedFiles();
             try {
                 const buffer = await bigSheetFirstBuffer();
                 for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
@@ -204,34 +284,53 @@ describe("WorkbookReader (stream)", () => {
                     }
                 }
             } finally {
-                fs.createReadStream = original;
+                files.restore();
             }
-            expect(opened).to.have.length(2);
-            expect(opened[1].closed).to.equal(true);
-            // the skipped worksheet can never be read: its file descriptor must not stay open for the life of the process
-            for (let i = 0; i < 50 && !opened[0].closed; i++) {
+            expect(files.handles).to.have.length(1);
+            // the skipped worksheet could still be read through its reader
+            expect(files.handles[0].fd).to.not.equal(-1);
+            // it can never be read once its reader is gone: the file must not stay open for the life of the process
+            for (let i = 0; i < 50 && files.handles[0].fd !== -1; i++) {
                 gc();
                 await new Promise((resolve) => setTimeout(resolve, 20));
             }
-            expect(opened[0].closed).to.equal(true);
+            expect(files.handles[0].fd).to.equal(-1);
         });
 
-        it("closes the spooled worksheet files read to the end before removing the temp dir", async () => {
-            const opened = [];
-            const original = fs.createReadStream;
-            fs.createReadStream = (...args) => {
-                const stream = original.apply(fs, args);
-                opened.push(stream);
-                return stream;
-            };
+        it("closes the spooled worksheet file before removing the temp dir when every worksheet is read", async () => {
+            const files = trackOpenedFiles();
+            const removed = trackRemovals(files);
+            let sheets;
             try {
-                await readAll(chunkedStream(await bigSheetFirstBuffer()));
+                sheets = await readAll(chunkedStream(await bigSheetFirstBuffer()));
             } finally {
-                fs.createReadStream = original;
+                files.restore();
+                removed.restore();
             }
-            expect(opened).to.have.length(2);
-            opened.forEach((stream) => expect(stream.closed).to.equal(true));
+            expect(sheets.map((sheet) => sheet.rows.length)).to.deep.equal([3000, 1]);
+            expect(files.handles).to.have.length(1);
+            expect(removed.openFiles).to.deep.equal([0]);
             expect(fs.existsSync(tracker.created[0])).to.equal(false);
+        });
+
+        it("rejects the read of a collected worksheet when the iteration stopped early", async () => {
+            const buffer = await bigSheetFirstBuffer();
+            let first;
+            for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                first = worksheet;
+                break;
+            }
+            let error;
+            try {
+                // eslint-disable-next-line no-unused-vars
+                for await (const row of first) {
+                    // read
+                }
+            } catch (err) {
+                error = err;
+            }
+            expect(error).to.be.an.instanceOf(Error);
+            expect(error.code).to.equal("EBADF");
         });
 
         it("rejects and removes the temp dir on a truncated file", async function () {
@@ -494,6 +593,38 @@ describe("WorkbookReader (stream)", () => {
         expect(sheets.map((sheet) => sheet.name)).to.deep.equal(["Sheet1", "Named"]);
     });
 
+    it("names many worksheets among many relationships in linear time", async function () {
+        this.timeout(20000);
+        const W = 3000;
+        const NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+        const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        // the worksheet relationships come last: every lookup used to scan the 150,000 relationships and the sheets
+        let rels = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`;
+        rels += '<Relationship Id="x" Type="t" Target="other.xml"/>'.repeat(150000);
+        let sheets = "";
+        const parts = {};
+        for (let i = 1; i <= W; i++) {
+            rels += `<Relationship Id="rId${i}" Type="${R}/worksheet" Target="worksheets/sheet${i}.xml"/>`;
+            sheets += `<sheet name="S${i}" sheetId="${i}" r:id="rId${i}"/>`;
+        }
+        parts["xl/_rels/workbook.xml.rels"] = `${rels}</Relationships>`;
+        parts["xl/workbook.xml"] = `<workbook ${NS} xmlns:r="${R}"><sheets>${sheets}</sheets></workbook>`;
+        parts["xl/sharedStrings.xml"] = `<sst ${NS}/>`;
+        for (let i = 1; i <= W; i++) {
+            parts[`xl/worksheets/sheet${i}.xml`] = `<worksheet ${NS}><sheetData/></worksheet>`;
+        }
+        const start = Date.now();
+        const names = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([zipParts(parts)]))) {
+            names.push(worksheet.name);
+        }
+        const ms = Date.now() - start;
+        expect(names).to.have.length(W);
+        expect(names[W - 1]).to.equal(`S${W}`);
+        // about 0.2 s; 7 s with the linear lookups
+        expect(ms).to.be.below(4000);
+    });
+
     describe("cell references", () => {
         async function rowsOf(buffer) {
             const [sheet] = await readAll(chunkedStream(buffer));
@@ -589,6 +720,47 @@ describe("WorkbookReader (stream)", () => {
             "2024-02-29T25:00",
             "2023-02-29",
         ]);
+    });
+
+    describe("hyperlinks: emit with read()", () => {
+        const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+        // relationships that do not compress well: the part spans many chunks of the zip input
+        async function hyperlinksBuffer(count) {
+            let rels = '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+            for (let i = 0; i < count; i++) {
+                const target = require("crypto").randomBytes(24).toString("hex");
+                rels += `<Relationship Id="rId${i}" Type="${REL}" Target="https://example.com/${target}" TargetMode="External"/>`;
+            }
+            const parts = unzipParts(await baseWorkbookBuffer());
+            parts["xl/worksheets/_rels/sheet1.xml.rels"] = `${rels}</Relationships>`;
+            return zipParts(parts);
+        }
+
+        async function readHyperlinks(buffer, startRead) {
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer, 64 * 1024), { hyperlinks: "emit" });
+            let count = 0;
+            await new Promise((resolve, reject) => {
+                reader.on("hyperlinks", (hyperlinks) => {
+                    hyperlinks.on("hyperlink", () => count++);
+                    if (startRead) {
+                        // as in the README
+                        hyperlinks.read();
+                    }
+                });
+                reader.on("worksheet", (worksheet) => worksheet.on("row", () => {}));
+                reader.on("end", resolve);
+                reader.on("error", reject);
+                reader.read();
+            });
+            return count;
+        }
+
+        it("reads all the relationships of a large part before moving on", async () => {
+            const buffer = await hyperlinksBuffer(10000);
+            expect(await readHyperlinks(buffer, true)).to.equal(10000);
+            // the reader reads them when the listener does not
+            expect(await readHyperlinks(buffer, false)).to.equal(10000);
+        });
     });
 
     it("merges options passed to read() with the defaults", async () => {
