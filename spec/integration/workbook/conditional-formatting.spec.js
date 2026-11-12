@@ -38,6 +38,21 @@ async function sourceWith(conditionalFormattings, ext) {
 }
 
 describe("conditional formatting", () => {
+    it("gives the rules without priority one after the highest", async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("Sheet1");
+        const bold = { font: { bold: true } };
+        ws.addConditionalFormatting({
+            ref: "A1",
+            rules: [
+                { type: "expression", formulae: ["A1=1"], priority: 3, style: bold },
+                { type: "expression", formulae: ["A1=2"], style: bold },
+            ],
+        });
+        const xml = await readPart(await wb.xlsx.writeBuffer(), SHEET);
+        expect([...xml.matchAll(/priority="(\d+)"/g)].map(([, priority]) => priority)).to.deep.equal(["3", "4"]);
+    });
+
     describe("dataBar x14 extension", () => {
         // as written by Excel: the main rule references its x14 counterpart by id
         const mainDataBar = (id, priority) =>
