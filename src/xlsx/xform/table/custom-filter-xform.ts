@@ -1,20 +1,23 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { CustomFilterModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class CustomFilterXform extends BaseXform {
-    get tag() {
+/** A custom filter of a filter column, `<customFilter val operator>`. */
+class CustomFilterXform extends BaseXform<CustomFilterModel> {
+    get tag(): string {
         return "customFilter";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: CustomFilterModel): void {
         xmlStream.leafNode(this.tag, {
             val: model.val,
             operator: model.operator,
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<customFilter>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === this.tag) {
             this.model = {
                 val: node.attributes.val,
@@ -25,9 +28,9 @@ class CustomFilterXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

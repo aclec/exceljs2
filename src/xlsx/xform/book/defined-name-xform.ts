@@ -1,10 +1,22 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DefinedNameModel } from "../../../types";
 import BaseXform from "../base-xform";
 import colCache from "../../../utils/col-cache";
 
-class DefinedNamesXform extends BaseXform {
-    render(xmlStream, model) {
+/**
+ * A `<definedName name localSheetId>` of `xl/workbook.xml`: its ranges, comma-separated. Parsing keeps the ranges that
+ * are references (`colCache.decodeEx` accepts them); a comma inside a quoted sheet name does not split a range.
+ */
+class DefinedNamesXform extends BaseXform<DefinedNameModel> {
+    /** While parsing: the `name` attribute. */
+    private _parsedName?: string;
+    /** While parsing: the `localSheetId` attribute. */
+    private _parsedLocalSheetId?: string;
+    /** While parsing: the chunks of text of the element. */
+    private _parsedText: string[] = [];
+
+    override render(xmlStream: XmlStream, model: DefinedNameModel): void {
         // <definedNames>
         //   <definedName name="name">name.ranges.join(',')</definedName>
         //   <definedName name="_xlnm.Print_Area" localSheetId="0">name.ranges.join(',')</definedName>
@@ -17,7 +29,8 @@ class DefinedNamesXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<definedName>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case "definedName":
                 this._parsedName = node.attributes.name;
@@ -29,38 +42,40 @@ class DefinedNamesXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         this._parsedText.push(text);
     }
 
-    parseClose() {
-        this.model = {
-            name: this._parsedName,
+    override parseClose(): boolean {
+        const model: DefinedNameModel = {
+            // the name attribute is required (CT_DefinedName): a file without it gives an undefined name
+            name: this._parsedName!,
             ranges: extractRanges(this._parsedText.join("")),
         };
         if (this._parsedLocalSheetId !== undefined) {
-            this.model.localSheetId = parseInt(this._parsedLocalSheetId, 10);
+            model.localSheetId = parseInt(this._parsedLocalSheetId, 10);
         }
+        this.model = model;
         return false;
     }
 }
 
-function isValidRange(range) {
+function isValidRange(range: string): boolean {
     try {
         colCache.decodeEx(range);
         return true;
-    } catch (err) {
+    } catch {
         return false;
     }
 }
 
-function extractRanges(parsedText) {
-    const ranges = [];
+function extractRanges(parsedText: string): string[] {
+    const ranges: string[] = [];
     let quotesOpened = false;
     let last = "";
-    parsedText.split(",").forEach((item) => {
+    for (const item of parsedText.split(",")) {
         if (!item) {
-            return;
+            continue;
         }
         const quotes = (item.match(/'/g) || []).length;
 
@@ -70,7 +85,7 @@ function extractRanges(parsedText) {
             } else if (isValidRange(item)) {
                 ranges.push(item);
             }
-            return;
+            continue;
         }
         const quotesEven = quotes % 2 === 0;
 
@@ -86,7 +101,7 @@ function extractRanges(parsedText) {
             quotesOpened = true;
             last += `${item},`;
         }
-    });
+    }
     return ranges;
 }
 

@@ -1,10 +1,17 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DrawingPictureModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 import CNvPrXform from "./c-nv-pr-xform";
 import CNvPicPrXform from "./c-nv-pic-pr-xform";
 
-class NvPicPrXform extends BaseXform {
+/**
+ * The non-visual properties of a picture, `<xdr:nvPicPr>`: `<xdr:cNvPr>` then `<xdr:cNvPicPr>`. Parsed as the model of
+ * `<xdr:cNvPr>` (its hyperlink).
+ */
+class NvPicPrXform extends BaseXform<Pick<DrawingPictureModel, "hyperlinks">> {
+    declare map: { readonly "xdr:cNvPr": CNvPrXform; readonly "xdr:cNvPicPr": CNvPicPrXform };
+
     constructor() {
         super();
 
@@ -14,18 +21,19 @@ class NvPicPrXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "xdr:nvPicPr";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: DrawingPictureModel): void {
         xmlStream.openNode(this.tag);
         this.map["xdr:cNvPr"].render(xmlStream, model);
-        this.map["xdr:cNvPicPr"].render(xmlStream, model);
+        this.map["xdr:cNvPicPr"].render(xmlStream);
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<xdr:nvPicPr>` is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -35,19 +43,21 @@ class NvPicPrXform extends BaseXform {
             case this.tag:
                 this.reset();
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;

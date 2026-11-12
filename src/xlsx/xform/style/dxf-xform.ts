@@ -1,6 +1,7 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DxfModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 
 import AlignmentXform from "./alignment-xform";
 import BorderXform from "./border-xform";
@@ -9,13 +10,21 @@ import FontXform from "./font-xform";
 import NumFmtXform from "./numfmt-xform";
 import ProtectionXform from "./protection-xform";
 
-// <xf numFmtId="[numFmtId]" fontId="[fontId]" fillId="[fillId]" borderId="[xf.borderId]" xfId="[xfId]">
-//   Optional <alignment>
-//   Optional <protection>
-// </xf>
+/**
+ * A differential format, `<dxf>` of the styles part (the style of a conditional formatting rule or a table column), see
+ * {@link DxfModel}. Its number format is rendered only when the model has both `numFmt` and `numFmtId`. Unknown child
+ * elements are skipped.
+ */
+class DxfXform extends BaseXform<DxfModel> {
+    declare map: {
+        readonly alignment: AlignmentXform;
+        readonly border: BorderXform;
+        readonly fill: FillXform;
+        readonly font: FontXform;
+        readonly numFmt: NumFmtXform;
+        readonly protection: ProtectionXform;
+    };
 
-// Style assists translation from style model to/from xlsx
-class DxfXform extends BaseXform {
     constructor() {
         super();
 
@@ -29,12 +38,12 @@ class DxfXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "dxf";
     }
 
     // CT_Dxf sequence: font, numFmt, fill, alignment, border, protection, extLst
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: DxfModel): void {
         xmlStream.openNode(this.tag);
 
         if (model.font) {
@@ -60,7 +69,8 @@ class DxfXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<dxf>` is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -71,22 +81,24 @@ class DxfXform extends BaseXform {
                 // this node is often repeated. Need to reset children
                 this.reset();
                 return true;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 return true;
+            }
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -97,6 +109,7 @@ class DxfXform extends BaseXform {
             // like cell styles, a dxf style holds its number format as the format code string;
             // the numFmtId is reassigned by StylesXform.addDxfStyle when written
             const numFmt = this.map.numFmt.model;
+            // (the children were reset when <dxf> opened: the parts that are absent are null)
             this.model = {
                 alignment: this.map.alignment.model,
                 border: this.map.border.model,

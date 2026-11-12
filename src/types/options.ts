@@ -6,7 +6,7 @@
 
 import type { FormulaCellModel, MergeCellModel } from "./cell";
 import type { CommentRefsEntry, MediaModel, RelationshipModel } from "./book";
-import type { DrawingModel, NoteModel, SheetHyperlinkModel, TableModel } from "./sheet";
+import type { DrawingModel, NoteModel, SheetHyperlinkModel, TableModel, VmlNotesModel } from "./sheet";
 import type { StyleLookup, StyleRegistry } from "./style";
 import type { SharedStringLookup, SharedStringRegistry } from "./strings";
 
@@ -71,7 +71,7 @@ export interface WorkbookReconcileOptions {
     drawings: Record<string, DrawingModel>;
     comments: Record<string, { comments: NoteModel[] }>;
     tables: Record<string, TableModel>;
-    vmlDrawings: Record<string, { comments: unknown[] }>;
+    vmlDrawings: Record<string, VmlNotesModel>;
     /** the parts already claimed by a worksheet (a part belongs to one worksheet) */
     claimedParts: Set<object>;
 }

@@ -1,13 +1,15 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DrawingPictureModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class BlipXform extends BaseXform {
-    get tag() {
+/** The image of a picture, `<a:blip r:embed>`: its relationship id. Its children are skipped when parsing. */
+class BlipXform extends BaseXform<DrawingPictureModel> {
+    get tag(): string {
         return "a:blip";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: DrawingPictureModel): void {
         xmlStream.leafNode(this.tag, {
             "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
             "r:embed": model.rId,
@@ -16,7 +18,8 @@ class BlipXform extends BaseXform {
         // TODO: handle children (e.g. a:extLst=>a:ext=>a14:useLocalDpi
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<a:blip>` is accepted (and skipped) */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 this.model = {
@@ -28,9 +31,9 @@ class BlipXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         switch (name) {
             case this.tag:
                 return false;

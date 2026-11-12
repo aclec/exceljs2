@@ -1,13 +1,59 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
+import type { SaxInput, SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { VmlNotesModel } from "../../../types";
 
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 import VmlShapeXform from "./vml-shape-xform";
+import type { VmlClientDataRenderModel } from "./vml-client-data-xform";
 
-// This class is (currently) single purposed to insert the triangle
-// drawing icons on commented cells
-class VmlNotesXform extends BaseXform {
+/** What {@link VmlNotesXform} renders: the notes of a worksheet, and the first block of VML shape ids it claims. */
+export interface VmlNotesRenderModel {
+    readonly comments: readonly VmlClientDataRenderModel[];
+    /** The first block of shape ids of the worksheet (default 1). */
+    readonly shapeBlock?: number;
+}
+
+/**
+ * The VML drawing of the notes of a worksheet, `xl/drawings/vmlDrawingN.vml`: one hidden shape per note (it is what
+ * draws the triangle of a commented cell). Parsed as the list of the shapes ({@link VmlNotesModel}).
+ */
+class VmlNotesXform extends BaseXform<VmlNotesModel | VmlNotesRenderModel> {
+    /** The parsed shapes (render takes the notes of a worksheet: see the type parameter). */
+    declare model: VmlNotesModel | null | undefined;
+
+    /** The namespaces of the root element. */
+    static readonly DRAWING_ATTRIBUTES: XmlAttributes = {
+        "xmlns:v": "urn:schemas-microsoft-com:vml",
+        "xmlns:o": "urn:schemas-microsoft-com:office:office",
+        "xmlns:x": "urn:schemas-microsoft-com:office:excel",
+    };
+
+    /**
+     * VML shape ids must be unique across the workbook. They come in blocks of 1024 (block n holds ids n * 1024 to
+     * n * 1024 + 1023) that the drawing claims in `<o:idmap data="n,m,...">`; as Excel does, the shapes of block n are
+     * numbered from n * 1024 + 1, so a block holds 1023 notes. Each worksheet claims contiguous blocks, as many as its
+     * notes need.
+     */
+    static readonly SHAPES_PER_BLOCK = 1023;
+
+    /** @returns the number of blocks of a worksheet with `count` notes (at least 1) */
+    static blockCount(this: void, count: number): number {
+        return Math.max(1, Math.ceil(count / VmlNotesXform.SHAPES_PER_BLOCK));
+    }
+
+    /** @returns the idmap data of a worksheet whose `count` notes use the blocks from `firstBlock` ("1,2,3") */
+    static idmap(this: void, firstBlock: number, count: number): string {
+        return Array.from({ length: VmlNotesXform.blockCount(count) }, (_, i) => firstBlock + i).join(",");
+    }
+
+    /** @returns the index for VmlShapeXform (which numbers shapes from 1025) of the note at `index` */
+    static shapeIndex(this: void, firstBlock: number, index: number): number {
+        const block = firstBlock + Math.floor(index / VmlNotesXform.SHAPES_PER_BLOCK);
+        return (block - 1) * 1024 + (index % VmlNotesXform.SHAPES_PER_BLOCK);
+    }
+
+    declare map: { readonly "v:shape": VmlShapeXform };
+
     constructor() {
         super();
         this.map = {
@@ -15,11 +61,17 @@ class VmlNotesXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "xml";
     }
 
-    render(xmlStream, model) {
+    /** @returns the parsed shapes */
+    override async parseStream(stream: SaxInput): Promise<VmlNotesModel | null | undefined> {
+        await super.parseStream(stream);
+        return this.model;
+    }
+
+    override render(xmlStream: XmlStream, model: VmlNotesRenderModel): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode(this.tag, VmlNotesXform.DRAWING_ATTRIBUTES);
 
@@ -39,14 +91,17 @@ class VmlNotesXform extends BaseXform {
         xmlStream.leafNode("v:path", { gradientshapeok: "t", "o:connecttype": "rect" });
         xmlStream.closeNode();
 
-        model.comments.forEach((item, index) => {
-            this.map["v:shape"].render(xmlStream, item, VmlNotesXform.shapeIndex(firstBlock, index));
-        });
+        const shapeXform = this.map["v:shape"];
+        const { comments } = model;
+        for (let index = 0; index < comments.length; index++) {
+            shapeXform.render(xmlStream, comments[index]!, VmlNotesXform.shapeIndex(firstBlock, index));
+        }
 
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element of the drawing is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -58,26 +113,32 @@ class VmlNotesXform extends BaseXform {
                     comments: [],
                 };
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.model.comments.push(this.parser.model);
+                // a shape outside the root element (no model) is ignored
+                if (this.model) {
+                    // the shape has its model: its element was opened
+                    this.model.comments.push(this.map["v:shape"].model!);
+                }
                 this.parser = undefined;
             }
             return true;
@@ -90,39 +151,6 @@ class VmlNotesXform extends BaseXform {
                 return true;
         }
     }
-
-    reconcile(model, options) {
-        model.anchors.forEach((anchor) => {
-            if (anchor.br) {
-                this.map["xdr:twoCellAnchor"].reconcile(anchor, options);
-            } else {
-                this.map["xdr:oneCellAnchor"].reconcile(anchor, options);
-            }
-        });
-    }
 }
-
-VmlNotesXform.DRAWING_ATTRIBUTES = {
-    "xmlns:v": "urn:schemas-microsoft-com:vml",
-    "xmlns:o": "urn:schemas-microsoft-com:office:office",
-    "xmlns:x": "urn:schemas-microsoft-com:office:excel",
-};
-
-// VML shape ids must be unique across the workbook. They come in blocks of 1024 (block n holds ids n * 1024 to n * 1024 + 1023)
-// that the drawing claims in <o:idmap data="n,m,...">; as Excel does, the shapes of block n are numbered from n * 1024 + 1, so
-// a block holds 1023 notes. Each worksheet claims contiguous blocks, as many as its notes need.
-VmlNotesXform.SHAPES_PER_BLOCK = 1023;
-
-// the number of blocks of a worksheet with count notes
-VmlNotesXform.blockCount = (count) => Math.max(1, Math.ceil(count / VmlNotesXform.SHAPES_PER_BLOCK));
-
-// the idmap data of a worksheet whose count notes use the blocks from firstBlock
-VmlNotesXform.idmap = (firstBlock, count) => Array.from({ length: VmlNotesXform.blockCount(count) }, (_, i) => firstBlock + i).join(",");
-
-// the index for VmlShapeXform (which numbers shapes from 1025) of the note at index
-VmlNotesXform.shapeIndex = (firstBlock, index) => {
-    const block = firstBlock + Math.floor(index / VmlNotesXform.SHAPES_PER_BLOCK);
-    return (block - 1) * 1024 + (index % VmlNotesXform.SHAPES_PER_BLOCK);
-};
 
 export default VmlNotesXform;

@@ -1,9 +1,24 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type { ImageEditAs } from "../../../../index";
+import type { DrawingAnchorModel, DrawingPictureModel, DrawingReconcileOptions, MediaModel } from "../../../types";
+import BaseXform, { ownEntry, type AnyXform } from "../base-xform";
 
-class BaseCellAnchorXform extends BaseXform {
-    parseOpen(node) {
+/**
+ * The base of the anchors of a drawing (two-cell and one-cell): parsing of the element and its children, and the
+ * resolution of the medium of the picture. A subclass provides the `tag`, the `map` of the children, `render` and
+ * `parseClose` (which builds the model from {@link parsedEditAs} and the children).
+ */
+abstract class BaseCellAnchorXform extends BaseXform<DrawingAnchorModel> {
+    /** The element. */
+    abstract get tag(): string;
+
+    declare map: Readonly<Record<string, AnyXform>>;
+
+    /** While parsing: the `editAs` attribute of the anchor (default `oneCell`; unvalidated). */
+    protected parsedEditAs: ImageEditAs = "oneCell";
+
+    /** @returns `true`: every element inside the anchor is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -11,39 +26,44 @@ class BaseCellAnchorXform extends BaseXform {
         switch (node.name) {
             case this.tag:
                 this.reset();
-                this.model = {
-                    range: {
-                        editAs: node.attributes.editAs || "oneCell",
-                    },
-                };
+                // the model is built when the element closes
+                this.parsedEditAs = (node.attributes.editAs || "oneCell") as ImageEditAs;
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    reconcilePicture(model, options) {
+    /**
+     * @returns the workbook medium of a parsed picture: the image its relationship targets (`.../media/<name>.<ext>`),
+     *   found by name in `options.mediaIndex`
+     */
+    reconcilePicture(model: DrawingPictureModel | null | undefined, options: DrawingReconcileOptions): MediaModel | undefined {
         if (model && model.rId) {
-            const rel = options.rels[model.rId];
+            const rel = options.rels && ownEntry(options.rels, model.rId);
+            const target = rel && rel.Target;
             // take the part after the last '/media/' without a backtracking regex
             // (/.*\/media\/(.+)/ was cubic on Targets like '/media//media//media/...')
-            const mediaPos = rel && rel.Target ? rel.Target.lastIndexOf("/media/") : -1;
-            const match = mediaPos !== -1 && rel.Target.slice(mediaPos + 7).match(/^(.+[.][a-zA-Z]{3,4})/);
+            const mediaPos = target ? target.lastIndexOf("/media/") : -1;
+            const match = target && mediaPos !== -1 && target.slice(mediaPos + 7).match(/^(.+[.][a-zA-Z]{3,4})/);
             if (match) {
-                const name = match[1];
-                const mediaId = options.mediaIndex[name];
-                return options.media[mediaId];
+                // the group of a match
+                const name = match[1]!;
+                const mediaId = ownEntry(options.mediaIndex, name);
+                return mediaId === undefined ? undefined : options.media[mediaId];
             }
         }
         return undefined;

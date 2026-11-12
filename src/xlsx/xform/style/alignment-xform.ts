@@ -1,61 +1,44 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import Enums from "../../../doc/enums";
-
-import utils from "../../../utils/utils";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { Alignment } from "../../../../index";
+import type { AlignmentModel } from "../../../types";
+import { ReadingOrder } from "../../../doc/enums";
+import { parseBoolean, validInt } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
-const validation = {
-    horizontalValues: ["left", "center", "right", "fill", "centerContinuous", "distributed", "justify"].reduce((p, v) => {
-        p[v] = true;
-        return p;
-    }, {}),
-    horizontal(value) {
-        return this.horizontalValues[value] ? value : undefined;
-    },
+const horizontalValues: ReadonlySet<unknown> = new Set(["left", "center", "right", "fill", "centerContinuous", "distributed", "justify"]);
+const verticalValues: ReadonlySet<unknown> = new Set(["top", "middle", "bottom", "distributed", "justify"]);
 
-    verticalValues: ["top", "middle", "bottom", "distributed", "justify"].reduce((p, v) => {
-        p[v] = true;
-        return p;
-    }, {}),
-    vertical(value) {
+// model value -> attribute value (undefined: not written)
+const validation = {
+    horizontal(value: string | undefined): string | undefined {
+        return horizontalValues.has(value) ? value : undefined;
+    },
+    vertical(value: string | undefined): string | undefined {
         if (value === "middle") return "center";
-        return this.verticalValues[value] ? value : undefined;
+        return verticalValues.has(value) ? value : undefined;
     },
-    wrapText(value) {
-        return value ? true : undefined;
-    },
-    shrinkToFit(value) {
-        return value ? true : undefined;
-    },
-    textRotation(value) {
-        switch (value) {
-            case "vertical":
-                return value;
-            default:
-                value = utils.validInt(value);
-                return value >= -90 && value <= 90 ? value : undefined;
+    textRotation(value: number | string | undefined): number | "vertical" | undefined {
+        if (value === "vertical") {
+            return value;
         }
+        const rotation = validInt(value);
+        return rotation >= -90 && rotation <= 90 ? rotation : undefined;
     },
-    indent(value) {
-        value = utils.validInt(value);
-        return Math.max(0, value);
+    indent(value: number | undefined): number {
+        return Math.max(0, validInt(value));
     },
-    readingOrder(value) {
-        switch (value) {
-            case "ltr":
-                return Enums.ReadingOrder.LeftToRight;
-            case "rtl":
-                return Enums.ReadingOrder.RightToLeft;
-            default:
-                return undefined;
-        }
+    readingOrder(value: string | undefined): ReadingOrder | undefined {
+        if (value === "ltr") return ReadingOrder.LeftToRight;
+        if (value === "rtl") return ReadingOrder.RightToLeft;
+        return undefined;
     },
 };
 
+// textRotation: model (-90..90 degrees or "vertical") <-> XML (0..90 up, 91..180 down, 255 vertical)
 const textRotationXform = {
-    toXml(textRotation) {
-        textRotation = validation.textRotation(textRotation);
+    toXml(value: number | "vertical" | undefined): number | undefined {
+        const textRotation = validation.textRotation(value);
         if (textRotation) {
             if (textRotation === "vertical") {
                 return 255;
@@ -72,82 +55,97 @@ const textRotationXform = {
         }
         return undefined;
     },
-    toModel(textRotation) {
-        const tr = utils.validInt(textRotation);
-        if (tr !== undefined) {
-            if (tr === 255) {
-                return "vertical";
-            }
-            if (tr >= 0 && tr <= 90) {
-                return tr;
-            }
-            if (tr > 90 && tr <= 180) {
-                return 90 - tr;
-            }
+    toModel(textRotation: string): number | "vertical" | undefined {
+        const tr = validInt(textRotation);
+        if (tr === 255) {
+            return "vertical";
+        }
+        if (tr >= 0 && tr <= 90) {
+            return tr;
+        }
+        if (tr > 90 && tr <= 180) {
+            return 90 - tr;
         }
         return undefined;
     },
 };
 
-// Alignment encapsulates translation from style.alignment model to/from xlsx
-class AlignmentXform extends BaseXform {
-    get tag() {
+/**
+ * The alignment of a cell format, `<alignment>`. Invalid values are not written, and nothing is written when no value is
+ * valid. The XML `center` vertical alignment is `"middle"` in the model. Parsing gives `null` when no attribute is set;
+ * the values are not validated (except `textRotation`, which may parse as `undefined`).
+ */
+class AlignmentXform extends BaseXform<AlignmentModel> {
+    get tag(): string {
         return "alignment";
     }
 
-    render(xmlStream, model) {
-        xmlStream.addRollback();
-        xmlStream.openNode("alignment");
+    override render(xmlStream: XmlStream, model: AlignmentModel): void {
+        // the attributes, in this order, when truthy
+        const horizontal = validation.horizontal(model.horizontal);
+        const vertical = validation.vertical(model.vertical);
+        const wrapText = model.wrapText ? "1" : undefined;
+        const shrinkToFit = model.shrinkToFit ? "1" : undefined;
+        const indent = validation.indent(model.indent) || undefined;
+        const textRotation = textRotationXform.toXml(model.textRotation) || undefined;
+        const readingOrder = validation.readingOrder(model.readingOrder);
 
-        let isValid = false;
-        function add(name, value) {
-            if (value) {
-                xmlStream.addAttribute(name, value);
-                isValid = true;
-            }
-        }
-        add("horizontal", validation.horizontal(model.horizontal));
-        add("vertical", validation.vertical(model.vertical));
-        add("wrapText", validation.wrapText(model.wrapText) ? "1" : false);
-        add("shrinkToFit", validation.shrinkToFit(model.shrinkToFit) ? "1" : false);
-        add("indent", validation.indent(model.indent));
-        add("textRotation", textRotationXform.toXml(model.textRotation));
-        add("readingOrder", validation.readingOrder(model.readingOrder));
-
-        xmlStream.closeNode();
-
-        if (isValid) {
-            xmlStream.commit();
-        } else {
-            xmlStream.rollback();
+        if (horizontal || vertical || wrapText || shrinkToFit || indent || textRotation || readingOrder) {
+            xmlStream.leafNode("alignment", {
+                horizontal,
+                vertical,
+                wrapText,
+                shrinkToFit,
+                indent,
+                textRotation,
+                readingOrder,
+            });
         }
     }
 
-    parseOpen(node) {
-        const model = {};
+    /** Reads `<alignment>` (returns nothing: the parent decides when to delegate to this xform). */
+    override parseOpen(node: SaxTag): void {
+        const { horizontal, vertical, wrapText, shrinkToFit, indent, textRotation, readingOrder } = node.attributes;
+        const model: AlignmentModel = {};
 
         let valid = false;
-        function add(truthy, name, value) {
-            if (truthy) {
-                model[name] = value;
-                valid = true;
-            }
+        // the values of the file are not validated: the literal unions of the model are the API contract
+        if (horizontal) {
+            model.horizontal = horizontal as Alignment["horizontal"];
+            valid = true;
         }
-        add(node.attributes.horizontal, "horizontal", node.attributes.horizontal);
-        add(node.attributes.vertical, "vertical", node.attributes.vertical === "center" ? "middle" : node.attributes.vertical);
+        if (vertical) {
+            model.vertical = (vertical === "center" ? "middle" : vertical) as Alignment["vertical"];
+            valid = true;
+        }
         // "0"/"false" is the default: treat it as absent, as rendering does
-        add(utils.parseBoolean(node.attributes.wrapText), "wrapText", true);
-        add(utils.parseBoolean(node.attributes.shrinkToFit), "shrinkToFit", true);
-        add(node.attributes.indent, "indent", parseInt(node.attributes.indent, 10));
-        add(node.attributes.textRotation, "textRotation", textRotationXform.toModel(node.attributes.textRotation));
-        add(node.attributes.readingOrder, "readingOrder", node.attributes.readingOrder === "2" ? "rtl" : "ltr");
+        if (parseBoolean(wrapText)) {
+            model.wrapText = true;
+            valid = true;
+        }
+        if (parseBoolean(shrinkToFit)) {
+            model.shrinkToFit = true;
+            valid = true;
+        }
+        if (indent) {
+            model.indent = parseInt(indent, 10);
+            valid = true;
+        }
+        if (textRotation) {
+            model.textRotation = textRotationXform.toModel(textRotation);
+            valid = true;
+        }
+        if (readingOrder) {
+            model.readingOrder = readingOrder === "2" ? "rtl" : "ltr";
+            valid = true;
+        }
 
         this.model = valid ? model : null;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

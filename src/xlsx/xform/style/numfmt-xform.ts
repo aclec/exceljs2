@@ -1,50 +1,66 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
-import defaultNumFormats from "../../defaultnumformats";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { NumFmtModel } from "../../../types";
+import defaultNumFormats, { type DefaultNumFormat } from "../../defaultnumformats";
 
 import BaseXform from "../base-xform";
 
+/** The built-in formats by id, as a plain record (any number may be looked up). */
+const builtInFormats: Readonly<Record<number, DefaultNumFormat | undefined>> = defaultNumFormats;
+
 // keyed by format code: no prototype, so that a format such as "constructor" is not found
-function hashDefaultFormats() {
-    const hash = Object.create(null);
-    _.each(defaultNumFormats, (dnf, id) => {
-        if (dnf.f) {
+function hashDefaultFormats(): Record<string, number> {
+    const hash: Record<string, number> = Object.create(null) as Record<string, number>;
+    for (const [id, dnf] of Object.entries(defaultNumFormats)) {
+        if ("f" in dnf) {
             hash[dnf.f] = parseInt(id, 10);
         }
         // at some point, add the other cultures here...
-    });
+    }
     return hash;
 }
 const defaultFmtHash = hashDefaultFormats();
 
-// NumFmt encapsulates translation between number format and xlsx
-class NumFmtXform extends BaseXform {
-    constructor(id, formatCode) {
+/**
+ * A custom number format, `<numFmt numFmtId formatCode>` of the styles part. A format code longer than
+ * {@link NumFmtXform.MAX_FORMAT_CODE_LENGTH} characters (or a missing one) parses as `formatCode: undefined`.
+ */
+class NumFmtXform extends BaseXform<NumFmtModel> {
+    /** Excel's limit on the length of a format code. */
+    static readonly MAX_FORMAT_CODE_LENGTH = 255;
+
+    /** Unused: kept for the constructor signature of the original code. */
+    readonly id: number | undefined;
+    /** Unused: kept for the constructor signature of the original code. */
+    readonly formatCode: string | undefined;
+
+    constructor(id?: number, formatCode?: string) {
         super();
 
         this.id = id;
         this.formatCode = formatCode;
     }
 
-    get tag() {
+    get tag(): string {
         return "numFmt";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: NumFmtModel): void {
         xmlStream.leafNode("numFmt", { numFmtId: model.id, formatCode: model.formatCode });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<numFmt>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case "numFmt": {
                 // kept as written: a backslash escapes a literal character ("\-", "\ ", "\m")
                 const { formatCode } = node.attributes;
                 this.model = {
-                    id: parseInt(node.attributes.numFmtId, 10),
+                    id: BaseXform.toIntValue(node.attributes.numFmtId, NaN),
                     // Excel limits format codes to 255 characters: a longer one is not a format Excel wrote, and
                     // is ignored (its cells read as General) instead of being scanned for every cell using it
-                    formatCode: formatCode.length <= NumFmtXform.MAX_FORMAT_CODE_LENGTH ? formatCode : undefined,
+                    formatCode:
+                        formatCode !== undefined && formatCode.length <= NumFmtXform.MAX_FORMAT_CODE_LENGTH ? formatCode : undefined,
                 };
                 return true;
             }
@@ -53,21 +69,21 @@ class NumFmtXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
+
+    /** @returns the id of the built-in format with this code, or `undefined` when it is not a built-in one */
+    static getDefaultFmtId(this: void, formatCode: string): number | undefined {
+        return defaultFmtHash[formatCode];
+    }
+
+    /** @returns the code of a built-in format (default locale), or `undefined` when there is none for this id */
+    static getDefaultFmtCode(this: void, numFmtId: number): string | undefined {
+        return builtInFormats[numFmtId]?.f;
+    }
 }
-
-NumFmtXform.MAX_FORMAT_CODE_LENGTH = 255;
-
-NumFmtXform.getDefaultFmtId = function getDefaultFmtId(formatCode) {
-    return defaultFmtHash[formatCode];
-};
-
-NumFmtXform.getDefaultFmtCode = function getDefaultFmtCode(numFmtId) {
-    return defaultNumFormats[numFmtId] && defaultNumFormats[numFmtId].f;
-};
 
 export default NumFmtXform;

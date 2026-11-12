@@ -1,13 +1,14 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
 import BaseXform from "../base-xform";
 
-class CNvPicPrXform extends BaseXform {
-    get tag() {
+/** The non-visual picture properties, `<xdr:cNvPicPr>`: the aspect ratio is locked. Nothing is parsed. */
+class CNvPicPrXform extends BaseXform<never> {
+    get tag(): string {
         return "xdr:cNvPicPr";
     }
 
-    render(xmlStream) {
+    override render(xmlStream: XmlStream): void {
         xmlStream.openNode(this.tag);
         xmlStream.leafNode("a:picLocks", {
             noChangeAspect: "1",
@@ -15,7 +16,8 @@ class CNvPicPrXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<xdr:cNvPicPr>` is accepted (and skipped) */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 return true;
@@ -24,9 +26,9 @@ class CNvPicPrXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         switch (name) {
             case this.tag:
                 return false;

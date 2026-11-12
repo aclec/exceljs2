@@ -1,16 +1,19 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { WorkbookPivotCacheModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class WorkbookPivotCacheXform extends BaseXform {
-    render(xmlStream, model) {
+/** A `<pivotCache cacheId r:id>` of `xl/workbook.xml` (rendered for each pivot table). */
+class WorkbookPivotCacheXform extends BaseXform<WorkbookPivotCacheModel> {
+    override render(xmlStream: XmlStream, model: WorkbookPivotCacheModel): void {
         xmlStream.leafNode("pivotCache", {
             cacheId: model.cacheId,
             "r:id": model.rId,
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<pivotCache>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "pivotCache") {
             this.model = {
                 cacheId: node.attributes.cacheId,
@@ -21,9 +24,9 @@ class WorkbookPivotCacheXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

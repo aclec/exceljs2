@@ -5,7 +5,7 @@ import colCache from "../utils/col-cache";
 import type { TableColumnModel, TableModel } from "../types";
 import type Cell from "./cell";
 import type { CellValue } from "./cell";
-import type { StyleModel } from "../types";
+import type { DxfModel, StyleModel } from "../types";
 
 /** What a {@link Table} reads of its worksheet: its rows, to write the table in their cells. */
 export interface TableWorksheet {
@@ -41,7 +41,7 @@ function rowsOf(table: TableModel): unknown[][] {
 }
 
 /** Copies the properties of a column style into the style of a cell (no copy on write: as it always did). */
-function assignStyle(cell: Cell, style: StyleModel | undefined): void {
+function assignStyle(cell: Cell, style: StyleModel | DxfModel | undefined): void {
     if (style) {
         Object.assign(cell.style, style);
     }

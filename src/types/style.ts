@@ -39,10 +39,13 @@ export interface FontModel extends Partial<Omit<Font, "color">> {
     shadow?: boolean;
 }
 
-/** A gradient stop of a {@link FillModel} (`position` 0..1, parsed with parseFloat). */
+/**
+ * A gradient stop of a {@link FillModel} (`position` 0..1, parsed with parseFloat). A parsed stop has no `color` without
+ * a `<color>` child, and `color: undefined` for an auto color.
+ */
 export interface GradientStopModel {
     position: number;
-    color: ColorModel;
+    color?: ColorModel;
 }
 
 /**
@@ -116,31 +119,34 @@ export interface NumFmtModel {
 
 /**
  * A cell format, `<xf>` of `cellXfs` / `cellStyleXfs` (style-xform): indexes into the style manager's lists. `xfId` only
- * with the `{ xfId: true }` option; render writes `0` for a missing id.
+ * with the `{ xfId: true }` option; render writes `0` for a missing id (the style manager registers formats with only
+ * the ids that are set). Parsing sets every id (`NaN` when absent or not a number); a parsed `alignment` / `protection`
+ * is `null` when its element sets only defaults.
  */
 export interface XfModel {
-    numFmtId: number;
-    fontId: number;
-    fillId: number;
-    borderId: number;
+    numFmtId?: number;
+    fontId?: number;
+    fillId?: number;
+    borderId?: number;
     xfId?: number;
-    alignment?: AlignmentModel;
-    protection?: ProtectionModel;
+    alignment?: AlignmentModel | null;
+    protection?: ProtectionModel | null;
 }
 
 /**
- * A differential format, `<dxf>` (dxf-xform): the style of a conditional formatting rule or a table column. Parsed parts
- * that are absent are present as `undefined` keys. `numFmt` is the format code; render needs `numFmtId`, which
- * `StyleRegistry.addDxfStyle` adds (it mutates the style it is given).
+ * A differential format, `<dxf>` (dxf-xform): the style of a conditional formatting rule or a table column. Parsing
+ * gives every part as a key: `null` when its element is absent (or sets only defaults); `fill` may be `{}` (a `<fill>`
+ * without a known child) and `numFmt` `undefined` (a rejected format code). `numFmt` is the format code; render needs
+ * `numFmtId`, which `StyleRegistry.addDxfStyle` adds (it mutates the style it is given).
  */
 export interface DxfModel {
-    alignment?: AlignmentModel;
-    border?: BorderModel;
-    fill?: FillModel;
-    font?: FontModel;
-    numFmt?: string;
+    alignment?: AlignmentModel | null;
+    border?: BorderModel | null;
+    fill?: FillModel | { type?: undefined } | null;
+    font?: FontModel | null;
+    numFmt?: string | null;
     numFmtId?: number;
-    protection?: ProtectionModel;
+    protection?: ProtectionModel | null;
 }
 
 /**

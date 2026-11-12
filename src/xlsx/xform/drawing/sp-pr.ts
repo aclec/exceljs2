@@ -1,6 +1,7 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-export default {
+import type { StaticModel } from "../static-xform";
+
+/** The shape properties of a picture, `<xdr:spPr>`: a rectangle, positioned by the anchor (rendered by a StaticXform). */
+const spPr: StaticModel = {
     tag: "xdr:spPr",
     c: [
         {
@@ -17,3 +18,5 @@ export default {
         },
     ],
 };
+
+export default spPr;

@@ -1,13 +1,18 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DrawingPictureModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class HLinkClickXform extends BaseXform {
-    get tag() {
+/**
+ * The hyperlink of a picture, `<a:hlinkClick r:id tooltip>`: rendered when the picture has a hyperlink relationship.
+ * Parsed as `{ hyperlinks: { rId, tooltip } }`.
+ */
+class HLinkClickXform extends BaseXform<Pick<DrawingPictureModel, "hyperlinks">> {
+    get tag(): string {
         return "a:hlinkClick";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: Pick<DrawingPictureModel, "hyperlinks">): void {
         if (!(model.hyperlinks && model.hyperlinks.rId)) {
             return;
         }
@@ -18,7 +23,8 @@ class HLinkClickXform extends BaseXform {
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 this.model = {
@@ -33,9 +39,9 @@ class HLinkClickXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

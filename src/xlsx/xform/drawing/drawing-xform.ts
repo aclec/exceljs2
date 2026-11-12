@@ -1,19 +1,38 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
 import colCache from "../../../utils/col-cache";
-import XmlStream from "../../../utils/xml-stream";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { DrawingAnchorModel, DrawingModel, DrawingReconcileOptions, ImageRangeModel } from "../../../types";
 
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 import TwoCellAnchorXform from "./two-cell-anchor-xform";
 import OneCellAnchorXform from "./one-cell-anchor-xform";
 
-function getAnchorType(model) {
-    const range = typeof model.range === "string" ? colCache.decode(model.range) : model.range;
+/** The element of an anchor. */
+type AnchorType = NonNullable<DrawingAnchorModel["anchorType"]>;
 
-    return range.br ? "xdr:twoCellAnchor" : "xdr:oneCellAnchor";
+// a range with a bottom-right corner is a two-cell anchor
+function getAnchorType(model: { readonly range: ImageRangeModel | string }): AnchorType {
+    if (typeof model.range === "string") {
+        // a decoded reference has no `br`: a one-cell anchor (decode throws for an invalid reference)
+        colCache.decode(model.range);
+        return "xdr:oneCellAnchor";
+    }
+    return model.range.br ? "xdr:twoCellAnchor" : "xdr:oneCellAnchor";
 }
 
-class DrawingXform extends BaseXform {
+/**
+ * The drawing part of a worksheet, `xl/drawings/drawingN.xml`: its pictures, each with a two-cell or a one-cell anchor.
+ * Parsing another drawing (e.g. a chart's `<c:userShapes>`) gives no model.
+ */
+class DrawingXform extends BaseXform<DrawingModel> {
+    /** The namespaces of `<xdr:wsDr>`. */
+    static readonly DRAWING_ATTRIBUTES: XmlAttributes = {
+        "xmlns:xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+        "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    };
+
+    declare map: { readonly "xdr:twoCellAnchor": TwoCellAnchorXform; readonly "xdr:oneCellAnchor": OneCellAnchorXform };
+
     constructor() {
         super();
 
@@ -23,34 +42,38 @@ class DrawingXform extends BaseXform {
         };
     }
 
-    prepare(model) {
+    /** Sets the `anchorType` of each anchor and prepares its picture (index and creation id). */
+    override prepare(model: DrawingModel): void {
         // drawings are named drawingN with N unique in the workbook
         const match = /(\d+)$/.exec(model.name || "");
-        const drawingNumber = match ? parseInt(match[1], 10) : 0;
+        const drawingNumber = match ? parseInt(match[1]!, 10) : 0;
         model.anchors.forEach((item, index) => {
-            item.anchorType = getAnchorType(item);
-            const anchor = this.map[item.anchorType];
+            const anchorType = getAnchorType(item);
+            item.anchorType = anchorType;
+            const anchor = this.map[anchorType];
             anchor.prepare(item, { index, drawingNumber });
         });
     }
 
-    get tag() {
+    get tag(): string {
         return "xdr:wsDr";
     }
 
-    render(xmlStream, model) {
+    /** @param model - prepared: each anchor has its `anchorType` */
+    override render(xmlStream: XmlStream, model: DrawingModel): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode(this.tag, DrawingXform.DRAWING_ATTRIBUTES);
 
-        model.anchors.forEach((item) => {
-            const anchor = this.map[item.anchorType];
+        for (const item of model.anchors) {
+            const anchor = this.map[item.anchorType!];
             anchor.render(xmlStream, item);
-        });
+        }
 
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element of the part is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -62,26 +85,34 @@ class DrawingXform extends BaseXform {
                     anchors: [],
                 };
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.model.anchors.push(this.parser.model);
+                // an anchor outside <xdr:wsDr> (no model) is ignored
+                if (this.model) {
+                    const anchor =
+                        this.parser === this.map["xdr:twoCellAnchor"] ? this.map["xdr:twoCellAnchor"] : this.map["xdr:oneCellAnchor"];
+                    // the anchor has its model: its element was closed
+                    this.model.anchors.push(anchor.model!);
+                }
                 this.parser = undefined;
             }
             return true;
@@ -95,20 +126,16 @@ class DrawingXform extends BaseXform {
         }
     }
 
-    reconcile(model, options) {
-        model.anchors.forEach((anchor) => {
-            if (anchor.br) {
+    /** Resolves the medium of each picture (see BaseCellAnchorXform.reconcilePicture). */
+    override reconcile(model: DrawingModel, options: DrawingReconcileOptions): void {
+        for (const anchor of model.anchors) {
+            if (anchor.range.br) {
                 this.map["xdr:twoCellAnchor"].reconcile(anchor, options);
             } else {
                 this.map["xdr:oneCellAnchor"].reconcile(anchor, options);
             }
-        });
+        }
     }
 }
-
-DrawingXform.DRAWING_ATTRIBUTES = {
-    "xmlns:xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
-    "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
-};
 
 export default DrawingXform;

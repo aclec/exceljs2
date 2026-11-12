@@ -1,10 +1,26 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { FilterColumnModel, TableModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 
 import FilterColumnXform from "./filter-column-xform";
 
-class AutoFilterXform extends BaseXform {
+/** The auto filter of a table as {@link AutoFilterXform} parses it: its range and its (sparse) filter columns. */
+export interface TableAutoFilterModel {
+    autoFilterRef?: string;
+    columns: FilterColumnModel[];
+}
+
+/**
+ * The auto filter of a table, `<autoFilter ref>` with a `<filterColumn>` per column of the table (rendered from the
+ * table model). Parsing keeps the filter columns; the other children (sortState, extLst...) are skipped.
+ */
+class AutoFilterXform extends BaseXform<TableAutoFilterModel> {
+    declare map: { readonly filterColumn: FilterColumnXform };
+
+    /** While parsing: the depth inside an element that is skipped (0: none). */
+    private skipDepth = 0;
+
     constructor() {
         super();
 
@@ -13,28 +29,29 @@ class AutoFilterXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "autoFilter";
     }
 
-    prepare(model) {
+    /** Sets the `colId` of the columns of the table. */
+    override prepare(model: TableModel): void {
         model.columns.forEach((column, index) => {
             this.map.filterColumn.prepare(column, { index });
         });
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: TableModel): void {
         xmlStream.openNode(this.tag, { ref: model.autoFilterRef });
 
-        model.columns.forEach((column) => {
+        for (const column of model.columns) {
             this.map.filterColumn.render(xmlStream, column);
-        });
+        }
 
         xmlStream.closeNode();
-        return true;
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<autoFilter>` is accepted (the unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -52,28 +69,32 @@ class AutoFilterXform extends BaseXform {
                 };
                 return true;
 
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                     return true;
                 }
                 // sortState, extLst... are not modelled: skip the subtree
                 this.skipDepth = 1;
                 return true;
+            }
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /** @throws Error on an end tag that does not match (malformed XML) */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.model.columns.push(this.parser.model);
+                // the filter columns are inside <autoFilter>, which created the model
+                this.model!.columns.push(this.map.filterColumn.model!);
                 this.parser = undefined;
             }
             return true;

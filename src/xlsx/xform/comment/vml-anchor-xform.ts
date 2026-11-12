@@ -1,14 +1,39 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
 import BaseXform from "../base-xform";
 
-// render the triangle in the cell for the comment
-class VmlAnchorXform extends BaseXform {
-    get tag() {
+/** The box of a note in cells (fractional, 0-based): left / right columns, top / bottom rows. */
+export interface VmlAnchorRect {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+}
+
+/** What {@link VmlAnchorXform} renders: the box of the note, or else the cell it is attached to. */
+export interface VmlAnchorRenderModel {
+    anchor?: VmlAnchorRect;
+    /** The cell of the note (1-based row and column). */
+    refAddress: { readonly row: number; readonly col: number };
+}
+
+/** The 8 numbers of `<x:Anchor>`: column, x offset, row, y offset of the top-left then of the bottom-right corner. */
+type AnchorNumbers = [number, number, number, number, number, number, number, number];
+
+/**
+ * The position of the box of a note, `<x:Anchor>` (this is what draws the triangle in the commented cell). Parsing keeps
+ * the text in {@link text}, not in the model.
+ */
+class VmlAnchorXform extends BaseXform<VmlAnchorRenderModel> {
+    /** While parsing: the text of the element (`""` until a text is read). */
+    declare text?: string;
+
+    get tag(): string {
         return "x:Anchor";
     }
 
-    getAnchorRect(anchor) {
+    /** @returns the anchor numbers of a box */
+    getAnchorRect(anchor: VmlAnchorRect): AnchorNumbers {
         const l = Math.floor(anchor.left);
         const lf = Math.floor((anchor.left - l) * 68);
         const t = Math.floor(anchor.top);
@@ -20,7 +45,8 @@ class VmlAnchorXform extends BaseXform {
         return [l, lf, t, tf, r, rf, b, bf];
     }
 
-    getDefaultRect(ref) {
+    /** @returns the anchor numbers of the default box of a note: right of its cell, over the rows around it */
+    getDefaultRect(ref: VmlAnchorRenderModel["refAddress"]): AnchorNumbers {
         const l = ref.col;
         const lf = 6;
         const t = Math.max(ref.row - 2, 0);
@@ -32,13 +58,14 @@ class VmlAnchorXform extends BaseXform {
         return [l, lf, t, tf, r, rf, b, bf];
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: VmlAnchorRenderModel): void {
         const rect = model.anchor ? this.getAnchorRect(model.anchor) : this.getDefaultRect(model.refAddress);
 
-        xmlStream.leafNode("x:Anchor", null, rect.join(", "));
+        xmlStream.leafNode("x:Anchor", undefined, rect.join(", "));
     }
 
-    parseOpen(node) {
+    /** @returns `true` for its element */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 this.text = "";
@@ -48,11 +75,11 @@ class VmlAnchorXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         this.text = text;
     }
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

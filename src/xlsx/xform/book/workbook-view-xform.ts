@@ -1,53 +1,51 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { WorkbookViewModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class WorkbookViewXform extends BaseXform {
-    render(xmlStream, model) {
-        const attributes = {
+/**
+ * A `<workbookView>` of `xl/workbook.xml` (see {@link WorkbookViewModel}). Render defaults: position 0, 0, size 12000 x
+ * 24000; `visibility` is written unless `visible`. Parse defaults: position 0, 0, size 25000 x 10000, `visible`.
+ */
+class WorkbookViewXform extends BaseXform<WorkbookViewModel> {
+    override render(xmlStream: XmlStream, model: Partial<WorkbookViewModel>): void {
+        xmlStream.leafNode("workbookView", {
             xWindow: model.x || 0,
             yWindow: model.y || 0,
             windowWidth: model.width || 12000,
             windowHeight: model.height || 24000,
             firstSheet: model.firstSheet,
             activeTab: model.activeTab,
-        };
-        if (model.visibility && model.visibility !== "visible") {
-            attributes.visibility = model.visibility;
-        }
-        xmlStream.leafNode("workbookView", attributes);
+            visibility: model.visibility && model.visibility !== "visible" ? model.visibility : undefined,
+        });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<workbookView>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "workbookView") {
-            const model = (this.model = {});
-            const addS = function (name, value, dflt) {
-                const s = value !== undefined ? (model[name] = value) : dflt;
-                if (s !== undefined) {
-                    model[name] = s;
-                }
+            const { xWindow, yWindow, windowWidth, windowHeight, visibility, activeTab, firstSheet } = node.attributes;
+            const model: WorkbookViewModel = {
+                x: BaseXform.toIntValue(xWindow, 0),
+                y: BaseXform.toIntValue(yWindow, 0),
+                width: BaseXform.toIntValue(windowWidth, 25000),
+                height: BaseXform.toIntValue(windowHeight, 10000),
+                visibility: visibility !== undefined ? visibility : "visible",
             };
-            const addN = function (name, value, dflt) {
-                const n = value !== undefined ? (model[name] = parseInt(value, 10)) : dflt;
-                if (n !== undefined) {
-                    model[name] = n;
-                }
-            };
-            addN("x", node.attributes.xWindow, 0);
-            addN("y", node.attributes.yWindow, 0);
-            addN("width", node.attributes.windowWidth, 25000);
-            addN("height", node.attributes.windowHeight, 10000);
-            addS("visibility", node.attributes.visibility, "visible");
-            addN("activeTab", node.attributes.activeTab, undefined);
-            addN("firstSheet", node.attributes.firstSheet, undefined);
+            if (activeTab !== undefined) {
+                model.activeTab = parseInt(activeTab, 10);
+            }
+            if (firstSheet !== undefined) {
+                model.firstSheet = parseInt(firstSheet, 10);
+            }
+            this.model = model;
             return true;
         }
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

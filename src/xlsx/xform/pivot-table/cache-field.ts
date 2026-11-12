@@ -1,10 +1,17 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import utilsModule from "../../../utils/utils";
-const { xmlEncode } = utilsModule;
+import type { PivotCacheFieldModel } from "../../../types";
+import { xmlEncode } from "../../../utils/utils";
 
+/**
+ * A `<cacheField>` of a pivot cache definition, rendered as an XML string: a string field lists its shared items, an
+ * integer field (`sharedItems: null`) has none. Every value is written with `xmlEncode(String(value))`.
+ */
 class CacheField {
-    constructor({ name, sharedItems }) {
+    /** The header value of the column. */
+    readonly name: unknown;
+    /** The distinct values of a row or column field, `null` for an integer (value) field. */
+    readonly sharedItems: readonly unknown[] | null;
+
+    constructor({ name, sharedItems }: PivotCacheFieldModel) {
         // string type
         //
         // {
@@ -24,7 +31,8 @@ class CacheField {
         this.sharedItems = sharedItems;
     }
 
-    render() {
+    /** @returns the XML of the `<cacheField>` */
+    render(): string {
         // PivotCache Field: http://www.datypic.com/sc/ooxml/e-ssml_cacheField-1.html
         // Shared Items: http://www.datypic.com/sc/ooxml/e-ssml_sharedItems-1.html
 

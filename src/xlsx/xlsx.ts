@@ -27,7 +27,7 @@ import PivotCacheRecordsXform from "./xform/pivot-table/pivot-cache-records-xfor
 import PivotCacheDefinitionXform from "./xform/pivot-table/pivot-cache-definition-xform";
 import PivotTableXform from "./xform/pivot-table/pivot-table-xform";
 import CommentsXformJs from "./xform/comment/comments-xform";
-import VmlNotesXformJs from "./xform/comment/vml-notes-xform";
+import VmlNotesXform from "./xform/comment/vml-notes-xform";
 
 import theme1Xml from "./xml/theme1";
 import type { XlsxReadOptions } from "../../index";
@@ -89,12 +89,6 @@ const WorksheetXform = WorksheetXformJs as unknown as {
 const CommentsXform = CommentsXformJs as unknown as new () => {
     parseStream(stream: SaxInput): Promise<unknown>;
     render(xmlStream: XmlStream, model: WorksheetModel): void;
-};
-
-const VmlNotesXform = VmlNotesXformJs as unknown as {
-    new (): { parseStream(stream: SaxInput): Promise<unknown>; render(xmlStream: XmlStream, model: WorksheetModel): void };
-    /** the number of blocks of VML shape ids that `count` notes take */
-    blockCount(this: void, count: number): number;
 };
 
 /** What xlsx.ts needs from the workbook (src/doc/workbook.ts). */
@@ -333,8 +327,9 @@ class XLSX {
         }
 
         // reconcile tables with the default styles
+        // a file without styles part has no dxfs: the columns with a dxfId get no style (instead of a TypeError)
         const tableOptions = {
-            styles: model.styles,
+            styles: model.styles ?? new StylesXform(),
         };
         for (const table of Object.values(model.tables)) {
             tableXform.reconcile(table, tableOptions);
@@ -437,8 +432,7 @@ class XLSX {
 
     async _processDrawingEntry(entry: SaxInput, model: XlsxReadModel, name: string): Promise<void> {
         const xform = new DrawingXform();
-        // TS-WAVE2: the model of DrawingXform (typed in parallel)
-        const drawing = (await xform.parseStream(entry)) as DrawingModel | null | undefined;
+        const drawing = await xform.parseStream(entry);
         // null when the part is not a spreadsheet drawing (e.g. a chart's <c:userShapes>)
         if (drawing) {
             model.drawings[name] = drawing;
@@ -451,8 +445,9 @@ class XLSX {
 
     async _processVmlDrawingEntry(entry: SaxInput, model: XlsxReadModel, entryName: string): Promise<void> {
         const xform = new VmlNotesXform();
-        // TS-WAVE2: the model of VmlNotesXform (typed in parallel)
-        model.vmlDrawings[entryName] = (await xform.parseStream(entry)) as { comments: unknown[] };
+        const notes = await xform.parseStream(entry);
+        // an empty part parses to nothing: no entry (a lookup gives undefined, as the stored undefined did)
+        if (notes) model.vmlDrawings[entryName] = notes;
     }
 
     async _processThemeEntry(entry: NodeJS.ReadableStream, model: XlsxReadModel, name: string): Promise<void> {
@@ -757,9 +752,8 @@ class XLSX {
 
     /** Adds the parts of the pivot table of the workbook (one at most). */
     addPivotTables(zip: ZipWriter, model: XlsxWriteModel): void {
-        if (!model.pivotTables.length) return;
-
-        const pivotTable = model.pivotTables[0];
+        const [pivotTable] = model.pivotTables;
+        if (!pivotTable) return;
 
         const pivotCacheRecordsXform = new PivotCacheRecordsXform();
         const pivotCacheDefinitionXform = new PivotCacheDefinitionXform();
@@ -961,7 +955,7 @@ class XLSX {
                 xmlStream = new XmlStream();
                 worksheet.shapeBlock = nextShapeBlock;
                 nextShapeBlock += VmlNotesXform.blockCount(comments.length);
-                vmlNotesXform.render(xmlStream, worksheet);
+                vmlNotesXform.render(xmlStream, { comments, shapeBlock: worksheet.shapeBlock });
                 zip.append(xmlStream.xml, { name: `xl/drawings/vmlDrawing${worksheet.id}.vml` });
             }
         }

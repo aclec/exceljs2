@@ -1,28 +1,42 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
-import utilsModule from "../../../utils/utils";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { PivotTableModel } from "../../../types";
+import { xmlEncode } from "../../../utils/utils";
 import BaseXform from "../base-xform";
-const { xmlEncode } = utilsModule;
 
-class PivotTableXform extends BaseXform {
+/** The kind of a field of a pivot table. */
+type PivotFieldType = "row" | "column" | "value" | null;
+
+/**
+ * The definition of a pivot table, `xl/pivotTables/pivotTable1.xml`: its fields (rows, columns, the value summed) and
+ * its layout. Render only (parsing is not supported: the inherited no-op methods). The XML is built from a template:
+ * the field names are written with `xmlEncode(String(name))`; the other values are numbers (indexes and counts).
+ */
+class PivotTableXform extends BaseXform<PivotTableModel> {
+    /** The namespaces of `<pivotTableDefinition>`. */
+    static readonly PIVOT_TABLE_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+        "mc:Ignorable": "xr",
+        "xmlns:xr": "http://schemas.microsoft.com/office/spreadsheetml/2014/revision",
+    };
+
+    declare map: Record<string, never>;
+
     constructor() {
         super();
 
         this.map = {};
     }
 
-    prepare(model) {
-        // TK
-    }
-
-    get tag() {
+    get tag(): string {
         // http://www.datypic.com/sc/ooxml/e-ssml_pivotTableDefinition.html
         return "pivotTableDefinition";
     }
 
-    render(xmlStream, model) {
-        const { rows, columns, values, metric, cacheFields, cacheId } = model;
+    override render(xmlStream: XmlStream, model: PivotTableModel): void {
+        const { rows, columns, values, cacheFields, cacheId } = model;
+        // the one value field (validated by makePivotTable)
+        const valueField = values[0]!;
 
         // Examples
         // --------
@@ -84,8 +98,8 @@ class PivotTableXform extends BaseXform {
       </colItems>
       <dataFields count="${values.length}">
         <dataField
-          name="Sum of ${xmlEncode(String(cacheFields[values[0]].name))}"
-          fld="${values[0]}"
+          name="Sum of ${xmlEncode(String(cacheFields[valueField]!.name))}"
+          fld="${valueField}"
           baseField="0"
           baseItem="0"
         />
@@ -122,30 +136,14 @@ class PivotTableXform extends BaseXform {
 
         xmlStream.closeNode();
     }
-
-    parseOpen(node) {
-        // TK
-    }
-
-    parseText(text) {
-        // TK
-    }
-
-    parseClose(name) {
-        // TK
-    }
-
-    reconcile(model, options) {
-        // TK
-    }
 }
 
 // Helpers
 
-function renderPivotFields(pivotTable) {
+function renderPivotFields(pivotTable: PivotTableModel): string {
     return pivotTable.cacheFields
         .map((cacheField, fieldIndex) => {
-            const fieldType =
+            const fieldType: PivotFieldType =
                 pivotTable.rows.indexOf(fieldIndex) >= 0
                     ? "row"
                     : pivotTable.columns.indexOf(fieldIndex) >= 0
@@ -158,12 +156,12 @@ function renderPivotFields(pivotTable) {
         .join("");
 }
 
-function renderPivotField(fieldType, sharedItems) {
+function renderPivotField(fieldType: PivotFieldType, sharedItems: readonly unknown[] | null): string {
     // fieldType: 'row', 'column', 'value', null
 
     const defaultAttributes = 'compact="0" outline="0" showAll="0" defaultSubtotal="0"';
 
-    if (fieldType === "row" || fieldType === "column") {
+    if ((fieldType === "row" || fieldType === "column") && sharedItems) {
         const axis = fieldType === "row" ? "axisRow" : "axisCol";
         return `
       <pivotField axis="${axis}" ${defaultAttributes}>
@@ -180,12 +178,5 @@ function renderPivotField(fieldType, sharedItems) {
     />
   `;
 }
-
-PivotTableXform.PIVOT_TABLE_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
-    "mc:Ignorable": "xr",
-    "xmlns:xr": "http://schemas.microsoft.com/office/spreadsheetml/2014/revision",
-};
 
 export default PivotTableXform;

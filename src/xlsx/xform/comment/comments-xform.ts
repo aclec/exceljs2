@@ -1,86 +1,101 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
-import utils from "../../../utils/utils";
+import type { SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { NoteModel } from "../../../types";
 import BaseXform from "../base-xform";
 
 import CommentXform from "./comment-xform";
 
-const CommentsXform = function () {
-    this.map = {
-        comment: new CommentXform(),
+/** The model of a comments part: its notes (rendered with their `ref`; parsed with the attributes of `<comment>`). */
+export interface CommentsModel {
+    comments: NoteModel[];
+}
+
+/**
+ * A comments part, `xl/commentsN.xml`: one author (`Author`) and the notes of a worksheet. Parsing starts at
+ * `<commentList>`.
+ */
+class CommentsXform extends BaseXform<CommentsModel> {
+    /** The namespace of `<comments>`. */
+    static readonly COMMENTS_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
     };
-};
 
-utils.inherits(
-    CommentsXform,
-    BaseXform,
-    {
-        COMMENTS_ATTRIBUTES: {
-            xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-        },
-    },
-    {
-        render(xmlStream, model) {
-            model = model || this.model;
-            xmlStream.openXml(XmlStream.StdDocAttributes);
-            xmlStream.openNode("comments", CommentsXform.COMMENTS_ATTRIBUTES);
+    declare map: { readonly comment: CommentXform };
 
-            // authors
-            // TODO: support authors properly
-            xmlStream.openNode("authors");
-            xmlStream.leafNode("author", null, "Author");
-            xmlStream.closeNode();
+    constructor() {
+        super();
+        this.map = {
+            comment: new CommentXform(),
+        };
+    }
 
-            // comments
-            xmlStream.openNode("commentList");
-            model.comments.forEach((comment) => {
-                this.map.comment.render(xmlStream, comment);
-            });
-            xmlStream.closeNode();
-            xmlStream.closeNode();
-        },
+    /** Writes the part (for `model`, or when it is falsy, the model of this xform). */
+    override render(xmlStream: XmlStream, model: { readonly comments: readonly NoteModel[] } | undefined): void {
+        // one of them is set: xlsx.ts renders the worksheet model
+        const { comments } = (model || this.model)!;
+        xmlStream.openXml(XmlStream.StdDocAttributes);
+        xmlStream.openNode("comments", CommentsXform.COMMENTS_ATTRIBUTES);
 
-        parseOpen(node) {
-            if (this.parser) {
+        // authors
+        // TODO: support authors properly
+        xmlStream.openNode("authors");
+        xmlStream.leafNode("author", undefined, "Author");
+        xmlStream.closeNode();
+
+        // comments
+        xmlStream.openNode("commentList");
+        for (const comment of comments) {
+            this.map.comment.render(xmlStream, comment);
+        }
+        xmlStream.closeNode();
+        xmlStream.closeNode();
+    }
+
+    /** @returns `true` for `<commentList>` and the notes, `false` for other elements (skipped) */
+    override parseOpen(node: SaxTag): boolean {
+        if (this.parser) {
+            this.parser.parseOpen(node);
+            return true;
+        }
+        switch (node.name) {
+            case "commentList":
+                this.model = {
+                    comments: [],
+                };
+                return true;
+            case "comment":
+                this.parser = this.map.comment;
                 this.parser.parseOpen(node);
                 return true;
-            }
-            switch (node.name) {
-                case "commentList":
-                    this.model = {
-                        comments: [],
-                    };
-                    return true;
-                case "comment":
-                    this.parser = this.map.comment;
-                    this.parser.parseOpen(node);
-                    return true;
-                default:
-                    return false;
-            }
-        },
-        parseText(text) {
-            if (this.parser) {
-                this.parser.parseText(text);
-            }
-        },
-        parseClose(name) {
-            switch (name) {
-                case "commentList":
-                    return false;
-                case "comment":
-                    this.model.comments.push(this.parser.model);
-                    this.parser = undefined;
-                    return true;
-                default:
-                    if (this.parser) {
-                        this.parser.parseClose(name);
-                    }
-                    return true;
-            }
-        },
+            default:
+                return false;
+        }
     }
-);
+
+    override parseText(text: string): void {
+        if (this.parser) {
+            this.parser.parseText(text);
+        }
+    }
+
+    override parseClose(name: string): boolean {
+        switch (name) {
+            case "commentList":
+                return false;
+            case "comment":
+                // a <comment> outside <commentList> (no model) is ignored
+                if (this.parser && this.model) {
+                    this.model.comments.push(this.map.comment.model!);
+                }
+                this.parser = undefined;
+                return true;
+            default:
+                if (this.parser) {
+                    this.parser.parseClose(name);
+                }
+                return true;
+        }
+    }
+}
 
 export default CommentsXform;

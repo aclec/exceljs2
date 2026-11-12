@@ -1,9 +1,11 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { WorkbookProperties } from "../../../../index";
 import BaseXform from "../base-xform";
 
-class WorksheetPropertiesXform extends BaseXform {
-    render(xmlStream, model) {
+/** `<workbookPr>` of `xl/workbook.xml`: the date system (`date1904`), with fixed theme and privacy settings. */
+class WorksheetPropertiesXform extends BaseXform<Partial<WorkbookProperties>> {
+    override render(xmlStream: XmlStream, model: Partial<WorkbookProperties>): void {
         xmlStream.leafNode("workbookPr", {
             date1904: model.date1904 ? 1 : undefined,
             defaultThemeVersion: 164011,
@@ -11,7 +13,8 @@ class WorksheetPropertiesXform extends BaseXform {
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<workbookPr>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "workbookPr") {
             this.model = {
                 date1904: node.attributes.date1904 === "1",
@@ -21,9 +24,9 @@ class WorksheetPropertiesXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

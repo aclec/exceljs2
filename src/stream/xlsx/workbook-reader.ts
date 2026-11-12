@@ -438,7 +438,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
 
         // TS-WAVE2: workbook-xform.ts is typed in parallel; its workbookPr child and its model
         this.properties = (workbook.map as unknown as { workbookPr: { model?: Partial<WorkbookProperties> | null } }).workbookPr;
-        this.model = workbook.model as WorkbookPartModel | null | undefined;
+        this.model = workbook.model;
         this._sheetIndex = null;
     }
 
@@ -448,7 +448,8 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         if (!this._sheetIndex) {
             const sheetsByRId = new Map<string, SheetDefModel>();
             for (const sheet of (this.model && this.model.sheets) || []) {
-                if (!sheetsByRId.has(sheet.rId)) {
+                // a <sheet> without r:id matches no relationship
+                if (sheet.rId !== undefined && !sheetsByRId.has(sheet.rId)) {
                     sheetsByRId.set(sheet.rId, sheet);
                 }
             }

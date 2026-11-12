@@ -1,19 +1,22 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { FilterModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class FilterXform extends BaseXform {
-    get tag() {
+/** A value of a filter column, `<filter val>`. */
+class FilterXform extends BaseXform<FilterModel> {
+    get tag(): string {
         return "filter";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: FilterModel): void {
         xmlStream.leafNode(this.tag, {
             val: model.val,
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<filter>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === this.tag) {
             this.model = {
                 val: node.attributes.val,
@@ -23,9 +26,9 @@ class FilterXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }
