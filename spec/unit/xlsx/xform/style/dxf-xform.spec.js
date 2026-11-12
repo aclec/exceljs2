@@ -11,12 +11,12 @@ describe("DxfXform", () => {
             numFmtId: 164,
             font: { bold: true },
         });
-        // font, numFmt, fill, alignment, protection, border (ECMA-376 Part 1, 18.8.17)
+        // font, numFmt, fill, alignment, border, protection (ISO/IEC 29500-4 sml.xsd, CT_Dxf)
         expect(xml).to.equal(
             '<dxf><font><b/></font><numFmt numFmtId="164" formatCode="0.0%"/>' +
                 '<fill><patternFill patternType="solid"><bgColor rgb="FFFF0000"/></patternFill></fill>' +
-                '<alignment horizontal="center"/><protection locked="0"/>' +
-                '<border><left/><right/><top style="thin"/><bottom/><diagonal/></border></dxf>'
+                '<alignment horizontal="center"/><border><left/><right/><top style="thin"/><bottom/><diagonal/></border>' +
+                '<protection locked="0"/></dxf>'
         );
     });
 });
