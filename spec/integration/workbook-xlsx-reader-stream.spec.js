@@ -175,4 +175,62 @@ describe('WorkbookReader (stream)', () => {
     expect(error).to.be.an.instanceOf(Error);
     expect(error.code).to.equal('ENOENT');
   });
+
+  it('reads many worksheets stored before sharedStrings and workbook rels', async function() {
+    this.timeout(10000);
+    const count = 50;
+    const buffer = await baseWorkbookBuffer((wb, ws) => {
+      ws.getCell('B1').value = 1;
+      for (let i = 2; i <= count; i++) {
+        const sheet = wb.addWorksheet(`Sheet${i}`);
+        sheet.getCell('A1').value = `text ${i}`;
+        sheet.getCell('B1').value = i;
+      }
+    });
+    // worksheets first, then everything they depend on
+    const reordered = await reorderZip(buffer, name => (isWorksheet(name) ? 0 : 1));
+
+    const sheets = await readAll(chunkedStream(reordered));
+    expect(sheets).to.have.length(count);
+    sheets.forEach((sheet, index) => {
+      const n = index + 1;
+      expect(sheet.name).to.equal(`Sheet${n}`);
+      expect(sheet.rows).to.have.length(1);
+      expect(sheet.rows[0].values[1]).to.equal(n === 1 ? 'hello' : `text ${n}`);
+      expect(sheet.rows[0].values[2]).to.equal(n);
+    });
+  });
+
+  it('names worksheets when only workbook.xml comes after the worksheets', async () => {
+    const buffer = await baseWorkbookBuffer(wb => {
+      wb.addWorksheet('Second').getCell('A1').value = 'two';
+    });
+    // shared strings and rels first, then the worksheets, workbook.xml last
+    const rank = name => {
+      if (name === 'xl/workbook.xml') return 2;
+      return isWorksheet(name) ? 1 : 0;
+    };
+    const reordered = await reorderZip(buffer, rank);
+
+    const sheets = await readAll(chunkedStream(reordered));
+    expect(sheets.map(sheet => sheet.name)).to.deep.equal(['Sheet1', 'Second']);
+    expect(sheets[1].rows[0].values[1]).to.equal('two');
+  });
+
+  it('applies cached styles when styles.xml comes after the worksheets', async () => {
+    const date = new Date(Date.UTC(2024, 1, 29));
+    const buffer = await baseWorkbookBuffer((wb, ws) => {
+      ws.getCell('B1').value = date;
+      ws.getCell('B1').numFmt = 'yyyy-mm-dd';
+    });
+    // shared strings, rels and workbook first, then the worksheets, styles.xml last
+    const rank = name => {
+      if (name === 'xl/styles.xml') return 2;
+      return isWorksheet(name) ? 1 : 0;
+    };
+    const reordered = await reorderZip(buffer, rank);
+
+    const sheets = await readAll(chunkedStream(reordered), {styles: 'cache'});
+    expect(sheets[0].rows[0].values[2]).to.equalTime(date);
+  });
 });
