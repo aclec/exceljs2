@@ -154,6 +154,68 @@ describe("hostile input: algorithmic complexity", function () {
         expect(ws.model.cols.map(({ min, max, width }) => [min, max, width])).to.deep.equal([[1, 16384, 20]]);
     });
 
+    describe("far rows", () => {
+        // number of rows a worksheet holds, without traversing every index below the last one
+        const rowsHeld = (ws) => Object.keys(ws._rows).filter((key) => ws._rows[key]).length;
+
+        it("traverses worksheets whose only row is the last one in time proportional to the rows", async () => {
+            const SHEETS = 100;
+            const patches = {};
+            for (let i = 1; i <= SHEETS; i++) {
+                patches[`xl/worksheets/sheet${i}.xml`] = (xml) =>
+                    xml.replace(/<sheetData>.*<\/sheetData>/, '<sheetData><row r="1048576"><c r="A1048576"><v>1</v></c></row></sheetData>');
+            }
+            const buffer = await tamper(
+                await baseWorkbookBuffer((wb) => {
+                    for (let i = 2; i <= SHEETS; i++) {
+                        wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+                    }
+                }),
+                patches
+            );
+            const wb = await load(buffer);
+            // each of these visited the 1,048,576 indexes of the rows of every worksheet: 14 ms per worksheet
+            const { result, ms } = await timed(async () => {
+                const written = await wb.xlsx.writeBuffer();
+                const counts = wb.worksheets.map((ws) => {
+                    let eachRow = 0;
+                    ws.eachRow(() => eachRow++);
+                    return [ws.actualRowCount, ws.rowCount, ws.dimensions.model.bottom, ws.getSheetValues().length, eachRow];
+                });
+                return { written, counts };
+            });
+            expect(ms).to.be.below(1000);
+            expect(result.counts[SHEETS - 1]).to.deep.equal([1, 1048576, 1048576, 1048577, 1]);
+            const ws = (await load(result.written)).getWorksheet(SHEETS);
+            expect(ws.getCell("A1048576").value).to.equal(1);
+            expect(rowsHeld(ws)).to.equal(1);
+        });
+
+        it("splices the rows and columns of a worksheet with a far row without visiting the rows between", () => {
+            const FAR = 200000;
+            const ws = new ExcelJS.Workbook().addWorksheet("s");
+            ws.getCell("A1").value = "first";
+            ws.getCell(`A${FAR}`).value = "far";
+            const { ms } = timedSync(() => {
+                ws.spliceRows(1, 1);
+                ws.insertRow(1, ["inserted"]);
+                ws.duplicateRow(1, 2, true);
+                ws.spliceColumns(1, 0, [undefined, "y"], ["z"]);
+                ws.spliceColumns(2, 1);
+            });
+            expect(ms).to.be.below(500);
+            // inserting a column used to create every row up to the last one
+            expect(rowsHeld(ws)).to.equal(4);
+            expect(ws.getSheetValues().length).to.equal(FAR + 3);
+            expect([1, 2, 3, FAR + 2].map((r) => [ws.getCell(r, 1).value, ws.getCell(r, 2).value])).to.deep.equal([
+                [null, "inserted"],
+                ["y", "inserted"],
+                [null, "inserted"],
+                [null, "far"],
+            ]);
+        });
+    });
+
     describe("image anchors", () => {
         const PNG = Buffer.from(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",

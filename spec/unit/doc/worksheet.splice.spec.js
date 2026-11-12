@@ -127,6 +127,99 @@ describe("Worksheet splice", () => {
         });
     });
 
+    describe("with far rows", () => {
+        const FAR = 100000;
+
+        function sheetWithFarRow() {
+            const ws = new Excel.Workbook().addWorksheet("s");
+            ws.getCell("A1").value = "r1";
+            ws.getCell("A3").value = "r3";
+            ws.getCell(`A${FAR}`).value = "far";
+            ws.getCell(`A${FAR}`).font = { name: "far" };
+            ws.getCell(`A${FAR}`).note = "note";
+            return ws;
+        }
+
+        function existingRows(ws) {
+            return Object.keys(ws._rows)
+                .filter((key) => ws._rows[key])
+                .map((key) => [Number(key) + 1, ws._rows[key].getCell(1).value]);
+        }
+
+        it("moves the rows after the splice, and only them", () => {
+            const ws = sheetWithFarRow();
+            ws.spliceRows(2, 1);
+            expect(existingRows(ws)).to.deep.equal([
+                [1, "r1"],
+                [2, "r3"],
+                [FAR - 1, "far"],
+            ]);
+            ws.spliceRows(2, 0, ["a"], ["b"]);
+            expect(existingRows(ws)).to.deep.equal([
+                [1, "r1"],
+                [2, "a"],
+                [3, "b"],
+                [4, "r3"],
+                [FAR + 1, "far"],
+            ]);
+            expect(ws.getCell(`A${FAR + 1}`).font).to.deep.equal({ name: "far" });
+            expect(ws.getCell(`A${FAR + 1}`).note).to.equal("note");
+            expect([ws.rowCount, ws.actualRowCount, ws.lastRow.number]).to.deep.equal([FAR + 1, 5, FAR + 1]);
+        });
+
+        it("removes the far row and shortens the sheet", () => {
+            const ws = sheetWithFarRow();
+            ws.spliceRows(50, FAR);
+            expect(existingRows(ws)).to.deep.equal([
+                [1, "r1"],
+                [3, "r3"],
+            ]);
+            expect([ws.rowCount, ws._rows.length, ws.lastRow.number]).to.deep.equal([3, 3, 3]);
+        });
+
+        it("visits the rows in order", () => {
+            const ws = sheetWithFarRow();
+            const visited = [];
+            ws.eachRow((row, rowNumber) => visited.push([rowNumber, row.number]));
+            expect(visited).to.deep.equal([
+                [1, 1],
+                [3, 3],
+                [FAR, FAR],
+            ]);
+            expect(ws.dimensions.model).to.deep.equal({ top: 1, left: 1, bottom: FAR, right: 1 });
+            const values = ws.getSheetValues();
+            expect([values.length, values[3], values[FAR]]).to.deep.equal([FAR + 1, [undefined, "r3"], [undefined, "far"]]);
+            expect(ws.model.rows.map((row) => row.number)).to.deep.equal([1, 3, FAR]);
+        });
+
+        it("inserts columns without creating the rows that get no value", () => {
+            const ws = sheetWithFarRow();
+            ws.spliceColumns(1, 0, [undefined, "x"]);
+            expect(existingRows(ws).map(([rowNumber]) => rowNumber)).to.deep.equal([1, 2, 3, FAR]);
+            expect([1, 2, 3, FAR].map((r) => [ws.getCell(r, 1).value, ws.getCell(r, 2).value])).to.deep.equal([
+                [null, "r1"],
+                ["x", null],
+                [null, "r3"],
+                [null, "far"],
+            ]);
+            expect(ws.getCell(FAR, 2).font).to.deep.equal({ name: "far" });
+        });
+
+        it("duplicates a row that does not exist as empty rows", () => {
+            const ws = sheetWithFarRow();
+            ws.duplicateRow(2, 2, true);
+            expect(existingRows(ws)).to.deep.equal([
+                [1, "r1"],
+                [2, null],
+                [3, null],
+                [4, null],
+                [5, "r3"],
+                [FAR + 2, "far"],
+            ]);
+            expect(ws.actualRowCount).to.equal(3);
+        });
+    });
+
     describe("spliceColumns", () => {
         it("matches Array#splice for every start/count/inserts combination", () => {
             cases.forEach(([start, count, nInserts]) => {
