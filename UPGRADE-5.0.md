@@ -255,6 +255,20 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
 - **Object keys `__proto__`, `constructor` and `prototype`** in objects given to ExcelJS (for example `cell.note = JSON.parse(...)`) are
   ignored when they are merged into internal models.
 - **Pivot tables** (experimental): field names and values are XML-escaped.
+- **Rows and cells that splices do not need are not created.** `spliceColumns` no longer creates the rows that get no inserted value (4.x
+  gave them empty cells, written as empty `<row>` elements); the rows moved by `spliceRows`, `insertRow(s)` and `duplicateRow` get the cells
+  their source has, not an empty styled cell in every column up to the last one; `duplicateRow` of a row that does not exist duplicates an
+  empty row (4.x threw a `TypeError`). Values, styles, notes and `cellCount` are unchanged.
+- **Truncated XML parts are rejected.** A part that ends before its root element is closed (or has no root element) makes `xlsx.load` and
+  the streaming reader reject with the error of the XML parser (`unclosed tag: sheetData`). 4.x read it as if it were complete (the
+  streaming reader returned the rows before the cut) or failed with a `TypeError`.
+- **`_xHHHH_` in strings.** A literal `_xHHHH_` in a string is written escaped as `_x005F_xHHHH_` (ECMA-376), so that Excel and ExcelJS read
+  it back as written. 4.x wrote it as is, and it was read as the character U+HHHH (`x_x0041_y` became `xAy`).
+- **Print areas and print titles** are written as absolute references (`'Sheet'!$A$1:$G$20`), whether `pageSetup.printArea` is given with
+  `$` or not. 4.x wrote `$A1:$G20`, and `$$A$1:$$B$2` for `$A$1:$B$2`. They are still read without `$`.
+- **Streaming reader shared strings** are read like the document reader reads them: rich text runs keep their whole font (4.x lost the
+  colour, name and charset of most runs), phonetic runs are no longer read as the text, and `_xHHHH_` escapes are decoded.
+- **`worksheet.model = model`** replaces the merges of the worksheet (4.x kept the previous merges next to the new rows).
 - **Streaming writer backpressure.** `row.commit()` and `worksheet.commit()` of the streaming `WorkbookWriter` return a promise (4.x:
   `undefined`) that resolves once the output can take more data. `await worksheet.addRow(values).commit()` keeps memory bounded on large
   sheets; code that ignores the promise works as before (and keeps all the pending data in memory until it yields to the event loop). See

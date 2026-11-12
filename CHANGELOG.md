@@ -78,6 +78,22 @@ All fixes have regression tests in `spec/integration/security`.
       `csv.write` / `writeFile` crashed the process on a destination error (ENOENT, ENOSPC); the promise rejects.
     - Pivot tables: header names such as `constructor` were looked up in plain objects (corrupt pivot cache).
     - An invalid `docProps/core.xml` date loaded as an Invalid Date that made every later write reject; it is read as undefined.
+- Third review:
+    - Rows and cells are kept in arrays indexed by row / column number, and every traversal visited each index: a worksheet whose only row
+      is 1,048,576 cost 14 ms per traversal (400 such sheets in a 114 KiB file: 10.8 s to write), a row whose only cell is in column XFD 0.2
+      ms (3,000 such rows: 6.2 s), and moving such a row created its 16,384 cells. Traversals (`eachRow`, `eachCell`, `values`,
+      `dimensions`, `actualRowCount`, splices, the written model, defined names) now visit the existing entries only
+      (`lib/utils/sparse-array.js`), as fast as before on dense rows.
+    - Streaming writer: committing a row after a gap was quadratic in the gap (a row 10,000 rows below the last one: 2 s; row 1,048,576
+      never finished), and committing rows one by one before a far row was quadratic in the rows; both are proportional to the rows. A row
+      whose writing throws is no longer written twice.
+    - Streaming reader: one `<col min="1" max="16384">` created 16,384 Column objects per streamed worksheet, and a cell in column XFD did
+      the same; columns are created when they are used, as in the document model.
+    - Merged cells: the default workbook budget (`maxMergedCells`) is one full worksheet (1,048,576 merged cells, about 600 MB) again: with
+      four worksheets, a 7.6 KB file reached 2.5 GB of heap. Checking it summed the worksheets over their sheet ids on every merge (8,000
+      merges on a worksheet whose `sheetId` is 65535: 7.6 s); the workbook keeps a running total.
+    - XML: a truncated part (an element left open) is rejected by both readers instead of being read as if complete (the streaming reader
+      returned the first rows of a cut worksheet without an error).
 
 ### Dependencies
 
@@ -106,8 +122,12 @@ upstream PR code was merged) and has a regression test.
     - empty rich-text runs (#2737); distinct rich-text shared strings in the streaming writer (#2588); dxf number format written as
       `[object Object]` (#2698);
     - internal hyperlinks (`#Sheet!A1`, `#DefinedName`) written as a `location` without an external relationship, by both writers (#2002);
-      URLs and paths ending like a sheet reference (`https://example.com/#!page1`) stay external links; `inset="NaNmm,..."` written for
-      notes whose VML textbox had no inset.
+      URLs and paths ending like a sheet reference (`https://example.com/#!page1`) stay external links, while legacy links to sheets named
+      with `'` or `#` (`Bob's!A1`, `Q#1!B2`) stay internal; `inset="NaNmm,..."` written for notes whose VML textbox had no inset;
+    - print areas and print titles written as absolute references (`$A$1:$G$20`; 4.x wrote `$A1:$G20`, and `$$A$1` for `$A$1`), by both
+      writers;
+    - a literal `_xHHHH_` in a string (`x_x0041_y`) is written escaped (`_x005F_x0041_`), as ECMA-376 requires, so that it reads back as
+      written instead of as the character U+HHHH.
 - Data lost or wrong on read:
     - rows/cells without an `r` attribute (#2962, both readers); `t="d"` ISO 8601 date cells (#2702, both readers);
     - falsy formula results (#3048); only numeric formula results converted to dates (#3111);
@@ -125,11 +145,18 @@ upstream PR code was merged) and has a regression test.
 - Streaming reader: rejects instead of hanging or crashing on truncated/corrupt input and always removes its temp files (#2148); waits for
   `workbook.xml`/styles before parsing sheets stored earlier in the zip (#2790, #2915, #3095); UTF-8 characters split across chunks (#1665,
   #2894, #3102); column definitions, hidden rows, sheet format properties (#2800); absolute relationship targets (#2671); options passed to
-  `read()`/`parse()` merged with the defaults; `sharedStrings: 'emit'` emits again.
+  `read()`/`parse()` merged with the defaults; `sharedStrings: 'emit'` emits again; shared strings read like the document reader does (rich
+  text fonts lost their colour, name and charset, phonetic runs replaced the text); a failed close of the temp file of a skipped worksheet
+  is no longer an unhandled rejection.
 - Document model: setting a style property on a cell no longer restyles every cell sharing a loaded style, while merged cells still share
   the master style (#2055, #2781); `spliceRows` stale rows (#1600); column keys / table names / CSV headers named like `Object.prototype`
   members (#2080), with `worksheet.tables` kept a plain object; assigning the model of a merged cell keeps its master, and releasing a merge
-  reference twice no longer throws.
+  reference twice no longer throws; a value inserted inside a merge by column key is checked with the keys that `row.values` uses (a value
+  could be lost); setting `worksheet.model` replaces the merges of the worksheet.
+- `writeBuffer()` of a small workbook no longer waits for a timer, so it settles under fake timers (Vitest, Jest, sinon); see the README
+  (Known Issues > Fake timers) for what still does.
+- Browser bundle: loading it in Node.js 25+ no longer prints a `localStorage` ExperimentalWarning (from the `util-deprecate` and `util`
+  polyfills, replaced by small shims); the bundle is about 6% smaller.
 - CSV: whitespace-only cells stay strings (#2752); integers beyond `Number.MAX_SAFE_INTEGER` stay strings (#1743); `parserOptions.headers`
   support (#2080), keeping the values of columns with empty or repeated header names; `read()` rejects instead of crashing or hanging when a
   listener throws (e.g. a header row wider than 16,384 columns) or the input stream fails.
