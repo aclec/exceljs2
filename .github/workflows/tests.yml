@@ -165,9 +165,10 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
       - run: bun run check:install-scripts
-      # no dependency lifecycle script may run, so the tests must pass without any of them
+      # no dependency lifecycle script may run, so build and tests must work without any of them
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun pm untrusted
+      - run: bun run build
+      - run: bun run test:unit
 
   benchmark:
     name: Measure performance impact of changes

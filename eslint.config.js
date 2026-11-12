@@ -8,7 +8,9 @@ const n = require('eslint-plugin-n');
 const globals = require('globals');
 const prettier = require('eslint-config-prettier');
 
-const NODE_ONLY_MODULES = ['child_process', 'fs', 'http', 'https', 'net', 'os', 'path', 'vm', 'worker_threads'];
+// crypto is listed because its browser shim (scripts/browser-shims/crypto.js) only implements what
+// lib/utils/encryptor.js uses (getHashes, createHash, randomBytes): other lib files go through Encryptor.
+const NODE_ONLY_MODULES = ['child_process', 'crypto', 'fs', 'http', 'https', 'net', 'os', 'path', 'vm', 'worker_threads'];
 
 module.exports = [
   {
@@ -77,6 +79,7 @@ module.exports = [
       'lib/exceljs.nodejs.js',
       'lib/stream/**',
       'lib/csv/csv.js', // CSV#readFile / CSV#writeFile
+      'lib/utils/encryptor.js', // crypto, polyfilled in the bundle by scripts/browser-shims/crypto.js
       'lib/utils/utils.js', // utils.fs.exists, used by readFile
       'lib/xlsx/xlsx.js', // XLSX#readFile / XLSX#writeFile
     ],

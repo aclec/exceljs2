@@ -29,6 +29,8 @@
     "./excel.js": "./excel.js",
     "./dist/*": "./dist/*",
     "./lib/*.js": "./lib/*.js",
+    "./lib/*.json": "./lib/*.json",
+    "./lib/*.xml": "./lib/*.xml",
     "./lib/*": "./lib/*.js"
   },
   "files": [

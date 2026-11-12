@@ -31,6 +31,9 @@ const ALIASES = {
   util: polyfill('util'),
 };
 
+// lib/ and its dependencies may use either the bare or the node: prefixed specifier
+for (const name of Object.keys(ALIASES)) ALIASES[`node:${name}`] = ALIASES[name];
+
 const BUNDLES = [
   {entry: 'lib/exceljs.browser.js', name: 'exceljs'},
   {entry: 'lib/exceljs.bare.js', name: 'exceljs.bare'},

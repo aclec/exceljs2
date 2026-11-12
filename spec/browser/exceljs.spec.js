@@ -81,9 +81,12 @@ describe('ExcelJS in the browser', function() {
   });
 
   after(async () => {
-    if (context) await context.close();
-    if (server) await new Promise(resolve => server.close(resolve));
-    if (userDataDir) fs.rmSync(userDataDir, {recursive: true, force: true});
+    try {
+      if (context) await context.close();
+    } finally {
+      if (server) await new Promise(resolve => server.close(resolve));
+      if (userDataDir) fs.rmSync(userDataDir, {recursive: true, force: true});
+    }
   });
 
   BUNDLES.forEach(bundle => {
