@@ -164,6 +164,40 @@ describe('xlsx read robustness', function() {
     });
   });
 
+  describe('hyperlinks', () => {
+    const linkBuffer = () =>
+      baseWorkbookBuffer((wb, ws) => {
+        wb.addWorksheet('Sheet2');
+        ws.getCell('B1').value = {text: 'internal', hyperlink: "#'Sheet2'!A1"};
+        ws.getCell('C1').value = {text: 'external', hyperlink: 'https://example.com/page'};
+        ws.getCell('D1').value = {text: 'anchor', hyperlink: 'https://example.com/doc'};
+        ws.getCell('E1').value = {text: 'location only', hyperlink: 'https://example.com/x'};
+      });
+    // what Excel writes: an anchor in an external target, and an internal link without r:id
+    const excelStyle = xml =>
+      xml
+        .replace('<hyperlink ref="D1" r:id="rId3"/>', '<hyperlink ref="D1" r:id="rId3" location="part2"/>')
+        .replace('<hyperlink ref="E1" r:id="rId4"/>', '<hyperlink ref="E1" location="Sheet2!B3" display="x"/>');
+    const expectLinks = ws => {
+      expect(ws.getCell('B1').hyperlink).to.equal("#'Sheet2'!A1");
+      expect(ws.getCell('C1').hyperlink).to.equal('https://example.com/page');
+      expect(ws.getCell('D1').hyperlink).to.equal('https://example.com/doc#part2');
+      expect(ws.getCell('E1').hyperlink).to.equal('#Sheet2!B3');
+      expect(ws.getCell('E1').text).to.equal('location only');
+    };
+
+    it('reads the location of internal and external links', async () => {
+      const buffer = await tamper(await linkBuffer(), {[SHEET]: excelStyle});
+      expectLinks((await load(buffer)).getWorksheet('Sheet1'));
+    });
+
+    it('round-trips internal, external and anchored links', async () => {
+      const buffer = await tamper(await linkBuffer(), {[SHEET]: excelStyle});
+      const wb = await load(buffer);
+      expectLinks((await load(await wb.xlsx.writeBuffer())).getWorksheet('Sheet1'));
+    });
+  });
+
   describe('column widths', () => {
     it('keeps a width of 9 when the sheet default column width differs', async () => {
       const buffer = await baseWorkbookBuffer((wb, ws) => {
