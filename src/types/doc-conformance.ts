@@ -76,7 +76,13 @@ export type CellConforms = Assert<
     Check<
         Cell,
         Public.Cell,
-        // TODO(align)
+        // `value` returns two kinds of values that index.d.ts `CellValue` keeps out on purpose (rule 2: they come only
+        // from invalid input; describing them would make every cell value an untyped `object`):
+        // - a JSON value: any object that is not a cell value (only from a value outside `CellValue`, such as an
+        //   untyped one, or from the falsy-marker quirk: `{ text: "", hyperlink }`, `{ sharedString: 0 }`...);
+        // - a formula read from a malformed file with neither `formula` nor `sharedFormula` (a shared formula clone
+        //   whose `si` has no master): its value is `{ result }`.
+        // `merge` / `isMergedTo` take a Cell: they mismatch only through the `value` of that Cell.
         "value" | "merge" | "isMergedTo"
     >
 >;
@@ -85,7 +91,7 @@ export type RowConforms = Assert<
     Check<
         Row,
         Public.Row,
-        // TODO(align)
+        // Only through `Cell.value` (see CellConforms): `values` holds cell values, the others give or take Cells.
         "values" | "findCell" | "getCellEx" | "getCell" | "eachCell"
     >
 >;
@@ -94,7 +100,7 @@ export type ColumnConforms = Assert<
     Check<
         Column,
         Public.Column,
-        // TODO(align)
+        // Only through `Cell.value` (see CellConforms): `values` holds cell values, `eachCell` gives Cells.
         "values" | "eachCell"
     >
 >;
