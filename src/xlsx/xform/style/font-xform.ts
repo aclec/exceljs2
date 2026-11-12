@@ -3,6 +3,7 @@ import type XmlStream from "../../../utils/xml-stream";
 import type { FontModel } from "../../../types";
 import ColorXform from "./color-xform";
 import BooleanXform from "../simple/boolean-xform";
+import FloatXform from "../simple/float-xform";
 import IntegerXform from "../simple/integer-xform";
 import StringXform from "../simple/string-xform";
 import UnderlineXform from "./underline-xform";
@@ -65,7 +66,8 @@ class FontXform extends BaseXform<FontModel> {
             scheme: { prop: "scheme", xform: new StringXform({ tag: "scheme", attr: "val" }) },
             shadow: { prop: "shadow", xform: new BooleanXform({ tag: "shadow", attr: "val" }) },
             strike: { prop: "strike", xform: new BooleanXform({ tag: "strike", attr: "val" }) },
-            sz: { prop: "size", xform: new IntegerXform({ tag: "sz", attr: "val" }) },
+            // CT_FontSize: xsd:double (e.g. 10.5)
+            sz: { prop: "size", xform: new FloatXform({ tag: "sz", attr: "val" }) },
         };
         map[this.options.fontNameTag] = {
             prop: "name",

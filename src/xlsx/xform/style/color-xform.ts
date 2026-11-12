@@ -5,8 +5,8 @@ import BaseXform from "../base-xform";
 
 /**
  * A color element (CT_Color, `<color>` by default; `<fgColor>`, `<bgColor>`, `<tabColor>`... with another name):
- * `rgb`, `theme` (with `tint`) or `indexed`. A model without any of them renders `auto="1"`; an `auto` color (or one
- * without a known attribute) parses as `undefined`.
+ * `rgb`, `theme` (with `tint`), `indexed` or `auto`. A model without `argb`, `theme` and `indexed` renders `auto="1"`;
+ * an `auto` color parses as `{ auto: true }`, an element without any of them as `undefined`.
  */
 class ColorXform extends BaseXform<ColorModel> {
     /** The name of the element. */
@@ -38,6 +38,7 @@ class ColorXform extends BaseXform<ColorModel> {
             } else if (model.indexed !== undefined) {
                 xmlStream.addAttribute("indexed", model.indexed);
             } else {
+                // `auto: true`, or a color without any (CT_Color would mean no color)
                 xmlStream.addAttribute("auto", "1");
             }
             xmlStream.closeNode();
@@ -60,6 +61,9 @@ class ColorXform extends BaseXform<ColorModel> {
                 this.model = model;
             } else if (indexed) {
                 this.model = { indexed: parseInt(indexed, 10) };
+            } else if (node.attributes.auto === "1" || node.attributes.auto === "true") {
+                // xsd:boolean
+                this.model = { auto: true };
             } else {
                 this.model = undefined;
             }

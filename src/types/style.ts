@@ -24,8 +24,9 @@ import type {
 import type { ValueType } from "../doc/enums";
 
 /**
- * A color (color-xform): index.d.ts `Color`, all parts optional: `{ argb }`, `{ theme, tint? }` or `{ indexed }`. `{}`
- * renders `auto="1"`; an `auto` color parses as `undefined`.
+ * A color (color-xform): index.d.ts `Color`, all parts optional: `{ argb }`, `{ theme, tint? }`, `{ indexed }` or
+ * `{ auto: true }`. A color without `argb`, `theme` and `indexed` (e.g. `{}`) renders `auto="1"`; an element without any
+ * color attribute parses as `undefined`.
  *
  * Producer: color-xform parse, the application. Consumer: color-xform render.
  */
@@ -33,14 +34,15 @@ export type ColorModel = Partial<Color>;
 
 /**
  * A font (font-xform): index.d.ts `Font`, all parts optional. Only the elements present in the file become keys when
- * parsing; `size` is parsed with `parseInt` (IntegerXform: `sz="10.5"` reads as 10); `underline` parses as `true` or
+ * parsing; `size` is parsed with `parseFloat` (`sz="10.5"` reads as 10.5); `underline` parses as `true` or
  * the raw `val` string.
  */
 export type FontModel = Partial<Font>;
 
 /**
  * A gradient stop of a {@link FillModel} (index.d.ts `GradientStop`: `position` 0..1, parsed with parseFloat). A parsed
- * stop has no `color` without a `<color>` child, and `color: undefined` for an auto color.
+ * stop has no `color` without a `<color>` child, and `color: undefined` for a `<color>` without color attribute; a stop
+ * without color renders `<color/>` (CT_GradientStop requires the element).
  */
 export type GradientStopModel = GradientStop;
 

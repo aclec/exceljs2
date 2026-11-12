@@ -256,7 +256,10 @@ export interface FillPattern {
 /** A color of a gradient fill, at a position (0 to 1) of the gradient. */
 export interface GradientStop {
     position: number;
-    /** The color; `undefined` for an automatic color read from a file (`<color auto="1"/>`). */
+    /**
+     * The color. A stop without color is written with an empty `<color/>` (no color attribute); a stop read from a file
+     * whose `<color>` has no color attribute has none.
+     */
     color?: Partial<Color>;
 }
 
@@ -309,7 +312,7 @@ export type Fill = FillPattern | FillGradientAngle | FillGradientPath;
 /** A font. A font read from a file has only the properties the file sets. */
 export interface Font {
     name: string;
-    /** The size in points. Read as an integer: a size of 10.5 in a file reads as 10. */
+    /** The size in points (e.g. 10.5). */
     size: number;
     /** The font family (1 Roman, 2 Swiss, 3 Modern, 4 Script, 5 Decorative). */
     family: number;
@@ -350,7 +353,7 @@ export type BorderStyle =
 
 /**
  * A color: `argb`, `theme` (with an optional `tint`) or `indexed`; when several are set, only the first of them in this
- * order is written. `{}` writes an automatic color; an automatic color read from a file is `undefined`.
+ * order is written; a color with none of them (`{ auto: true }`, or `{}`) is written as the automatic color.
  */
 export interface Color {
     /**
@@ -368,6 +371,12 @@ export interface Color {
 
     /** A color of the legacy indexed palette (64 is the system foreground color). */
     indexed: number;
+
+    /**
+     * The automatic color (`<color auto="1"/>`): the system color of the context (e.g. the window text color). Read from a
+     * file as `{ auto: true }`; a color without `argb`, `theme` and `indexed` is written as automatic.
+     */
+    auto: boolean;
 }
 
 /** A border edge: a style and its color. An edge read from a file with a color but no style is `{ color }`. */
@@ -495,8 +504,11 @@ export interface DataValidations {
 export interface DataValidation {
     type: DataValidationType;
     /**
-     * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`); absent for `"any"`. Read from a
-     * file: numbers for `whole`, `decimal` and `textLength`, Dates for `date`, else the text of the formula.
+     * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`, `["$B$1"]`, `["TODAY()"]`); absent for
+     * `"any"`. A string is written as is (a formula), a number as is, a Date as its serial date; for `date`, a number is
+     * read as milliseconds since 1970 (`new Date(number)`). Writing an invalid Date or a number that is not finite
+     * throws. Read from a file: a number literal is a number for `whole`, `decimal` and `textLength` and a Date for
+     * `date`; any other formula (a reference, a function...) is its text.
      */
     formulae?: (string | number | Date)[];
     /** Whether an empty cell is valid. */
@@ -1641,8 +1653,8 @@ export type TimePeriodTypes =
     "lastWeek" | "thisWeek" | "nextWeek" | "yesterday" | "today" | "tomorrow" | "last7Days" | "lastMonth" | "thisMonth" | "nextMonth";
 
 /**
- * The icon set of an `iconSet` rule. `3Triangles`, `3Stars` and `5Boxes` (Excel 2010) are written in the x14 extension of
- * the worksheet.
+ * An icon set (ST_IconSetType). `3Triangles`, `3Stars`, `5Boxes` and `NoIcons` (Excel 2010) are written in the x14
+ * extension of the worksheet. `NoIcons` has a single "icon": none.
  */
 export type IconSetTypes =
     | "5Arrows"
@@ -1752,8 +1764,8 @@ export interface ColorScaleRuleType extends ConditionalFormattingBaseRule {
     /** The thresholds of the scale, from the lowest (required: writing a rule without them throws). */
     cfvo: Cvfo[];
     /**
-     * The color of each threshold (required: writing a rule without them throws); `undefined` for an automatic color read
-     * from a file.
+     * The color of each threshold (required: writing a rule without them throws). `undefined` is written as an empty
+     * `<color/>` (no color attribute), and a `<color>` without color attribute read from a file is `undefined`.
      */
     color: (Partial<Color> | undefined)[];
 }
@@ -1766,8 +1778,8 @@ export interface CfIcon {
     /** The icon set the icon comes from (`"NoIcons"`: no icon). */
     iconSet: IconSetTypes;
     /**
-     * The 0-based index of the icon in `iconSet`. Writing the rule sets it to the index of the icon in `icons` (it mutates
-     * it).
+     * The 0-based index of the icon in `iconSet` (from 0 to its number of icons - 1), written as is. Required by the file
+     * format but for `"NoIcons"` (written as 0 when absent): writing a rule whose icon has no valid `iconId` throws.
      */
     iconId?: number;
 }
@@ -1780,19 +1792,22 @@ export interface IconSetRuleType extends ConditionalFormattingBaseRule {
     /** Whether the order of the icons is reversed. */
     reverse?: boolean;
     /**
-     * Write the rule in the x14 extension of the worksheet, with its `icons` (`custom="1"` is written when the rule has
-     * `icons`). Not set on the rules read from a file: they have `icons` instead.
+     * Whether the icon set shows custom `icons` (Excel 2010). A rule with `custom` or `icons` is written in the x14
+     * extension of the worksheet only, with `custom="1"` when it has `icons`. A rule read from the extension has the
+     * `custom` attribute of the file (`true` with its `icons`).
      */
     custom?: boolean;
     /**
-     * The icon set (`"3TrafficLights1"` when absent). A rule read from a file without icon set (the default) has
-     * `"3TrafficLights"`: not written in `<conditionalFormatting>` (the default), but written as is in the x14
-     * extension.
+     * The icon set (`"3TrafficLights1"`, the default, when absent; a rule read from a file without icon set has
+     * `"3TrafficLights1"`). Writing a rule whose icon set is not one of {@link IconSetTypes} throws.
      */
-    iconSet?: IconSetTypes | "3TrafficLights";
+    iconSet?: IconSetTypes;
     /** The thresholds, one per icon, from the lowest (required: writing a rule without them throws). */
     cfvo: Cvfo[];
-    /** The custom icons, one per threshold: written in the x14 extension, with `custom`. Set on the rules read from it. */
+    /**
+     * The custom icons, one per threshold (writing a rule with another number of icons throws): written in the x14
+     * extension, with `custom="1"`. Set on the rules read from it that have some.
+     */
     icons?: CfIcon[];
 }
 

@@ -1905,7 +1905,7 @@ worksheet.addConditionalFormatting({
 | ------------- | -------- | ------- | ----------- |
 | type          |          |         | 'iconSet' |
 | priority      | Y        | &lt;auto&gt;  | determines priority ordering of styles |
-| iconSet       | Y        | 3TrafficLights | name of icon set to use |
+| iconSet       | Y        | 3TrafficLights1 | name of icon set to use |
 | showValue     |          | true    | Specifies whether the cells in the applied range display the icon and cell value, or the icon only |
 | reverse       |          | false   | Specifies whether the icons in the icon set specified in iconSet are show in reserve order. If custom equals "true" this value must be ignored |
 | custom        |          |  false  | Specifies whether a custom set of icons is used |

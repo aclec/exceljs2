@@ -25,9 +25,6 @@ class DxfExtXform extends DxfXform {
     }
 }
 
-// the icon sets of Excel 2010+, written in the x14 extension only
-const EXT_ICONS: ReadonlySet<string | undefined> = new Set(["3Triangles", "3Stars", "5Boxes"]);
-
 /** The attributes of the `<x14:cfRule>` of a formula rule that depend on its type. */
 interface FormulaRuleAttributes {
     type: string;
@@ -86,9 +83,7 @@ class CfRuleExtXform extends CompositeXform<ConditionalFormattingRuleModel> {
             return DatabarExtXform.isExt(rule);
         }
         if (rule.type === "iconSet") {
-            if (rule.custom || EXT_ICONS.has(rule.iconSet)) {
-                return true;
-            }
+            return CfRuleXform.isX14IconSet(rule);
         }
         return false;
     }

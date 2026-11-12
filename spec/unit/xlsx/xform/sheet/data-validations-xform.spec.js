@@ -1,6 +1,12 @@
 const testXformHelper = require("../test-xform-helper");
 
 const DataValidationsXform = verquire("xlsx/xform/sheet/data-validations-xform");
+const parseSax = verquire("utils/parse-sax");
+
+async function parse(xml) {
+    const xform = new DataValidationsXform();
+    return xform.parse(parseSax([xml]));
+}
 
 const expectations = [
     {
@@ -147,6 +153,42 @@ const expectations = [
     `,
         tests: ["render", "parse"],
     },
+    {
+        title: "formulas that are not literal values",
+        create: () => new DataValidationsXform(),
+        preparedModel: {
+            A1: { type: "whole", operator: "greaterThan", formulae: ["$B$1"] },
+            A2: { type: "decimal", operator: "between", formulae: ["A1+1", "MAX(C:C)"] },
+            A3: { type: "textLength", operator: "lessThan", formulae: ["LEN(B3)"] },
+            A4: { type: "date", operator: "greaterThan", formulae: ["TODAY()"] },
+        },
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        xml: `
+      <dataValidations count="4">
+        <dataValidation type="whole" operator="greaterThan" sqref="A1"><formula1>$B$1</formula1></dataValidation>
+        <dataValidation type="decimal" sqref="A2"><formula1>A1+1</formula1><formula2>MAX(C:C)</formula2></dataValidation>
+        <dataValidation type="textLength" operator="lessThan" sqref="A3"><formula1>LEN(B3)</formula1></dataValidation>
+        <dataValidation type="date" operator="greaterThan" sqref="A4"><formula1>TODAY()</formula1></dataValidation>
+      </dataValidations>
+    `,
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
+        title: "a date",
+        create: () => new DataValidationsXform(),
+        preparedModel: { A1: { type: "date", operator: "lessThan", formulae: [new Date(Date.UTC(2016, 0, 1))] } },
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        xml: `
+      <dataValidations count="1">
+        <dataValidation type="date" operator="lessThan" sqref="A1"><formula1>42370</formula1></dataValidation>
+      </dataValidations>
+    `,
+        tests: ["render", "renderIn", "parse"],
+    },
 ];
 
 describe("DataValidationsXform", () => {
@@ -157,6 +199,46 @@ describe("DataValidationsXform", () => {
         for (const key of ["$A$1:B2", "B2:A1", "a1", "foo", "#REF!", "Sheet1!#REF!"]) {
             const xform = new DataValidationsXform();
             expect(() => xform.toXml({ [key]: { type: "list", formulae: ['"a"'] } }), key).to.throw(/Invalid data validation address/);
+        }
+    });
+});
+
+describe("DataValidationsXform formulae", () => {
+    it("reads the number literals of whole, decimal and textLength rules as numbers", async () => {
+        const model = await parse(
+            '<dataValidations count="3">' +
+                '<dataValidation type="decimal" sqref="A1"><formula1>-1.5E-3</formula1><formula2>+.5</formula2></dataValidation>' +
+                '<dataValidation type="whole" sqref="A2"><formula1>-7</formula1><formula2>1e3</formula2></dataValidation>' +
+                '<dataValidation type="textLength" sqref="A3"><formula1>2.</formula1><formula2>0x10</formula2></dataValidation>' +
+                "</dataValidations>"
+        );
+        expect(model.A1.formulae).to.deep.equal([-0.0015, 0.5]);
+        expect(model.A2.formulae).to.deep.equal([-7, 1000]);
+        // 0x10 is not a number literal of a formula
+        expect(model.A3.formulae).to.deep.equal([2, "0x10"]);
+    });
+
+    it("reads a formula of a number rule in linear time", async () => {
+        // a long run of digits that is not a number literal in the end: the literal test must not backtrack
+        const formula = `${"1".repeat(100000)}x`;
+        const start = Date.now();
+        const model = await parse(
+            `<dataValidations count="1"><dataValidation type="decimal" sqref="A1"><formula1>${formula}</formula1></dataValidation></dataValidations>`
+        );
+        expect(Date.now() - start).to.be.below(200);
+        expect(model.A1.formulae).to.deep.equal([formula]);
+    });
+
+    it("rejects a date or a number that is not a value", () => {
+        const cases = [
+            [{ type: "date", formulae: [new Date(NaN)] }, /Invalid date/],
+            [{ type: "date", formulae: [NaN] }, /Invalid date/],
+            [{ type: "whole", formulae: [NaN] }, /not a finite number/],
+            [{ type: "decimal", formulae: [Infinity] }, /not a finite number/],
+        ];
+        for (const [dataValidation, error] of cases) {
+            const xform = new DataValidationsXform();
+            expect(() => xform.toXml({ A1: dataValidation }), String(dataValidation.formulae[0])).to.throw(Error, error);
         }
     });
 });

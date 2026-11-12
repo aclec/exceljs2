@@ -9,7 +9,7 @@ const expectations = [
             return new IconSetXform();
         },
         preparedModel: {
-            iconSet: "3TrafficLights",
+            iconSet: "3TrafficLights1",
             cfvo: [
                 { type: "percent", value: 0 },
                 { type: "percent", value: 33 },

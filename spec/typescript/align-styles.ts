@@ -15,6 +15,7 @@ export function colorsFontsBorders(): void {
     cell.font = { color: { indexed: 64 } };
     cell.border = { top: { style: "thin" }, bottom: { style: "double" }, color: { argb: "FFFF0000" } };
     worksheet.properties.tabColor = { theme: 5, tint: 0.4 };
+    cell.font = { size: 10.5, color: { auto: true } };
     const tint: number | undefined = cell.font?.color?.tint;
     const shadow: boolean | undefined = cell.font?.shadow;
     void tint;
@@ -94,6 +95,13 @@ export function conditionalFormatting(): void {
     const noColor: ExcelJS.ConditionalFormattingRule = { type: "colorScale", cfvo: [] };
     // @ts-expect-error an icon set needs its thresholds (writing it throws)
     const noIconCfvo: ExcelJS.ConditionalFormattingRule = { type: "iconSet", iconSet: "3Arrows" };
+    const legacyIconSet: ExcelJS.ConditionalFormattingRule = {
+        type: "iconSet",
+        // @ts-expect-error not an icon set of the file format (the default is 3TrafficLights1)
+        iconSet: "3TrafficLights",
+        cfvo: [],
+    };
+    void legacyIconSet;
     // @ts-expect-error a formula is a text, a number or a boolean
     const dateFormula: ExcelJS.ConditionalFormattingRule = { type: "cellIs", formulae: [new Date()] };
     void noCfvo;
@@ -128,4 +136,5 @@ export function tablesAndValidations(): void {
         rows: [[Symbol("not a value")]],
     });
     cell.dataValidation = { type: "whole", operator: "between", formulae: [1, 10], errorStyle: "warning", showErrorMessage: true };
+    cell.dataValidation = { type: "date", operator: "greaterThan", formulae: ["TODAY()"] };
 }

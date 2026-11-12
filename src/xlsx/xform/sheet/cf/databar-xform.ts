@@ -11,7 +11,7 @@ import CfvoXform from "./cfvo-xform";
 export interface DatabarModel {
     cfvo: CfvoModel[];
     showValue: boolean | undefined;
-    /** The color of the bars (`undefined` for an `auto` color). */
+    /** The color of the bars (`undefined` for a `<color>` without color attribute). */
     color?: ColorModel | undefined;
 }
 
@@ -88,8 +88,8 @@ class DatabarXform extends CompositeXform<DatabarModel> {
                 model.cfvo.push(this.cfvoXform.model!);
                 break;
             case "color":
-                // color-xform is not typed yet: its model is a ColorModel (undefined for an auto color)
-                model.color = this.colorXform.model as ColorModel | undefined;
+                // undefined for a <color> without color attribute
+                model.color = this.colorXform.model ?? undefined;
                 break;
             default:
                 break;
