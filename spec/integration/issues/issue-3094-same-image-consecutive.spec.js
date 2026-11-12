@@ -1,4 +1,4 @@
-const JSZip = require("jszip");
+const { readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -7,9 +7,9 @@ const RED = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const BLUE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==", "base64");
 
 // media file name of every picture of a drawing, in anchor order
-async function pictureTargets(zip, drawing) {
-    const xml = await zip.file(`xl/drawings/${drawing}.xml`).async("string");
-    const rels = await zip.file(`xl/drawings/_rels/${drawing}.xml.rels`).async("string");
+async function pictureTargets(buffer, drawing) {
+    const xml = await readPart(buffer, `xl/drawings/${drawing}.xml`);
+    const rels = await readPart(buffer, `xl/drawings/_rels/${drawing}.xml.rels`);
     const targets = {};
     rels.replace(/<Relationship ([^>]*)\/>/g, (m, attrs) => {
         targets[attrs.match(/Id="([^"]+)"/)[1]] = attrs.match(/Target="([^"]+)"/)[1];
@@ -33,11 +33,10 @@ describe("github issues", () => {
         });
 
         const buffer = await wb.xlsx.writeBuffer();
-        const zip = await JSZip.loadAsync(buffer);
         const R = "../media/image1.png";
         const B = "../media/image2.png";
-        expect(await pictureTargets(zip, "drawing1")).to.deep.equal([R, R, B, R, B, B]);
-        expect(await pictureTargets(zip, "drawing2")).to.deep.equal([B, R, R]);
+        expect(await pictureTargets(buffer, "drawing1")).to.deep.equal([R, R, B, R, B, B]);
+        expect(await pictureTargets(buffer, "drawing2")).to.deep.equal([B, R, R]);
 
         const wb2 = new ExcelJS.Workbook();
         await wb2.xlsx.load(buffer);

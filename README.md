@@ -68,15 +68,23 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 * **Formulas.** Formulas longer than Excel's limit of 8,192 characters are rejected with an error
  when ExcelJS has to analyse them (translating a shared formula to another cell, `cell.dependencies`)
  instead of being scanned with regular expressions.
+* **Decompressed size (zip bombs).** Both readers count the bytes they inflate and reject a file
+ as soon as a part is larger than `maxEntrySize`, all parts together are larger than
+ `maxUncompressedSize`, or a part over 10 MiB is compressed more than `maxCompressionRatio`:1.
+ Defaults: 1 GiB per part, 2 GiB in total for `xlsx.load` / `read` / `readFile` (which keep every
+ part in memory; Node.js cannot parse a part over about 512 MiB anyway); 16 GiB per part and 32 GiB
+ in total for the streaming `WorkbookReader` (which also bounds its temporary files); a ratio of
+ 1000 for both (DEFLATE cannot exceed about 1032). Lower them for untrusted uploads, for example
+ `xlsx.load(buffer, {maxUncompressedSize: 100 * 1024 * 1024})`.
 * **Not handled by ExcelJS (application responsibility):**
   * **CSV formula injection.** `csv.write`/`csv.writeFile` output cell text as is. Values starting
    with `=`, `+`, `-`, `@`, tab or carriage return are not neutralised; escape untrusted data
    before exporting CSV that will be opened in a spreadsheet application.
   * **Hyperlinks.** Hyperlink targets read from a file (for example `javascript:` or `file:` URLs)
    are returned unchanged. Validate them before rendering them in HTML or following them.
-  * **Decompressed size.** There is no limit on the decompressed size of the parts of an xlsx
-   file (zip bombs). Limit the size of uploads and consider parsing in a worker or a separate
-   process with a memory limit.
+  * **Resource limits.** Even within the limits above, a large workbook needs memory and CPU time.
+   Limit the size of uploads and consider parsing in a worker or a separate process with a memory
+   limit.
 
 # New Features!
 
@@ -2160,6 +2168,9 @@ Options supported when reading XLSX files.
 
 | Field            |  Required   |    Type     |Description  |
 | ---------------- | ----------- | ----------- | ----------- |
+| maxEntrySize     |     N       |  Number     | Maximum decompressed size of one part (zip entry) of the file, in bytes. Default is 1 GiB. See [Security & limits](#security--limits). |
+| maxUncompressedSize | N        |  Number     | Maximum decompressed size of all parts of the file, in bytes. Default is 2 GiB. |
+| maxCompressionRatio | N        |  Number     | Maximum compression ratio of a part larger than 10 MiB. Default is 1000. |
 | ignoreNodes      |     N       |  Array      | A list of node names to ignore while loading the XLSX document. Improves performance in some situations. <br/> Available: `sheetPr`, `dimension`, `sheetViews `, `sheetFormatPr`, `cols `, `sheetData`, `autoFilter `, `mergeCells `, `rowBreaks`, `hyperlinks `, `pageMargins`, `dataValidations`, `pageSetup`, `headerFooter `, `printOptions `, `picture`, `drawing`, `sheetProtection`, `tableParts `, `conditionalFormatting`, `extLst`,|
 
 ```javascript
@@ -2391,7 +2402,7 @@ The constructor takes an optional options object with the following fields:
 | filename         | If stream not specified, this field specifies the path to a file to write the XLSX workbook to. |
 | useSharedStrings | Specifies whether to use shared strings in the workbook. Default is `false`. |
 | useStyles        | Specifies whether to add style information to the workbook. Styles can add some performance overhead. Default is `false`. |
-| zip              | [Zip options](https://www.archiverjs.com/global.html#ZipOptions) that ExcelJS internally passes to [Archiver](https://github.com/archiverjs/node-archiver). Default is `undefined`. |
+| zip              | Zip options: `level` (0 to 9, 0 stores the parts uncompressed, default 6), `forceZip64` (write ZIP64 records even when they are not needed; they are added automatically past 4 GiB or 65,535 entries) and `comment`. The same options are accepted by `xlsx.write` / `writeBuffer` / `writeFile`. Default is `undefined`. |
 
 If neither stream nor filename is specified in the options, the workbook writer will create a StreamBuf object
  that will store the contents of the XLSX workbook in memory.
@@ -2464,13 +2475,14 @@ The constructor takes a required input argument and an optional options argument
 
 | Argument              | Description |
 | --------------------- | ----------- |
-| input (required)      | Specifies the name of the file or the readable stream from which to read the XLSX workbook. |
+| input (required)      | Specifies the name of the file or the readable stream from which to read the XLSX workbook: a Node.js stream (or any object with a `pipe` method), a web `ReadableStream` or an async iterable of byte chunks. |
 | options (optional)    | Specifies how to handle the event types occuring during the read parsing. |
 | options.entries       | Specifies whether to emit entries (`'emit'`) or not (`'ignore'`). Default is `'ignore'`. |
 | options.sharedStrings | Specifies whether to cache shared strings (`'cache'`), which inserts them into the respective cell values, or whether to emit them (`'emit'`) or ignore them (`'ignore'`), in both of which case the cell value will be a reference to the shared string's index. Default is `'cache'`. |
 | options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.worksheets    | Specifies whether to emit worksheets (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
+| options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to temporary files, which these limits bound too. |
 
 ```js
 const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader('./file.xlsx');

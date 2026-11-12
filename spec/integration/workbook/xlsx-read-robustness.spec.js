@@ -1,8 +1,7 @@
 // Reading xlsx files written by other producers (Excel, LibreOffice, openpyxl, POI, hand-edited):
 // legal-but-unusual XML must load, malformed parts must not crash with a TypeError.
 // Fixtures are built with ExcelJS and patched with xlsx-tamper so they stay readable.
-const JSZip = require("jszip");
-const { baseWorkbookBuffer, tamper, readPart } = require("../../utils/xlsx-tamper");
+const { baseWorkbookBuffer, editParts, tamper, readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -332,14 +331,13 @@ describe("xlsx read robustness", function () {
                 ws.addImage(wb.addImage({ buffer: PNG, extension: "png" }), "E5:F6");
             });
         const setTarget = (type, target) => (xml) => xml.replace(new RegExp(`(relationships/${type}" Target=")[^"]+"`), `$1${target}"`);
-        const moveParts = async (buffer, moves) => {
-            const zip = await JSZip.loadAsync(buffer);
-            for (const [from, to] of Object.entries(moves)) {
-                zip.file(to, await zip.file(from).async("nodebuffer"));
-                zip.remove(from);
-            }
-            return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-        };
+        const moveParts = async (buffer, moves) =>
+            editParts(buffer, (parts) => {
+                for (const [from, to] of Object.entries(moves)) {
+                    parts[to] = parts[from];
+                    delete parts[from];
+                }
+            });
         const expectEverything = (ws) => {
             expect(ws.getCell("B1").note.texts).to.deep.equal([{ text: "a " }, { text: "note" }]);
             expect(ws.getCell("B1").note.margins.inset).to.deep.equal([0.25, 0.25, 0.35, 0.35]);
@@ -424,14 +422,13 @@ describe("xlsx read robustness", function () {
         });
 
         it("takes the note properties from the legacyDrawing, not a header/footer vml", async () => {
-            const zip = await JSZip.loadAsync(await richBuffer());
-            zip.file(
-                "xl/drawings/vmlDrawing2.vml",
-                '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">' +
+            const withVml = editParts(await richBuffer(), (parts) => {
+                parts["xl/drawings/vmlDrawing2.vml"] =
+                    '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">' +
                     '<v:shape id="LH" type="#_x0000_t75" style="position:absolute;width:10pt;height:10pt">' +
-                    '<v:imagedata o:relid="rId1" o:title="img"/></v:shape></xml>'
-            );
-            const buffer = await tamper(await zip.generateAsync({ type: "nodebuffer" }), {
+                    '<v:imagedata o:relid="rId1" o:title="img"/></v:shape></xml>';
+            });
+            const buffer = await tamper(withVml, {
                 [RELS]: (xml) =>
                     xml.replace(
                         /(<Relationships[^>]*>)/,

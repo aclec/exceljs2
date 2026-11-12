@@ -149,3 +149,39 @@ browser projects that set `"types": []`.
 
 The typings use `get`/`set` accessor declarations in interfaces, which require TypeScript 4.3 or later; they are tested with TypeScript 5.9,
 6.0 and 7.0.
+
+## Zip library: fflate
+
+`archiver`, `jszip` and `unzipper` were replaced by a single zero-dependency library, [fflate](https://github.com/101arrowz/fflate)
+(^0.8.3), in the browser bundle and on Node.js and Bun. This supersedes their rows in the [Dependencies](#dependencies) table above. The zip
+records (including ZIP64) are written and read by ExcelJS itself; fflate compresses and decompresses.
+
+### `zip` option of the writers
+
+The `zip` option of `xlsx.write` / `writeBuffer` / `writeFile` was passed to JSZip, the one of the streaming `WorkbookWriter` to archiver.
+Both writers now take the same options, and the old shapes keep working:
+
+| ExcelJS 4.x                                                                        | ExcelJS 5.0                    |
+| ---------------------------------------------------------------------------------- | ------------------------------ |
+| `{compression: 'DEFLATE', compressionOptions: {level: 9}}` (JSZip)                 | `{level: 9}`                   |
+| `{zlib: {level: 9}}` (archiver)                                                    | `{level: 9}`                   |
+| `{compression: 'STORE'}` (JSZip), `{store: true}` (archiver)                       | `{level: 0}`                   |
+| `{forceZip64: true}`, `{comment}` (archiver)                                       | unchanged, now in both writers |
+| other JSZip / archiver / zlib options (`type`, `platform`, `memLevel`, `strategy`) | ignored                        |
+| an invalid `level`                                                                 | throws a `TypeError`           |
+
+### Behaviour changes
+
+- **Decompression limits.** Both readers reject files whose content inflates beyond `maxEntrySize`, `maxUncompressedSize` or
+  `maxCompressionRatio` (see the [Security & limits](README.md#security--limits) section of the README for the defaults). A legitimate file
+  above the defaults needs the option raised, e.g. `xlsx.load(buffer, {maxEntrySize: 4 * 1024 ** 3})`.
+- **ZIP64** records are written when an entry or the archive exceeds 4 GiB, or with 65,535 entries or more. In 4.x the streaming writer
+  (archiver) did so but `writeBuffer` (JSZip) did not.
+- **`xlsx.load` input**: a Buffer, a `Uint8Array`, an `ArrayBuffer` or a `Blob`. Strings (JSZip's binary strings) and other values are
+  rejected with `Can't read the zip file: expected a Buffer, a Uint8Array, an ArrayBuffer or a Blob`; use `{base64: true}` for base64.
+- **Error messages** of malformed archives changed: a truncated stream rejects with `Unexpected end of zip data` (unzipper: `FILE_ENDED`),
+  other errors start with `Invalid or unsupported zip file:`. Part names are decoded as UTF-8, like JSZip did.
+- **Streaming reader input**: besides file names and `stream.Readable`, any object with a `pipe` method (e.g. a `readable-stream` or older
+  stream), a web `ReadableStream` and an async iterable of byte chunks are accepted.
+- A failing output stream (or an unreadable image file) now rejects `write` / `writeFile` / `WorkbookWriter.commit()` instead of leaving the
+  promise pending or raising an unhandled rejection.

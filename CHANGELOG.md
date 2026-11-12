@@ -46,12 +46,10 @@ All fixes have regression tests in `spec/integration/security`.
 
 ### Dependencies
 
-- archiver ^5.0.0 → ^7.0.1
+- archiver, jszip and unzipper replaced by fflate ^0.8.3 (zero dependencies), see [Zip library](#zip-library-fflate) below
 - dayjs ^1.8.34 → ^1.11.23
 - fast-csv ^4.3.1 → ^5.0.8
-- jszip ^3.10.1 → ^3.10.2
 - saxes ^5.0.1 → ^6.0.0
-- unzipper ^0.10.11 → ^0.12.5
 - Removed `readable-stream` (replaced by `node:stream`), `tmp` (replaced by `fs.promises.mkdtemp`) and `uuid` (replaced by
   `crypto.randomUUID` / `crypto.getRandomValues`).
 - Development: bun is the package manager (`bun.lock`); mocha 12, chai 6 and tsx replace mocha 7, chai 4 and ts-node; `bun audit` reports no
@@ -108,3 +106,24 @@ upstream PR code was merged) and has a regression test.
 - README: installation with any package manager, requirements, a "Security & limits" section, streaming reader defaults (#1531), tab colour
   example (#2577), formulas without a leading `=` (#3011).
 - New [UPGRADE-5.0.md](UPGRADE-5.0.md) and [SECURITY.md](SECURITY.md).
+
+### Zip library (fflate)
+
+- `archiver` (streaming writer), `unzipper` (streaming reader) and `jszip` (document reader / writer, browser bundle) were replaced by
+  [fflate](https://github.com/101arrowz/fflate) for DEFLATE and by ExcelJS's own zip container code (`lib/utils/zip-stream.js`,
+  `lib/utils/zip-reader.js`). Runtime dependencies go from 3 zip libraries (about 80 packages) to one package without dependencies; the
+  minified browser bundle shrinks from 529.6 KiB to 479.6 KiB (gzip 150.4 KiB → 138.5 KiB).
+- Security: both readers enforce decompression limits while inflating (`maxEntrySize`, `maxUncompressedSize`, `maxCompressionRatio`), so a
+  zip bomb is rejected before it is materialised in memory or in the streaming reader's temporary files.
+- ZIP64: both writers add ZIP64 records past 4 GiB or 65,535 entries (`writeBuffer` could not before), `forceZip64` works in both.
+- The `zip` writer option takes `{level, forceZip64, comment}`; the archiver and JSZip shapes are still accepted. See
+  [UPGRADE-5.0.md](UPGRADE-5.0.md#zip-library-fflate).
+- Fixed: a string part with a character outside the BMP (emoji) cut by JSZip's 16 KiB encoding slices was written as two U+FFFD.
+- Fixed: the streaming reader stopped an entry written with a data descriptor at the first bytes of its data that looked like a data
+  descriptor signature (unzipper); descriptors are now checked against the size of the data read.
+- Fixed: write errors (failing output stream, unreadable image file) reject `write` / `writeFile` / `WorkbookWriter.commit()` instead of
+  leaving them pending or raising an unhandled rejection.
+- Removed the internal modules that no longer had a user (`lib/utils/auto-drain`, `browser-buffer-encode`, `iterate-stream`,
+  `stream-base64`, `string-builder`, `stuttered-pipe`, `typed-stack`); they were only reachable through deep imports (`exceljs/lib/...`).
+- The streaming `WorkbookReader` accepts any stream with a `pipe` method (e.g. `readable-stream`), web `ReadableStream`s and async
+  iterables, not only `stream.Readable` instances.

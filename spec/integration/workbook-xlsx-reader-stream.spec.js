@@ -1,10 +1,8 @@
 // Streaming reader (ExcelJS.stream.xlsx.WorkbookReader) robustness tests.
-// Fixtures are built in-test with ExcelJS + JSZip so they stay reviewable.
+// Fixtures are built in-test with ExcelJS + fflate so they stay reviewable.
 const fs = require("fs");
 const { Readable } = require("stream");
-const JSZip = require("jszip");
-
-const { baseWorkbookBuffer, tamper } = require("../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, unzipParts, zipParts } = require("../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -35,17 +33,16 @@ async function readAll(input, options) {
 
 // rebuild the zip with its parts sorted by rank(path) (stable: equal ranks keep their order)
 async function reorderZip(buffer, rank) {
-    const source = await JSZip.loadAsync(buffer);
-    const names = Object.keys(source.files).filter((name) => !source.files[name].dir);
-    const ordered = names
+    const source = unzipParts(buffer);
+    const ordered = Object.keys(source)
         .map((name, index) => ({ name, index, rank: rank(name) }))
         .sort((a, b) => a.rank - b.rank || a.index - b.index)
         .map(({ name }) => name);
-    const target = new JSZip();
+    const target = {};
     for (const name of ordered) {
-        target.file(name, await source.file(name).async("nodebuffer"));
+        target[name] = source[name];
     }
-    return target.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    return zipParts(target);
 }
 
 async function readError(input) {
@@ -157,7 +154,7 @@ describe("WorkbookReader (stream)", () => {
 
         it("rejects and removes the temp dir on a truncated file", async function () {
             this.timeout(10000);
-            // large enough for unzipper to stall inside the worksheet entry being spooled
+            // large enough for the input to end inside the worksheet entry being spooled
             const buffer = await bigSheetFirstBuffer(20000);
             const truncated = buffer.subarray(0, Math.floor(buffer.length * 0.5));
             const error = await readError(chunkedStream(truncated));
@@ -196,7 +193,7 @@ describe("WorkbookReader (stream)", () => {
         it("rejects when the input is truncated", async function () {
             this.timeout(5000);
             const error = await readError(chunkedStream(buffer.subarray(0, Math.floor(buffer.length * 0.8))));
-            expect(error && error.message).to.equal("FILE_ENDED");
+            expect(error && error.message).to.equal("Unexpected end of zip data");
         });
 
         it("rejects with the error of the input stream", async function () {
