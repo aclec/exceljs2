@@ -74,10 +74,10 @@ const expectations = [
             gradient: true,
             // reverse: false,
             // showValue: true,
-            negativeBarColorSameAsPositive: true,
+            negativeBarColorSameAsPositive: false,
             negativeBarBorderColorSameAsPositive: true,
             axisPosition: "auto",
-            direction: "leftToRight",
+            direction: "context",
             cfvo: [
                 { type: "num", value: 5 },
                 { type: "num", value: 20 },
