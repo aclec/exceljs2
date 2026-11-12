@@ -130,7 +130,8 @@ describe("WorkbookReader (stream)", () => {
                 fs.createReadStream = original;
             }
             expect(opened).to.have.length(2);
-            opened.forEach((stream) => expect(stream.destroyed).to.equal(true));
+            // closed (not only destroyed) before the directory is removed: Windows cannot remove open files
+            opened.forEach((stream) => expect(stream.closed).to.equal(true));
             expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
@@ -150,6 +151,41 @@ describe("WorkbookReader (stream)", () => {
                 counts.push(count);
             }
             expect(counts).to.deep.equal([3000, 1]);
+            // removed once the collected worksheets have been read
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(fs.existsSync(tracker.created[0])).to.equal(false);
+        });
+
+        it("removes the temp dir when spooled worksheets are skipped", async () => {
+            const buffer = await bigSheetFirstBuffer();
+            for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                if (worksheet.name !== "Second") continue;
+                // eslint-disable-next-line no-unused-vars
+                for await (const row of worksheet) {
+                    // read
+                }
+            }
+            await readAll(chunkedStream(buffer), { worksheets: "ignore" });
+            expect(tracker.created).to.have.length(2);
+            tracker.created.forEach((dir) => expect(fs.existsSync(dir)).to.equal(false));
+        });
+
+        it("closes the spooled worksheet files read to the end before removing the temp dir", async () => {
+            const opened = [];
+            const original = fs.createReadStream;
+            fs.createReadStream = (...args) => {
+                const stream = original.apply(fs, args);
+                opened.push(stream);
+                return stream;
+            };
+            try {
+                await readAll(chunkedStream(await bigSheetFirstBuffer()));
+            } finally {
+                fs.createReadStream = original;
+            }
+            expect(opened).to.have.length(2);
+            opened.forEach((stream) => expect(stream.closed).to.equal(true));
+            expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
         it("rejects and removes the temp dir on a truncated file", async function () {
