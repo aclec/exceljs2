@@ -299,4 +299,44 @@ describe('WorkbookReader (stream)', () => {
     const sheets = await readAll(chunkedStream(tampered));
     expect(sheets.map(sheet => sheet.name)).to.deep.equal(['Sheet1', 'Named']);
   });
+
+  describe('cell references', () => {
+    async function rowsOf(buffer) {
+      const [sheet] = await readAll(chunkedStream(buffer));
+      return sheet.rows.map(({number, values}) => ({number, values: values.slice(1)}));
+    }
+
+    it('infers row and column numbers when r is missing', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('B1').value = 1;
+        ws.getCell('C1').value = 'c1';
+        ws.getCell('A2').value = 'a2';
+        ws.getCell('B2').value = 2;
+        ws.getCell('A3').value = 'a3';
+      });
+      const tampered = await tamper(buffer, {
+        'xl/worksheets/sheet1.xml': xml => xml.replace(/ r="[A-Z]*\d+"/g, ''),
+      });
+      expect(await rowsOf(tampered)).to.deep.equal([
+        {number: 1, values: ['hello', 1, 'c1']},
+        {number: 2, values: ['a2', 2]},
+        {number: 3, values: ['a3']},
+      ]);
+    });
+
+    it('continues numbering after explicit references', async () => {
+      const sheetData =
+        '<sheetData>' +
+        '<row r="2"><c r="B2"><v>1</v></c><c><v>2</v></c></row>' +
+        '<row><c><v>3</v></c><c r="D3"><v>4</v></c><c><v>5</v></c></row>' +
+        '</sheetData>';
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'xl/worksheets/sheet1.xml': xml => xml.replace(/<sheetData>.*<\/sheetData>/, sheetData),
+      });
+      expect(await rowsOf(buffer)).to.deep.equal([
+        {number: 2, values: [undefined, 1, 2]},
+        {number: 3, values: [3, undefined, undefined, 4, 5]},
+      ]);
+    });
+  });
 });
