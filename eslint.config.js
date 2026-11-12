@@ -7,6 +7,7 @@ const js = require("@eslint/js");
 const n = require("eslint-plugin-n");
 const globals = require("globals");
 const prettier = require("eslint-config-prettier");
+const tseslint = require("typescript-eslint");
 
 // crypto is listed because its browser shim (scripts/browser-shims/crypto.js) only implements what
 // lib/utils/encryptor.js uses (getHashes, createHash, randomBytes): other lib files go through Encryptor.
@@ -19,6 +20,8 @@ module.exports = [
             "coverage/**",
             "dist/**",
             "graphify-out/**",
+            // compiled from src/ by `bun run build:lib`
+            "lib/**",
             "out/**",
             "spec/out/**",
             // ad-hoc manual scripts: not run by any suite or CI, some need packages that were removed (sax)
@@ -71,28 +74,65 @@ module.exports = [
         },
     },
     {
-        // Code reachable from the browser bundle (lib/exceljs.browser.js, lib/exceljs.bare.js) must not use
+        // Code reachable from the browser bundle (src/exceljs.browser.ts, src/exceljs.bare.ts) must not use
         // Node-only modules. The exceptions are the streaming API and the file helpers, which are not
         // available in the browser (fs is replaced by an empty module there).
-        files: ["lib/**/*.js"],
+        files: ["src/**/*.ts"],
         ignores: [
-            "lib/exceljs.nodejs.js",
-            "lib/stream/**",
-            "lib/csv/csv.js", // CSV#readFile / CSV#writeFile
-            "lib/utils/encryptor.js", // crypto, polyfilled in the bundle by scripts/browser-shims/crypto.js
-            "lib/utils/utils.js", // utils.fs.exists, used by readFile
-            "lib/xlsx/xlsx.js", // XLSX#readFile / XLSX#writeFile
+            "src/exceljs.nodejs.ts",
+            "src/stream/**",
+            "src/csv/csv.ts", // CSV#readFile / CSV#writeFile
+            "src/utils/encryptor.ts", // crypto, polyfilled in the bundle by scripts/browser-shims/crypto.js
+            "src/utils/utils.ts", // utils.fs.exists, used by readFile
+            "src/xlsx/xlsx.ts", // XLSX#readFile / XLSX#writeFile
         ],
         rules: {
-            "n/no-restricted-require": [
+            "no-restricted-imports": [
                 "error",
-                [
-                    {
-                        name: NODE_ONLY_MODULES.flatMap((m) => [m, `node:${m}`, `${m}/*`, `node:${m}/*`]),
+                {
+                    paths: NODE_ONLY_MODULES.flatMap((m) => [m, `node:${m}`]).map((name) => ({
+                        name,
                         message: "browser bundle: Node-only module",
-                    },
-                ],
+                    })),
+                    patterns: [
+                        {
+                            group: NODE_ONLY_MODULES.flatMap((m) => [`${m}/*`, `node:${m}/*`]),
+                            message: "browser bundle: Node-only module",
+                        },
+                    ],
+                },
             ],
+        },
+    },
+    // TypeScript sources: type-aware rules on top of the shared ones above. `any` is banned: use precise types,
+    // generics or `unknown` + narrowing.
+    ...tseslint.configs.recommendedTypeChecked.map((config) => ({ ...config, files: ["src/**/*.ts"] })),
+    {
+        files: ["src/**/*.ts"],
+        languageOptions: {
+            sourceType: "module",
+            parserOptions: { projectService: true, tsconfigRootDir: __dirname },
+        },
+        rules: {
+            // replaced by the TypeScript-aware versions
+            "no-unused-vars": "off",
+            "@typescript-eslint/no-unused-vars": ["error", { vars: "all", args: "none", ignoreRestSiblings: true, caughtErrors: "none" }],
+            "no-use-before-define": "off",
+            "@typescript-eslint/no-use-before-define": ["error", { variables: false, classes: false, functions: false, typedefs: false }],
+            // eslint-plugin-n resolves require() of .js files; tsc checks the imports of the .ts sources
+            "n/no-missing-import": "off",
+            "n/no-missing-require": "off",
+            "n/no-unpublished-import": "off",
+
+            "@typescript-eslint/no-explicit-any": "error",
+            "@typescript-eslint/consistent-type-imports": ["error", { fixStyle: "inline-type-imports" }],
+            "@typescript-eslint/consistent-type-exports": "error",
+            "@typescript-eslint/explicit-module-boundary-types": "error",
+            "@typescript-eslint/no-non-null-assertion": "off",
+            "@typescript-eslint/ban-ts-comment": ["error", { "ts-expect-error": "allow-with-description", minimumDescriptionLength: 10 }],
+            "@typescript-eslint/switch-exhaustiveness-check": "error",
+            "@typescript-eslint/prefer-nullish-coalescing": "off",
+            "@typescript-eslint/no-unnecessary-type-assertion": "error",
         },
     },
     {

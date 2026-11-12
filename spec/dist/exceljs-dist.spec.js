@@ -29,7 +29,7 @@ describe("ExcelJS", () => {
                     expect(code.startsWith(`/*! ExcelJS v${version} |`)).to.be.true();
                     expect(code.trimEnd().endsWith(`//# sourceMappingURL=${name}.map`)).to.be.true();
                     const map = JSON.parse(fs.readFileSync(`${file}.map`, "utf8"));
-                    expect(map.sources).to.include("../lib/doc/workbook.js");
+                    expect(map.sources).to.include("../src/doc/workbook.ts");
                 });
 
                 it("exports ExcelJS through module.exports (UMD) and works", async () => {
@@ -67,7 +67,7 @@ describe("ExcelJS", () => {
                 });
 
                 it("compresses with the bundled fflate, not node:zlib", () => {
-                    // zlib is an empty module in the bundle, so lib/utils/deflate.js selects fflate
+                    // zlib is an empty module in the bundle, so src/utils/deflate.ts selects fflate
                     const code = fs.readFileSync(file, "utf8");
                     expect(code).not.to.match(/require\(["'](node:)?zlib["']\)/);
                     expect(code).to.include("deflateRawSync");

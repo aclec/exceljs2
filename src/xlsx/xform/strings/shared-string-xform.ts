@@ -1,0 +1,113 @@
+/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
+// @ts-nocheck
+import TextXform from "./text-xform";
+import RichTextXform from "./rich-text-xform";
+import PhoneticTextXform from "./phonetic-text-xform";
+
+import BaseXform from "../base-xform";
+
+// <si>
+//   <r></r><r></r>...
+// </si>
+// <si>
+//   <t></t>
+// </si>
+
+class SharedStringXform extends BaseXform {
+    constructor(model) {
+        super();
+
+        this.model = model;
+
+        this.map = {
+            r: new RichTextXform(),
+            t: new TextXform(),
+            rPh: new PhoneticTextXform(),
+        };
+    }
+
+    get tag() {
+        return "si";
+    }
+
+    render(xmlStream, model) {
+        xmlStream.openNode(this.tag);
+        if (model && model.hasOwnProperty("richText") && model.richText) {
+            const runs = model.richText.filter((run) => !RichTextXform.isEmpty(run));
+            if (runs.length) {
+                runs.forEach((run) => {
+                    this.map.r.render(xmlStream, run);
+                });
+            } else {
+                this.map.t.render(xmlStream, "");
+            }
+        } else if (model !== undefined && model !== null) {
+            this.map.t.render(xmlStream, model);
+        }
+        xmlStream.closeNode();
+    }
+
+    parseOpen(node) {
+        const { name } = node;
+        if (this.parser) {
+            this.parser.parseOpen(node);
+            return true;
+        }
+        if (name === this.tag) {
+            this.model = {};
+            return true;
+        }
+        this.parser = this.map[name];
+        if (this.parser) {
+            this.parser.parseOpen(node);
+            return true;
+        }
+        return false;
+    }
+
+    parseText(text) {
+        if (this.parser) {
+            this.parser.parseText(text);
+        }
+    }
+
+    parseClose(name) {
+        if (this.parser) {
+            if (!this.parser.parseClose(name)) {
+                switch (name) {
+                    case "r": {
+                        if (typeof this.model === "string") {
+                            // CT_Rst is <t>?<r>*: a leading <t> is an unformatted first run
+                            this.model = { richText: [{ text: this.model }] };
+                        }
+                        let rt = this.model.richText;
+                        if (!rt) {
+                            rt = this.model.richText = [];
+                        }
+                        rt.push(this.parser.model);
+                        break;
+                    }
+                    case "t":
+                        this.model = this.parser.model;
+                        break;
+                    default:
+                        break;
+                }
+                this.parser = undefined;
+            }
+            return true;
+        }
+        switch (name) {
+            case this.tag:
+                if (this.model && typeof this.model === "object" && !this.model.richText) {
+                    // an empty <si/> (or one holding only phonetic runs) is the empty string
+                    this.model = "";
+                }
+                return false;
+            default:
+                return true;
+        }
+    }
+}
+
+export default SharedStringXform;

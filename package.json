@@ -43,6 +43,7 @@
     "files": [
         "dist",
         "lib",
+        "src",
         "excel.js",
         "index.d.ts",
         "LICENSE",
@@ -53,32 +54,33 @@
         "SECURITY.md"
     ],
     "scripts": {
-        "build": "node scripts/build.mjs",
-        "test": "bun run test:unit && bun run test:integration && bun run test:end-to-end",
+        "build:lib": "node scripts/build-lib.mjs",
+        "build": "node scripts/build-lib.mjs && node scripts/build.mjs",
+        "test": "bun run build:lib && bun run test:unit && bun run test:integration && bun run test:end-to-end",
         "test:unit": "mocha --require spec/config/setup.js --require spec/config/setup-unit.js spec/unit --recursive",
         "test:integration": "mocha --require spec/config/setup.js spec/integration --recursive",
         "test:end-to-end": "mocha --require spec/config/setup.js spec/end-to-end --recursive",
-        "test:bun": "bun --bun mocha --require spec/config/setup.js --require spec/config/setup-unit.js spec/unit --recursive && bun --bun mocha --require spec/config/setup.js spec/integration --recursive && bun --bun mocha --require spec/config/setup.js spec/end-to-end --recursive",
+        "test:bun": "bun run build:lib && bun --bun mocha --require spec/config/setup.js --require spec/config/setup-unit.js spec/unit --recursive && bun --bun mocha --require spec/config/setup.js spec/integration --recursive && bun --bun mocha --require spec/config/setup.js spec/end-to-end --recursive",
         "test:browser": "mocha --require spec/config/setup.js spec/browser",
         "test:dist": "mocha --require spec/config/setup.js spec/dist",
-        "test:typescript": "mocha --require spec/config/setup.js --import=tsx 'spec/typescript/**/*.spec.ts'",
-        "test:types": "tsc -p tsconfig.json",
+        "test:typescript": "bun run build:lib && mocha --require spec/config/setup.js --import=tsx 'spec/typescript/**/*.spec.ts'",
+        "test:types": "tsc -p tsconfig.json && tsc -p tsconfig.types.json",
         "lint": "eslint .",
         "lint:fix": "eslint --fix .",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "audit": "bun audit",
-        "benchmark": "node --expose-gc benchmark.js",
+        "benchmark": "bun run build:lib && node --expose-gc benchmark.js",
         "check:install-scripts": "node scripts/check-install-scripts.mjs",
         "prepublishOnly": "bun run build && bun run test:dist",
         "prepare": "husky"
     },
     "lint-staged": {
-        "*.{js,cjs,mjs}": [
+        "*.{js,cjs,mjs,ts}": [
             "eslint --fix",
             "prettier --write"
         ],
-        "*.{ts,json,md,yml,yaml}": "prettier --write"
+        "*.{json,md,yml,yaml}": "prettier --write"
     },
     "keywords": [
         "xlsx",
@@ -137,7 +139,8 @@
         "stream-browserify": "^3.0.0",
         "string_decoder": "^1.3.0",
         "tsx": "^4.23.15",
-        "typescript": "^5.9.3"
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.72.0"
     },
     "packageManager": "bun@1.4.4",
     "overrides": {

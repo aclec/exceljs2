@@ -1,0 +1,12 @@
+{
+    // Emits src/**/*.ts to lib/ as CommonJS + declarations + source maps (bun run build:lib)
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "rootDir": "src",
+        "outDir": "lib",
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true
+    },
+    "include": ["src/**/*.ts"]
+}

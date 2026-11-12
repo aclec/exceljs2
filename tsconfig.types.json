@@ -1,0 +1,10 @@
+{
+    // Public declarations (index.d.ts) and the TypeScript specs, checked with skipLibCheck off (bun run test:types)
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "skipLibCheck": false,
+        "types": ["node", "mocha"]
+    },
+    "include": ["index.d.ts", "spec/typescript/**/*.ts"]
+}
