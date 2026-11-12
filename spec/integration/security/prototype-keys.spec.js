@@ -3,7 +3,7 @@
 // library in a state where a later, unrelated write fails.
 const { Readable } = require("stream");
 const JSZip = require("jszip");
-const { baseWorkbookBuffer, tamper } = require("../../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -238,6 +238,21 @@ describe("prototype-named keys in xlsx parts", function () {
             await wb.xlsx.load(buffer);
             expect(wb.getWorksheet("Sheet1").getBackgroundImageId()).to.equal(undefined);
             await wb.xlsx.writeBuffer(); // used to reject on the inherited Object constructor
+        });
+
+        it("a number format", async () => {
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet("s");
+            KEYS.forEach((key, i) => {
+                ws.getCell(1, i + 1).value = i;
+                ws.getCell(1, i + 1).numFmt = key;
+            });
+            const out = await wb.xlsx.writeBuffer();
+            // used to write numFmtId="function Object() { [native code] }"
+            expect(await readPart(out, "xl/styles.xml")).not.to.include("native code");
+            const back = new ExcelJS.Workbook();
+            await back.xlsx.load(out);
+            expect(KEYS.map((key, i) => back.getWorksheet("s").getCell(1, i + 1).numFmt)).to.deep.equal(KEYS);
         });
 
         it("a cell reference looked up in the streamed hyperlinks", async () => {
