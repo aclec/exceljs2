@@ -41,4 +41,4 @@ export const fromBytes = workbook.xlsx.load(new Uint8Array(4), { base64: true })
 // --- ModelContainer: created empty to read a file into it -------------------------------------------
 const container = new ExcelJS.ModelContainer();
 export const read: Promise<ExcelJS.ModelContainer> = container.xlsx.readFile("in.xlsx");
-export const model: ExcelJS.WorkbookModel | undefined = container.model;
+export const model: ExcelJS.WorkbookModelInput | undefined = container.model;

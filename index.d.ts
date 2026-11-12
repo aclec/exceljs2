@@ -1355,6 +1355,10 @@ export interface WorksheetImage {
         br?: Anchor;
         ext?: { width: number; height: number };
         editAs?: ImageEditAs;
+        /**
+         * The link of the image. Its `hyperlink` is absent only for an image read from a malformed file whose link has no
+         * relationship (`<a:hlinkClick>` without `r:id`): the type does not say so.
+         */
         hyperlinks?: ImageHyperlinkValue;
     };
 }
@@ -1499,9 +1503,21 @@ export interface WorksheetTableModel {
     /** The style of the table. */
     style?: TableStyleProperties | null;
     /** The columns. */
-    columns: TableColumnProperties[];
+    columns: WorksheetTableColumnModel[];
     /** The rows of data (a table added by `addTable`). */
     rows?: CellValue[][];
+}
+
+/**
+ * A column of a table as `worksheet.model` holds it: the {@link TableColumnProperties} given to `addTable`, or read from
+ * a file (then its `style` is the differential format of the column).
+ */
+export interface WorksheetTableColumnModel extends Omit<TableColumnProperties, "style"> {
+    /**
+     * The style of the column: as given to `addTable`, or the differential format read from a file (`null` for the parts
+     * the file does not set: see {@link TableColumnStyle}).
+     */
+    style?: TableColumnStyle;
 }
 
 /**
@@ -1529,7 +1545,8 @@ export interface WorksheetColumnModel {
 /**
  * The model of a worksheet (`worksheet.model`): its settings (shared with the worksheet, not copied), its cells (the
  * rows and column ranges as models), its images, tables and conditional formattings. Setting `worksheet.model` replaces
- * the worksheet with a model of this shape: note that the merged cells are then read from `mergeCells`, not `merges`.
+ * the worksheet with a model of this shape ({@link WorksheetModelInput}: without the getter-only fields): note that the
+ * merged cells are then read from `mergeCells`, not `merges`.
  */
 export interface WorksheetModel {
     /** The id of the worksheet in the workbook. */
@@ -1571,6 +1588,37 @@ export interface WorksheetModel {
     /** The merged ranges given to the setter (copy `merges` here to keep them); absent from the getter. */
     mergeCells?: string[];
 }
+
+/**
+ * What setting `worksheet.model` reads: a {@link WorksheetModel} (such as the one of another worksheet, or one of a
+ * file read by a {@link ModelContainer}) without the fields that only the getter gives, which the setter does not read:
+ * `id` and `state` (the worksheet keeps its own; `workbook.model =` reads them), `rowBreaks`, `dimensions` (a Range from
+ * the getter, the `ref` text in a model read from a file) and `merges` (the merged cells are read from `mergeCells`).
+ */
+export interface WorksheetModelInput extends Omit<WorksheetModel, "id" | "state" | "rowBreaks" | "dimensions" | "merges"> {
+    /** The id of the worksheet in the workbook (read by `workbook.model =` only). */
+    id?: number;
+    /** Whether the worksheet is visible (read by `workbook.model =` only: visible when absent). */
+    state?: WorksheetState;
+    /** Not read. */
+    rowBreaks?: RowBreak[];
+    /** Not read. */
+    dimensions?: Range | string;
+    /** Not read: copy them to `mergeCells` to keep them. */
+    merges?: string[];
+}
+
+/**
+ * What setting `workbook.model` reads, and the model of a {@link ModelContainer}: a {@link WorkbookModel} whose worksheet
+ * models may lack the fields that only the worksheet getter gives (see {@link WorksheetModelInput}). A file read by a
+ * ModelContainer gives worksheet models without `rowBreaks` nor `merges` (`mergeCells` instead), their `dimensions` as
+ * text.
+ */
+export interface WorkbookModelInput extends Omit<WorkbookModel, "worksheets"> {
+    /** The worksheets, in their order (each one with its `id`). */
+    worksheets: (WorksheetModelInput & { id: number })[];
+}
+
 export type WorksheetState = "visible" | "hidden" | "veryHidden";
 
 /** The comparison of a `cellIs` rule. */
@@ -2140,7 +2188,14 @@ export interface Worksheet {
     /** The images of the worksheet (not the background image). */
     getImages(): WorksheetImage[];
 
-    model: WorksheetModel;
+    /** The model of the worksheet (see {@link WorksheetModel}). */
+    get model(): WorksheetModel;
+    /**
+     * Replaces the worksheet with a model (see {@link WorksheetModelInput}: the getter-only fields may be absent).
+     * @throws Error for an invalid name, for overlapping ranges in `mergeCells`, or when the merged cells exceed the caps
+     * (1,048,576 per worksheet, `maxMergedCells` of the workbook)
+     */
+    set model(value: WorksheetModelInput);
 
     /**
      * Worksheet protection
@@ -2369,8 +2424,11 @@ export interface XlsxWriteOptions {
  * `removeListener`, when present, are used to wait for `"drain"` and to report errors).
  */
 export interface XlsxOutput {
-    /** Writes a chunk of the file; returning `false` (with `on`) waits for `"drain"`. */
-    write(chunk: Buffer): unknown;
+    /**
+     * Writes a chunk of the file (a Node Buffer, or the Buffer polyfill in the browser bundle); returning `false` (with
+     * `on`) waits for `"drain"`.
+     */
+    write(chunk: globalThis.Buffer): unknown;
     /** Ends the output (`xlsx.write` does not call it). */
     end(): unknown;
 }
@@ -2843,11 +2901,14 @@ export class Workbook {
      */
     maxMergedCells: number;
 
+    /** The model of the workbook (the worksheet models and the settings). */
+    get model(): WorkbookModel;
     /**
-     * The model of the workbook (the worksheet models and the settings); setting it replaces the workbook.
-     * @throws Error (setter) for an invalid worksheet name, or when the merges exceed `maxMergedCells`
+     * Replaces the workbook with a model (see {@link WorkbookModelInput}: such as the model of another workbook, or of a
+     * {@link ModelContainer} that read a file).
+     * @throws Error for an invalid worksheet name, or when the merges exceed `maxMergedCells`
      */
-    model: WorkbookModel;
+    set model(value: WorkbookModelInput);
 
     /**
      * The Workbook views controls how many separate windows Excel will open when viewing the workbook. `[]` for a new
@@ -2910,7 +2971,7 @@ export class ModelContainer {
      * The workbook model: what `xlsx` writes, and what it sets when reading (then the parsed model, whose worksheets
      * hold their parsed rows and cells); `undefined` before a file is read into a container created without one.
      */
-    model: WorkbookModel | undefined;
+    model: WorkbookModelInput | undefined;
     /** The xlsx reader and writer of the model (its read methods resolve with the container). */
     readonly xlsx: Xlsx<ModelContainer>;
 }

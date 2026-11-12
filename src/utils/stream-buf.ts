@@ -376,7 +376,7 @@ class StreamBuf extends Duplex {
     // event close - optional, indicates upstream close
     // event error - duh
     /** Reads (and removes) up to size bytes, or all the data when size is 0 or undefined. */
-    override read(size?: number): Buffer {
+    override read(size?: number): Buffer<ArrayBuffer> {
         let buffers: Buffer[];
         // read min(buffer, size || infinity)
         if (size) {
