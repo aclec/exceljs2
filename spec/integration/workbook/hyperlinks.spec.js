@@ -2,8 +2,8 @@
 // written by the user as "#Sheet!A1" or "#DefinedName") are a location attribute only,
 // as Excel writes them (ECMA-376 CT_Hyperlink).
 const { PassThrough } = require("stream");
-const JSZip = require("jszip");
-const { baseWorkbookBuffer, tamper, readPart } = require("../../utils/xlsx-tamper");
+const { strFromU8 } = require("fflate");
+const { baseWorkbookBuffer, tamper, readPart, unzipParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -21,9 +21,8 @@ async function hyperlinkNodes(buffer) {
 }
 
 async function hyperlinkRels(buffer) {
-    const zip = await JSZip.loadAsync(buffer);
-    const rels = zip.file(RELS);
-    return rels ? (await rels.async("string")).match(/<Relationship [^>]*\/hyperlink"[^>]*>/g) || [] : [];
+    const rels = unzipParts(buffer)[RELS];
+    return rels ? strFromU8(rels).match(/<Relationship [^>]*\/hyperlink"[^>]*>/g) || [] : [];
 }
 
 const LINKS = {

@@ -2,8 +2,8 @@
 // names of Object.prototype members must neither pollute the global prototypes nor leave the
 // library in a state where a later, unrelated write fails.
 const { Readable } = require("stream");
-const JSZip = require("jszip");
-const { baseWorkbookBuffer, tamper, readPart } = require("../../utils/xlsx-tamper");
+const { strFromU8 } = require("fflate");
+const { baseWorkbookBuffer, tamper, readPart, unzipParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -73,11 +73,10 @@ function buildRichWorkbook(wb, ws) {
 }
 
 async function partsOf(buffer) {
-    const zip = await JSZip.loadAsync(buffer);
-    const names = Object.keys(zip.files).filter((name) => /\.(xml|rels|vml)$/.test(name));
+    const parts = unzipParts(buffer);
     const texts = {};
-    for (const name of names) {
-        texts[name] = await zip.file(name).async("string");
+    for (const name of Object.keys(parts).filter((n) => /\.(xml|rels|vml)$/.test(n))) {
+        texts[name] = strFromU8(parts[name]);
     }
     return texts;
 }
