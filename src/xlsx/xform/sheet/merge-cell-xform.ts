@@ -1,17 +1,19 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
 import BaseXform from "../base-xform";
 
-class MergeCellXform extends BaseXform {
-    get tag() {
+/** `<mergeCell ref="A1:B2"/>`: one merged range. The model is the `ref` string (`undefined` when absent). */
+class MergeCellXform extends BaseXform<string> {
+    get tag(): string {
         return "mergeCell";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: string): void {
         xmlStream.leafNode("mergeCell", { ref: model });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<mergeCell>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "mergeCell") {
             this.model = node.attributes.ref;
             return true;
@@ -19,9 +21,9 @@ class MergeCellXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

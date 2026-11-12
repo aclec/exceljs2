@@ -1,30 +1,52 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type XmlStream from "../../../utils/xml-stream";
+import type { ConditionalFormattingModel } from "../../../types";
 import CompositeXform from "../composite-xform";
 
 import ConditionalFormattingsExt from "./cf-ext/conditional-formattings-ext-xform";
+import type { ConditionalFormattingExtModel } from "./cf-ext/conditional-formatting-ext-xform";
 
-class ExtXform extends CompositeXform {
+/** What the worksheet extension renders: the conditional formattings of the worksheet (those with x14 rules). */
+export interface ExtLstRenderModel {
+    conditionalFormattings: ConditionalFormattingModel[];
+}
+
+/**
+ * The parsed worksheet extension, by element name: `x14:conditionalFormattings`. Also accepts the render model (see
+ * {@link ExtLstRenderModel}).
+ */
+export interface ExtLstModel {
+    "x14:conditionalFormattings"?: ConditionalFormattingExtModel[];
+    conditionalFormattings?: ConditionalFormattingModel[];
+}
+
+/** The `<ext>` of the x14 conditional formattings. */
+class ExtXform extends CompositeXform<ExtLstModel> {
+    /** The xform of the conditional formattings. */
+    readonly conditionalFormattings = new ConditionalFormattingsExt();
+
+    declare map: { readonly "x14:conditionalFormattings": ConditionalFormattingsExt };
+
     constructor() {
         super();
         this.map = {
-            "x14:conditionalFormattings": (this.conditionalFormattings = new ConditionalFormattingsExt()),
+            "x14:conditionalFormattings": this.conditionalFormattings,
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "ext";
     }
 
-    hasContent(model) {
+    /** @returns whether a conditional formatting has an x14 rule */
+    hasContent(model: ExtLstRenderModel): boolean {
         return this.conditionalFormattings.hasContent(model.conditionalFormattings);
     }
 
-    prepare(model, options) {
-        this.conditionalFormattings.prepare(model.conditionalFormattings, options);
+    override prepare(model: ExtLstRenderModel): void {
+        this.conditionalFormattings.prepare(model.conditionalFormattings);
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: ExtLstRenderModel): void {
         xmlStream.openNode("ext", {
             uri: "{78C0D931-6437-407d-A8EE-F0AAD7539E65}",
             "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main",
@@ -35,37 +57,51 @@ class ExtXform extends CompositeXform {
         xmlStream.closeNode();
     }
 
-    createNewModel() {
+    override createNewModel(): ExtLstModel {
         return {};
     }
 
-    onParserClose(name, parser) {
-        this.model[name] = parser.model;
+    override onParserClose(name: string): void {
+        if (name === "x14:conditionalFormattings") {
+            // the element was opened before its child (createNewModel)
+            this.model![name] = this.conditionalFormattings.model ?? undefined;
+        }
     }
 }
 
-class ExtLstXform extends CompositeXform {
+/**
+ * `<extLst>` of a worksheet: its extensions. Only the x14 conditional formattings are written (when a rule needs them)
+ * and read.
+ */
+class ExtLstXform extends CompositeXform<ExtLstModel> {
+    /** The xform of the `<ext>`. */
+    readonly ext = new ExtXform();
+
+    declare map: { readonly ext: ExtXform };
+
     constructor() {
         super();
 
         this.map = {
-            ext: (this.ext = new ExtXform()),
+            ext: this.ext,
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "extLst";
     }
 
-    prepare(model, options) {
-        this.ext.prepare(model, options);
+    /** Gives the x14 rules their `x14Id` (mutates the rules). */
+    override prepare(model: ExtLstRenderModel): void {
+        this.ext.prepare(model);
     }
 
-    hasContent(model) {
+    /** @returns whether a conditional formatting has an x14 rule */
+    hasContent(model: ExtLstRenderModel): boolean {
         return this.ext.hasContent(model);
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: ExtLstRenderModel): void {
         if (!this.hasContent(model)) {
             return;
         }
@@ -75,12 +111,13 @@ class ExtLstXform extends CompositeXform {
         xmlStream.closeNode();
     }
 
-    createNewModel() {
+    override createNewModel(): ExtLstModel {
         return {};
     }
 
-    onParserClose(name, parser) {
-        Object.assign(this.model, parser.model);
+    override onParserClose(): void {
+        // the element was opened before its child (createNewModel)
+        Object.assign(this.model!, this.ext.model);
     }
 }
 

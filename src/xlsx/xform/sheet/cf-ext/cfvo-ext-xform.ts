@@ -1,24 +1,34 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../../utils/parse-sax";
+import type XmlStream from "../../../../utils/xml-stream";
+import type { CfvoModel } from "../../../../types";
 import CompositeXform from "../../composite-xform";
 
 import CfvoXform from "../cf/cfvo-xform";
 import FExtXform from "./f-ext-xform";
 
-class CfvoExtXform extends CompositeXform {
+/**
+ * `<x14:cfvo type="num"><xm:f>50</xm:f></x14:cfvo>`: a threshold of an x14 data bar or icon set, its value in `<xm:f>`.
+ * The parsed `type` is the attribute (unvalidated); an empty `<xm:f>` is the value 0.
+ */
+class CfvoExtXform extends CompositeXform<CfvoModel> {
+    /** The xform of the value. */
+    readonly fExtXform = new FExtXform();
+
+    declare map: { readonly "xm:f": FExtXform };
+
     constructor() {
         super();
 
         this.map = {
-            "xm:f": (this.fExtXform = new FExtXform()),
+            "xm:f": this.fExtXform,
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "x14:cfvo";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: CfvoModel): void {
         xmlStream.openNode(this.tag, {
             type: model.type,
         });
@@ -28,17 +38,21 @@ class CfvoExtXform extends CompositeXform {
         xmlStream.closeNode();
     }
 
-    createNewModel(node) {
+    override createNewModel(node: SaxTag): CfvoModel {
         return {
-            type: node.attributes.type,
+            // unvalidated ST_CfvoType
+            type: node.attributes.type as CfvoModel["type"],
         };
     }
 
-    onParserClose(name, parser) {
+    override onParserClose(name: string): void {
         switch (name) {
-            case "xm:f":
-                this.model.value = parser.model ? CfvoXform.toValue(parser.model) : 0;
+            case "xm:f": {
+                // the element was opened before its child (createNewModel); <xm:f> holds text
+                const text = this.fExtXform.model;
+                this.model!.value = text ? CfvoXform.toValue(String(text)) : 0;
                 break;
+            }
         }
     }
 }

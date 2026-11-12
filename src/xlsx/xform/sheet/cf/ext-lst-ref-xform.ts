@@ -1,44 +1,58 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type XmlStream from "../../../../utils/xml-stream";
+import type { ConditionalFormattingRuleModel } from "../../../../types";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
 
-class X14IdXform extends BaseXform {
-    get tag() {
+/** The model of the reference of a main rule to its x14 version (merged into the rule). */
+export interface ExtLstRefModel {
+    x14Id?: string;
+}
+
+/** `<x14:id>{…}</x14:id>`: the id of the x14 version of a rule. */
+class X14IdXform extends BaseXform<string> {
+    get tag(): string {
         return "x14:id";
     }
 
-    render(xmlStream, model) {
-        xmlStream.leafNode(this.tag, null, model);
+    override render(xmlStream: XmlStream, model: string | undefined): void {
+        xmlStream.leafNode(this.tag, undefined, model);
     }
 
-    parseOpen() {
+    /** Starts the text (the parent delegates `<x14:id>` only). */
+    override parseOpen(): void {
         this.model = "";
     }
 
-    parseText(text) {
-        this.model += text;
+    override parseText(text: string): void {
+        this.model = `${String(this.model)}${text}`;
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<x14:id>` */
+    override parseClose(name: string): boolean {
         return name !== this.tag;
     }
 }
 
-class ExtXform extends CompositeXform {
+/** The `<ext>` holding the `<x14:id>` of a rule. */
+class ExtXform extends CompositeXform<ExtLstRefModel> {
+    /** The xform of the id. */
+    readonly idXform = new X14IdXform();
+
+    declare map: { readonly "x14:id": X14IdXform };
+
     constructor() {
         super();
 
         this.map = {
-            "x14:id": (this.idXform = new X14IdXform()),
+            "x14:id": this.idXform,
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "ext";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: Pick<ConditionalFormattingRuleModel, "x14Id">): void {
         xmlStream.openNode(this.tag, {
             uri: "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}",
             "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main",
@@ -49,16 +63,23 @@ class ExtXform extends CompositeXform {
         xmlStream.closeNode();
     }
 
-    createNewModel() {
+    override createNewModel(): ExtLstRefModel {
         return {};
     }
 
-    onParserClose(name, parser) {
-        this.model.x14Id = parser.model;
+    override onParserClose(): void {
+        // the element was opened before its child (createNewModel)
+        this.model!.x14Id = this.idXform.model ?? undefined;
     }
 }
 
-class ExtLstRefXform extends CompositeXform {
+/**
+ * `<extLst><ext uri="{B025F937-…}"><x14:id>{…}</x14:id></ext></extLst>` of a main `<cfRule>`: the reference to the x14
+ * version of the rule (its `x14Id`).
+ */
+class ExtLstRefXform extends CompositeXform<ExtLstRefModel> {
+    declare map: { readonly ext: ExtXform };
+
     constructor() {
         super();
         this.map = {
@@ -66,22 +87,23 @@ class ExtLstRefXform extends CompositeXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "extLst";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: Pick<ConditionalFormattingRuleModel, "x14Id">): void {
         xmlStream.openNode(this.tag);
         this.map.ext.render(xmlStream, model);
         xmlStream.closeNode();
     }
 
-    createNewModel() {
+    override createNewModel(): ExtLstRefModel {
         return {};
     }
 
-    onParserClose(name, parser) {
-        Object.assign(this.model, parser.model);
+    override onParserClose(): void {
+        // the element was opened before its child (createNewModel)
+        Object.assign(this.model!, this.map.ext.model);
     }
 }
 

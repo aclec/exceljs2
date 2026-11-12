@@ -1,27 +1,91 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../../utils/parse-sax";
+import type XmlStream from "../../../../utils/xml-stream";
+import type { CfvoModel, ColorModel, DataBarRuleModel } from "../../../../types";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
 
 import ColorXform from "../../style/color-xform";
 import CfvoExtXform from "./cfvo-ext-xform";
 
-class DatabarExtXform extends CompositeXform {
+/** The settings of an x14 data bar that are colors (the child elements other than the thresholds). */
+type DatabarExtColor = "borderColor" | "negativeFillColor" | "negativeBorderColor" | "axisColor";
+
+/**
+ * The model of `<x14:dataBar>` (merged into the rule): the parsed attributes, with the defaults of [MS-XLSX] CT_DataBar
+ * (except `minLength` / `maxLength`: 10 / 90), the thresholds and the colors (`undefined` for an `auto` color).
+ */
+export type DatabarExtModel = Required<
+    Pick<
+        DataBarRuleModel,
+        | "minLength"
+        | "maxLength"
+        | "border"
+        | "gradient"
+        | "negativeBarColorSameAsPositive"
+        | "negativeBarBorderColorSameAsPositive"
+        | "axisPosition"
+        | "direction"
+    >
+> & { cfvo: CfvoModel[] } & Partial<Record<DatabarExtColor, ColorModel | undefined>>;
+
+/**
+ * `<x14:dataBar>` of an x14 `dataBar` rule: the settings that Excel 2007 ignores, the thresholds (which may be autoMin /
+ * autoMax) and the colors other than the color of the bars.
+ */
+class DatabarExtXform extends CompositeXform<DatabarExtModel> {
+    /** The settings of `<x14:dataBar>` that Excel 2007 ignores (its `<dataBar>` lengths are not read). */
+    static readonly X14_SETTINGS: readonly (keyof DataBarRuleModel)[] = [
+        "minLength",
+        "maxLength",
+        "border",
+        "negativeBarColorSameAsPositive",
+        "negativeBarBorderColorSameAsPositive",
+        "axisPosition",
+        "direction",
+        "borderColor",
+        "negativeFillColor",
+        "negativeBorderColor",
+        "axisColor",
+    ];
+
+    /** Excel's thresholds for a data bar created without explicit ones. */
+    static readonly DEFAULT_CFVO: readonly CfvoModel[] = [{ type: "autoMin" }, { type: "autoMax" }];
+
+    /** The xform of the thresholds. */
+    readonly cfvoXform = new CfvoExtXform();
+    /** The xforms of the colors. */
+    readonly borderColorXform = new ColorXform("x14:borderColor");
+    readonly negativeBorderColorXform = new ColorXform("x14:negativeBorderColor");
+    readonly negativeFillColorXform = new ColorXform("x14:negativeFillColor");
+    readonly axisColorXform = new ColorXform("x14:axisColor");
+
+    declare map: {
+        readonly "x14:cfvo": CfvoExtXform;
+        readonly "x14:borderColor": ColorXform;
+        readonly "x14:negativeBorderColor": ColorXform;
+        readonly "x14:negativeFillColor": ColorXform;
+        readonly "x14:axisColor": ColorXform;
+    };
+
     constructor() {
         super();
 
         this.map = {
-            "x14:cfvo": (this.cfvoXform = new CfvoExtXform()),
-            "x14:borderColor": (this.borderColorXform = new ColorXform("x14:borderColor")),
-            "x14:negativeBorderColor": (this.negativeBorderColorXform = new ColorXform("x14:negativeBorderColor")),
-            "x14:negativeFillColor": (this.negativeFillColorXform = new ColorXform("x14:negativeFillColor")),
-            "x14:axisColor": (this.axisColorXform = new ColorXform("x14:axisColor")),
+            "x14:cfvo": this.cfvoXform,
+            "x14:borderColor": this.borderColorXform,
+            "x14:negativeBorderColor": this.negativeBorderColorXform,
+            "x14:negativeFillColor": this.negativeFillColorXform,
+            "x14:axisColor": this.axisColorXform,
         };
     }
 
-    // Excel 2007 data bars are gradient bars with none of the x14 settings: any other data bar,
-    // e.g. one read from a file with its extension, needs one
-    static isExt(rule) {
+    /**
+     * Excel 2007 data bars are gradient bars with none of the x14 settings: any other data bar, e.g. one read from a file
+     * with its extension, needs one.
+     *
+     * @returns whether the data bar is written in the extension too
+     */
+    static isExt(this: void, rule: DataBarRuleModel): boolean {
         return (
             !rule.gradient ||
             DatabarExtXform.X14_SETTINGS.some((key) => rule[key] !== undefined) ||
@@ -29,12 +93,17 @@ class DatabarExtXform extends CompositeXform {
         );
     }
 
-    get tag() {
+    get tag(): string {
         return "x14:dataBar";
     }
 
-    // the defaults of [MS-XLSX] CT_DataBar, except for the lengths of a new data bar: Excel's 0 and 100
-    render(xmlStream, model) {
+    /**
+     * Writes the x14 settings: the defaults of [MS-XLSX] CT_DataBar, except for the lengths of a new data bar (Excel's 0
+     * and 100), and the default thresholds autoMin / autoMax.
+     *
+     * @param model - the rule
+     */
+    override render(xmlStream: XmlStream, model: Omit<DataBarRuleModel, "type">): void {
         xmlStream.openNode(this.tag, {
             minLength: BaseXform.toIntAttribute(model.minLength, 0, true),
             maxLength: BaseXform.toIntAttribute(model.maxLength, 100, true),
@@ -47,9 +116,9 @@ class DatabarExtXform extends CompositeXform {
         });
 
         const cfvoList = model.cfvo && model.cfvo.length ? model.cfvo : DatabarExtXform.DEFAULT_CFVO;
-        cfvoList.forEach((cfvo) => {
+        for (const cfvo of cfvoList) {
             this.cfvoXform.render(xmlStream, cfvo);
-        });
+        }
 
         // CT_DataBar order: cfvo, fillColor, borderColor, negativeFillColor, negativeBorderColor, axisColor
         this.borderColorXform.render(xmlStream, model.borderColor);
@@ -60,7 +129,7 @@ class DatabarExtXform extends CompositeXform {
         xmlStream.closeNode();
     }
 
-    createNewModel({ attributes }) {
+    override createNewModel({ attributes }: SaxTag): DatabarExtModel {
         return {
             cfvo: [],
             minLength: BaseXform.toIntValue(attributes.minLength, 10),
@@ -69,41 +138,36 @@ class DatabarExtXform extends CompositeXform {
             gradient: BaseXform.toBoolValue(attributes.gradient, true),
             negativeBarColorSameAsPositive: BaseXform.toBoolValue(attributes.negativeBarColorSameAsPositive, false),
             negativeBarBorderColorSameAsPositive: BaseXform.toBoolValue(attributes.negativeBarBorderColorSameAsPositive, true),
-            axisPosition: BaseXform.toStringValue(attributes.axisPosition, "auto"),
-            direction: BaseXform.toStringValue(attributes.direction, "context"),
+            // unvalidated ST_DataBarAxisPosition / ST_DataBarDirection
+            axisPosition: BaseXform.toStringValue(attributes.axisPosition, "auto") as DatabarExtModel["axisPosition"],
+            direction: BaseXform.toStringValue(attributes.direction, "context") as DatabarExtModel["direction"],
         };
     }
 
-    onParserClose(name, parser) {
-        const [, prop] = name.split(":");
-        switch (prop) {
-            case "cfvo":
-                this.model.cfvo.push(parser.model);
+    override onParserClose(name: string): void {
+        // the element was opened before its children (createNewModel)
+        const model = this.model!;
+        switch (name) {
+            case "x14:cfvo":
+                // set by the start tag of <x14:cfvo>
+                model.cfvo.push(this.cfvoXform.model!);
                 break;
 
-            default:
-                this.model[prop] = parser.model;
+            // color-xform is not typed yet: its model is a ColorModel (undefined for an auto color)
+            case "x14:borderColor":
+                model.borderColor = this.borderColorXform.model as ColorModel | undefined;
+                break;
+            case "x14:negativeBorderColor":
+                model.negativeBorderColor = this.negativeBorderColorXform.model as ColorModel | undefined;
+                break;
+            case "x14:negativeFillColor":
+                model.negativeFillColor = this.negativeFillColorXform.model as ColorModel | undefined;
+                break;
+            case "x14:axisColor":
+                model.axisColor = this.axisColorXform.model as ColorModel | undefined;
                 break;
         }
     }
 }
-
-// the settings of <x14:dataBar> that Excel 2007 ignores (its <dataBar> lengths are not read)
-DatabarExtXform.X14_SETTINGS = [
-    "minLength",
-    "maxLength",
-    "border",
-    "negativeBarColorSameAsPositive",
-    "negativeBarBorderColorSameAsPositive",
-    "axisPosition",
-    "direction",
-    "borderColor",
-    "negativeFillColor",
-    "negativeBorderColor",
-    "axisColor",
-];
-
-// Excel's defaults for a data bar created without explicit thresholds
-DatabarExtXform.DEFAULT_CFVO = [{ type: "autoMin" }, { type: "autoMax" }];
 
 export default DatabarExtXform;

@@ -1,25 +1,27 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type XmlStream from "../../../../utils/xml-stream";
 import BaseXform from "../../base-xform";
 
-class SqrefExtXform extends BaseXform {
-    get tag() {
+/** `<xm:sqref>A1:B10</xm:sqref>`: the range of an x14 conditional formatting. */
+class SqrefExtXform extends BaseXform<string> {
+    get tag(): string {
         return "xm:sqref";
     }
 
-    render(xmlStream, model) {
-        xmlStream.leafNode(this.tag, null, model);
+    override render(xmlStream: XmlStream, model: string | undefined): void {
+        xmlStream.leafNode(this.tag, undefined, model);
     }
 
-    parseOpen() {
+    /** Starts the text (the parent delegates `<xm:sqref>` only). */
+    override parseOpen(): void {
         this.model = "";
     }
 
-    parseText(text) {
-        this.model += text;
+    override parseText(text: string): void {
+        this.model = `${String(this.model)}${text}`;
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<xm:sqref>` */
+    override parseClose(name: string): boolean {
         return name !== this.tag;
     }
 }

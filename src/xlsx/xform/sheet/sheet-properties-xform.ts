@@ -1,11 +1,29 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { ColorModel, OutlinePropertiesModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 import ColorXform from "../style/color-xform";
-import PageSetupPropertiesXform from "./page-setup-properties-xform";
+import PageSetupPropertiesXform, { type PageSetupPropertiesModel } from "./page-setup-properties-xform";
 import OutlinePropertiesXform from "./outline-properties-xform";
 
-class SheetPropertiesXform extends BaseXform {
+/** The model of `<sheetPr>`: parts of the worksheet properties and page setup. */
+export interface SheetPropertiesModel {
+    tabColor?: ColorModel;
+    pageSetup?: PageSetupPropertiesModel;
+    outlineProperties?: OutlinePropertiesModel;
+}
+
+/**
+ * `<sheetPr>`: the tab color, outline properties and `fitToPage` of a worksheet. Rendered only when one of its children
+ * is (the element is rolled back otherwise). Parsing gives `null` when none of the children has a model.
+ */
+class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
+    declare map: {
+        readonly tabColor: ColorXform;
+        readonly pageSetUpPr: PageSetupPropertiesXform;
+        readonly outlinePr: OutlinePropertiesXform;
+    };
+
     constructor() {
         super();
 
@@ -16,11 +34,11 @@ class SheetPropertiesXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "sheetPr";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: SheetPropertiesModel | undefined): void {
         if (model) {
             xmlStream.addRollback();
             xmlStream.openNode("sheetPr");
@@ -40,7 +58,8 @@ class SheetPropertiesXform extends BaseXform {
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<sheetPr>` and its known children */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -49,39 +68,43 @@ class SheetPropertiesXform extends BaseXform {
             this.reset();
             return true;
         }
-        if (this.map[node.name]) {
-            this.parser = this.map[node.name];
-            this.parser.parseOpen(node);
+        const parser = ownEntry(this.map, node.name);
+        if (parser) {
+            this.parser = parser;
+            parser.parseOpen(node);
             return true;
         }
         return false;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
-            return true;
         }
-        return false;
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<sheetPr>` (the model is then built), else `true` */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
             }
             return true;
         }
-        if (this.map.tabColor.model || this.map.pageSetUpPr.model || this.map.outlinePr.model) {
-            this.model = {};
-            if (this.map.tabColor.model) {
-                this.model.tabColor = this.map.tabColor.model;
+        // color-xform is not typed yet: its model is a ColorModel
+        const tabColor = this.map.tabColor.model as ColorModel | null | undefined;
+        const pageSetup = this.map.pageSetUpPr.model;
+        const outlineProperties = this.map.outlinePr.model;
+        if (tabColor || pageSetup || outlineProperties) {
+            const model: SheetPropertiesModel = (this.model = {});
+            if (tabColor) {
+                model.tabColor = tabColor;
             }
-            if (this.map.pageSetUpPr.model) {
-                this.model.pageSetup = this.map.pageSetUpPr.model;
+            if (pageSetup) {
+                model.pageSetup = pageSetup;
             }
-            if (this.map.outlinePr.model) {
-                this.model.outlineProperties = this.map.outlinePr.model;
+            if (outlineProperties) {
+                model.outlineProperties = outlineProperties;
             }
         } else {
             this.model = null;

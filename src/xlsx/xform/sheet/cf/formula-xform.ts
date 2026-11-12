@@ -1,25 +1,28 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type XmlStream from "../../../../utils/xml-stream";
+import type { CfFormula } from "../../../../types";
 import BaseXform from "../../base-xform";
 
-class FormulaXform extends BaseXform {
-    get tag() {
+/** `<formula>…</formula>` of a `<cfRule>`: the model is the formula text (parsing concatenates its chunks). */
+class FormulaXform extends BaseXform<CfFormula> {
+    get tag(): string {
         return "formula";
     }
 
-    render(xmlStream, model) {
-        xmlStream.leafNode(this.tag, null, model);
+    override render(xmlStream: XmlStream, model: CfFormula): void {
+        xmlStream.leafNode(this.tag, undefined, model);
     }
 
-    parseOpen() {
+    /** Starts the text (the parent delegates `<formula>` only). */
+    override parseOpen(): void {
         this.model = "";
     }
 
-    parseText(text) {
-        this.model += text;
+    override parseText(text: string): void {
+        this.model = `${String(this.model)}${text}`;
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<formula>` */
+    override parseClose(name: string): boolean {
         return name !== this.tag;
     }
 }

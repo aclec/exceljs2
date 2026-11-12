@@ -1,11 +1,18 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DataValidationFormula, DataValidationModel, DataValidationsModel, WorksheetLoadBudget } from "../../../types";
 import _ from "../../../utils/under-dash";
 import utils from "../../../utils/utils";
 import colCache from "../../../utils/col-cache";
 import BaseXform from "../base-xform";
 import Range from "../../../doc/range";
 import DataValidations from "../../../doc/data-validations";
+
+// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
+const RangeOf = Range as unknown as new (range: string) => Range;
+
+// doc/data-validations.ts is not typed yet: wholeRangeAddress is assigned to the class after its declaration
+const { wholeRangeAddress } = DataValidations as unknown as { wholeRangeAddress(this: void, address: string): string | null };
 
 const addressRegex = /^[A-Z]{1,3}\d+$/;
 const rangeRegex = /^[A-Z]{1,3}\d+:[A-Z]{1,3}\d+$/;
@@ -14,115 +21,191 @@ const rangeRegex = /^[A-Z]{1,3}\d+:[A-Z]{1,3}\d+$/;
 // workbook stays under this budget; larger ranges are kept as 'A1:B2' keys.
 const MAX_EXPANDED_CELLS = 100000;
 
-function assign(definedName, attributes, name, defaultValue) {
+/** The attributes of a `<dataValidation>` copied as strings. */
+type StringAttribute = "operator" | "promptTitle" | "prompt" | "errorStyle" | "errorTitle" | "error";
+/** The attributes of a `<dataValidation>` parsed as booleans. */
+type BooleanAttribute = "allowBlank" | "showInputMessage" | "showErrorMessage";
+
+function assign(
+    dataValidation: DataValidationModel,
+    attributes: Readonly<Record<string, string | undefined>>,
+    name: StringAttribute,
+    defaultValue?: string
+): void {
     const value = attributes[name];
+    // the attribute strings of the file, unvalidated (operator, errorStyle)
+    const target = dataValidation as Record<StringAttribute, string | undefined>;
     if (value !== undefined) {
-        definedName[name] = value;
+        target[name] = value;
     } else if (defaultValue !== undefined) {
-        definedName[name] = defaultValue;
+        target[name] = defaultValue;
     }
 }
 
-function assignBool(definedName, attributes, name, defaultValue) {
+function assignBool(
+    dataValidation: DataValidationModel,
+    attributes: Readonly<Record<string, string | undefined>>,
+    name: BooleanAttribute
+): void {
     const value = attributes[name];
     if (value !== undefined) {
-        definedName[name] = utils.parseBoolean(value);
-    } else if (defaultValue !== undefined) {
-        definedName[name] = defaultValue;
+        dataValidation[name] = utils.parseBoolean(value);
     }
 }
 
-function optimiseDataValidations(model) {
-    // Squeeze alike data validations together into rectangular ranges
-    // to reduce file size and speed up Excel load time
-    const dvList = _.map(model, (dataValidation, address) => ({
-        address,
-        dataValidation,
-        marked: false,
-    }))
-        .filter((dv) => dv.dataValidation) // removed validations are kept as undefined entries
-        .sort((a, b) => _.strcmp(a.address, b.address));
-    const dvMap = _.keyBy(dvList, "address");
-    const matchCol = (addr, height, col) => {
+/** A data validation of the model, with the rectangle (`sqref`) it is written for. */
+type SqrefDataValidation = DataValidationModel & { sqref: string };
+
+/** An entry of the model while it is squeezed. */
+interface DvEntry {
+    address: string;
+    dataValidation: DataValidationModel;
+    marked: boolean;
+}
+
+/**
+ * Squeezes alike data validations together into rectangular ranges, to reduce file size and speed up Excel load time.
+ *
+ * @throws Error for a key of the model that is not a cell address or a range in its normal form (`A1`, `A1:B2`)
+ */
+function optimiseDataValidations(model: DataValidationsModel | undefined): SqrefDataValidation[] {
+    const keys = model ? Object.keys(model) : [];
+    const dvList: DvEntry[] = [];
+    for (const address of keys) {
+        // removed validations are kept as undefined entries
+        const dataValidation = model![address];
+        if (dataValidation) {
+            dvList.push({ address, dataValidation, marked: false });
+        }
+    }
+    dvList.sort((a, b) => _.strcmp(a.address, b.address));
+    // the model is not empty (dvList has entries) from here on
+    const dvs = model!;
+    const dvMap = new Map(dvList.map((dv) => [dv.address, dv]));
+    const matchCol = (addr: { row: number; address: string }, height: number, col: number): boolean => {
         for (let i = 0; i < height; i++) {
             const otherAddress = colCache.encodeAddress(addr.row + i, col);
-            if (!model[otherAddress] || !_.isEqual(model[addr.address], model[otherAddress])) {
+            if (!dvs[otherAddress] || !_.isEqual(dvs[addr.address], dvs[otherAddress])) {
                 return false;
             }
         }
         return true;
     };
-    return dvList
-        .map((dv) => {
-            if (!dv.marked) {
-                const addr = colCache.decodeEx(dv.address);
-                if (addr.dimensions) {
-                    dvMap[addr.dimensions].marked = true;
-                    return {
-                        ...dv.dataValidation,
-                        sqref: dv.address,
-                    };
-                }
-
-                // iterate downwards - finding matching cells
-                let height = 1;
-                let otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
-                while (model[otherAddress] && _.isEqual(dv.dataValidation, model[otherAddress])) {
-                    height++;
-                    otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
-                }
-
-                // iterate rightwards...
-
-                let width = 1;
-                while (matchCol(addr, height, addr.col + width)) {
-                    width++;
-                }
-
-                // mark all included addresses
-                for (let i = 0; i < height; i++) {
-                    for (let j = 0; j < width; j++) {
-                        otherAddress = colCache.encodeAddress(addr.row + i, addr.col + j);
-                        dvMap[otherAddress].marked = true;
-                    }
-                }
-
-                if (height > 1 || width > 1) {
-                    const bottom = addr.row + (height - 1);
-                    const right = addr.col + (width - 1);
-                    return {
-                        ...dv.dataValidation,
-                        sqref: `${dv.address}:${colCache.encodeAddress(bottom, right)}`,
-                    };
-                }
-                return {
-                    ...dv.dataValidation,
-                    sqref: dv.address,
-                };
+    const result: SqrefDataValidation[] = [];
+    for (const dv of dvList) {
+        if (dv.marked) {
+            continue;
+        }
+        const addr = colCache.decodeEx(dv.address);
+        if ("dimensions" in addr) {
+            if (!dvMap.has(addr.dimensions)) {
+                // not a range in its normal form (e.g. "$A$1:B2", "B2:A1")
+                throw new Error(`Invalid data validation address: ${dv.address}`);
             }
-            return null;
-        })
-        .filter(Boolean);
+            result.push({
+                ...dv.dataValidation,
+                sqref: dv.address,
+            });
+            continue;
+        }
+        if ("error" in addr) {
+            throw new Error(`Invalid data validation address: ${dv.address}`);
+        }
+
+        // iterate downwards - finding matching cells
+        let height = 1;
+        let otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
+        while (dvs[otherAddress] && _.isEqual(dv.dataValidation, dvs[otherAddress])) {
+            height++;
+            otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
+        }
+
+        // iterate rightwards...
+
+        let width = 1;
+        while (matchCol(addr, height, addr.col + width)) {
+            width++;
+        }
+
+        // mark all included addresses (entries of the model, found by matchCol; the first one is the key itself, unless it
+        // is not a cell address in its normal form)
+        for (let i = 0; i < height; i++) {
+            for (let j = 0; j < width; j++) {
+                otherAddress = colCache.encodeAddress(addr.row + i, addr.col + j);
+                const entry = dvMap.get(otherAddress);
+                if (!entry) {
+                    throw new Error(`Invalid data validation address: ${dv.address}`);
+                }
+                entry.marked = true;
+            }
+        }
+
+        if (height > 1 || width > 1) {
+            const bottom = addr.row + (height - 1);
+            const right = addr.col + (width - 1);
+            result.push({
+                ...dv.dataValidation,
+                sqref: `${dv.address}:${colCache.encodeAddress(bottom, right)}`,
+            });
+        } else {
+            result.push({
+                ...dv.dataValidation,
+                sqref: dv.address,
+            });
+        }
+    }
+    return result;
 }
 
-class DataValidationsXform extends BaseXform {
-    // options.loadBudget: {dataValidationCells}, shared by all the worksheets of a workbook being loaded (a budget per
-    // <dataValidations> element would be multiplied by the number of worksheets)
-    constructor(options) {
+/** The options of a {@link DataValidationsXform}. */
+export interface DataValidationsXformOptions {
+    /**
+     * The budget of expanded cells, shared by all the worksheets of a workbook being loaded (a budget per
+     * `<dataValidations>` element would be multiplied by the number of worksheets). Default: a budget of its own for
+     * each `<dataValidations>`.
+     */
+    loadBudget?: Pick<WorksheetLoadBudget, "dataValidationCells">;
+}
+
+/**
+ * `<dataValidations>` of a worksheet. Rendering squeezes alike validations of adjacent cells into rectangles. Parsing
+ * gives the model keyed by cell address, sharing one validation object between the cells of a `<dataValidation>`; ranges
+ * are expanded per cell within a budget of cells ({@link DataValidationsXform.MAX_EXPANDED_CELLS} per workbook), larger
+ * ones are kept as range keys (never expanded: a hostile `A1:XFD1048576` stays one key). Whole columns / rows are read as
+ * the rectangle they cover.
+ */
+class DataValidationsXform extends BaseXform<DataValidationsModel> {
+    /** The budget of cells that the ranges of a workbook being loaded are expanded to. */
+    static readonly MAX_EXPANDED_CELLS = MAX_EXPANDED_CELLS;
+
+    /** The budget shared by the worksheets of a workbook being loaded, if any. */
+    readonly loadBudget: Pick<WorksheetLoadBudget, "dataValidationCells"> | undefined;
+
+    /** While parsing: the budget of the current `<dataValidations>`. */
+    declare _budget: Pick<WorksheetLoadBudget, "dataValidationCells">;
+    /** While parsing: the `sqref` of the current `<dataValidation>`. */
+    declare _address: string | undefined;
+    /** While parsing: the current validation. */
+    declare _dataValidation: DataValidationModel;
+    /** While parsing: the chunks of text of the current `<formula1>` / `<formula2>`, if any. */
+    declare _formula: string[] | undefined;
+
+    constructor(options?: DataValidationsXformOptions) {
         super();
         this.loadBudget = options && options.loadBudget;
     }
 
-    get tag() {
+    get tag(): string {
         return "dataValidations";
     }
 
-    render(xmlStream, model) {
+    /** Writes the validations (nothing when there is none); `date` formulae are written as serial dates. */
+    override render(xmlStream: XmlStream, model: DataValidationsModel | undefined): void {
         const optimizedModel = optimiseDataValidations(model);
         if (optimizedModel.length) {
             xmlStream.openNode("dataValidations", { count: optimizedModel.length });
 
-            optimizedModel.forEach((value) => {
+            for (const value of optimizedModel) {
                 xmlStream.openNode("dataValidation");
 
                 if (value.type !== "any") {
@@ -157,52 +240,64 @@ class DataValidationsXform extends BaseXform {
                     xmlStream.addAttribute("error", value.error);
                 }
                 xmlStream.addAttribute("sqref", value.sqref);
-                (value.formulae || []).forEach((formula, index) => {
+                (value.formulae || []).forEach((formula: DataValidationFormula, index) => {
                     xmlStream.openNode(`formula${index + 1}`);
                     if (value.type === "date") {
                         xmlStream.writeText(utils.dateToExcel(new Date(formula)));
                     } else {
-                        xmlStream.writeText(formula);
+                        xmlStream.writeText(typeof formula === "object" ? formula.toString() : formula);
                     }
                     xmlStream.closeNode();
                 });
                 xmlStream.closeNode();
-            });
+            }
             xmlStream.closeNode();
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<dataValidations>`, `<dataValidation>`, `<formula1>` and `<formula2>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case "dataValidations":
+                // a plain object (it becomes the public worksheet.dataValidations.model): its keys are only cell and range
+                // references matched by addressRegex / rangeRegex, never raw strings of the file
                 this.model = {};
                 this._budget = this.loadBudget || { dataValidationCells: MAX_EXPANDED_CELLS };
                 return true;
 
             case "dataValidation": {
-                this._address = node.attributes.sqref;
-                const dataValidation = { type: node.attributes.type || "any", formulae: [] };
+                const { attributes } = node;
+                this._address = attributes.sqref;
+                // the type attribute of the file, unvalidated
+                const dataValidation: DataValidationModel = {
+                    type: (attributes.type || "any") as DataValidationModel["type"],
+                    formulae: [],
+                };
 
-                if (node.attributes.type) {
-                    assignBool(dataValidation, node.attributes, "allowBlank");
+                if (attributes.type) {
+                    assignBool(dataValidation, attributes, "allowBlank");
                 }
-                assignBool(dataValidation, node.attributes, "showInputMessage");
-                assignBool(dataValidation, node.attributes, "showErrorMessage");
+                assignBool(dataValidation, attributes, "showInputMessage");
+                assignBool(dataValidation, attributes, "showErrorMessage");
 
                 switch (dataValidation.type) {
                     case "any":
                     case "list":
                     case "custom":
                         break;
+                    case "whole":
+                    case "decimal":
+                    case "date":
+                    case "textLength":
                     default:
-                        assign(dataValidation, node.attributes, "operator", "between");
+                        assign(dataValidation, attributes, "operator", "between");
                         break;
                 }
-                assign(dataValidation, node.attributes, "promptTitle");
-                assign(dataValidation, node.attributes, "prompt");
-                assign(dataValidation, node.attributes, "errorStyle");
-                assign(dataValidation, node.attributes, "errorTitle");
-                assign(dataValidation, node.attributes, "error");
+                assign(dataValidation, attributes, "promptTitle");
+                assign(dataValidation, attributes, "prompt");
+                assign(dataValidation, attributes, "errorStyle");
+                assign(dataValidation, attributes, "errorTitle");
+                assign(dataValidation, attributes, "error");
 
                 this._dataValidation = dataValidation;
                 return true;
@@ -218,64 +313,75 @@ class DataValidationsXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this._formula) {
             this._formula.push(text);
         }
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of `<dataValidations>`, else `true` */
+    override parseClose(name: string): boolean {
         switch (name) {
             case "dataValidations":
                 return false;
             case "dataValidation": {
-                if (!this._dataValidation.formulae || !this._dataValidation.formulae.length) {
-                    delete this._dataValidation.formulae;
-                    delete this._dataValidation.operator;
+                const dataValidation = this._dataValidation;
+                // created by <dataValidations>, which holds this element
+                const model = this.model!;
+                const budget = this._budget;
+                if (!dataValidation.formulae || !dataValidation.formulae.length) {
+                    delete dataValidation.formulae;
+                    delete dataValidation.operator;
                 }
                 // The four known cases: 1. E4:L9 N4:U9  2.E4 L9  3. N4:U9  4. E4
                 const list = (this._address || "").split(/\s+/g);
-                list.forEach((addr) => {
+                for (const token of list) {
                     // whole columns / rows ('D:E', '4:4') are read as the rectangle they cover; outside the grid
                     // (null), they are ignored like the other tokens that are not cell references
-                    addr = DataValidations.wholeRangeAddress(addr.replace(/\$/g, "")) || "";
+                    const addr = wholeRangeAddress(token.replace(/\$/g, "")) || "";
                     if (rangeRegex.test(addr)) {
-                        const range = new Range(addr);
-                        if (range.count <= this._budget.dataValidationCells) {
-                            this._budget.dataValidationCells -= range.count;
-                            range.forEachAddress((address) => {
-                                this.model[address] = this._dataValidation;
+                        const range = new RangeOf(addr);
+                        if (range.count <= budget.dataValidationCells) {
+                            budget.dataValidationCells -= range.count;
+                            range.forEachAddress((address: string) => {
+                                model[address] = dataValidation;
                             });
                         } else {
                             // Too large to expand per cell (e.g. a whole column, or a hostile
                             // A1:XFD1048576): keep the range as a single key. DataValidations.find
                             // and the writer both understand range keys.
-                            this.model[range.range] = this._dataValidation;
+                            model[range.range] = dataValidation;
                         }
                     } else if (addressRegex.test(addr)) {
-                        this.model[addr] = this._dataValidation;
+                        model[addr] = dataValidation;
                     }
-                });
+                }
                 return true;
             }
             case "formula1":
             case "formula2": {
-                let formula = this._formula.join("");
+                const text = (this._formula || []).join("");
+                let formula: DataValidationFormula;
                 switch (this._dataValidation.type) {
                     case "whole":
                     case "textLength":
-                        formula = parseInt(formula, 10);
+                        formula = parseInt(text, 10);
                         break;
                     case "decimal":
-                        formula = parseFloat(formula);
+                        formula = parseFloat(text);
                         break;
                     case "date":
-                        formula = utils.excelToDate(parseFloat(formula));
+                        formula = utils.excelToDate(parseFloat(text));
                         break;
+                    case "any":
+                    case "list":
+                    case "custom":
                     default:
+                        formula = text;
                         break;
                 }
-                this._dataValidation.formulae.push(formula);
+                // a formula is read inside <dataValidation>, which created the formulae
+                this._dataValidation.formulae!.push(formula);
                 this._formula = undefined;
                 return true;
             }
@@ -284,7 +390,5 @@ class DataValidationsXform extends BaseXform {
         }
     }
 }
-
-DataValidationsXform.MAX_EXPANDED_CELLS = MAX_EXPANDED_CELLS;
 
 export default DataValidationsXform;

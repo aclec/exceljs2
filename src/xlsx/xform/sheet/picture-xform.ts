@@ -1,19 +1,22 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { SheetPartRefModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class PictureXform extends BaseXform {
-    get tag() {
+/** `<picture r:id="…"/>`: the background image of a worksheet (nothing is rendered without a model). */
+class PictureXform extends BaseXform<SheetPartRefModel> {
+    get tag(): string {
         return "picture";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: SheetPartRefModel | undefined): void {
         if (model) {
             xmlStream.leafNode(this.tag, { "r:id": model.rId });
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<picture>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 this.model = {
@@ -25,9 +28,9 @@ class PictureXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }
