@@ -112,14 +112,16 @@ async function csv(): Promise<void> {
     void worksheet;
 }
 
-// --- defined names: ranges given by their bounds (or a decoded reference) can be added -------------
+// --- defined names: ranges given by their bounds (or a decoded reference) can be added and removed -
 function definedNames(): void {
     const names = workbook.definedNames;
     names.addEx({ sheetName: "Sheet1", top: 1, left: 1, bottom: 2, right: 2 }, "range");
     names.addEx({ sheetName: "Sheet1", address: "A1", row: 1, col: 1 }, "cell");
     names.removeEx({ sheetName: "Sheet1", address: "A1", row: 1, col: 1 }, "cell");
-    // @ts-expect-error -- removing a range removes nothing: removeEx takes a cell
+    // a range given by its bounds is removed too
     names.removeEx({ sheetName: "Sheet1", top: 1, left: 1, bottom: 2, right: 2 }, "range");
+    names.removeAllNames({ sheetName: "Sheet1", top: 1, left: 1, bottom: 2, right: 2 });
+    names.remove("Sheet1!$A$1:$B$2", "range");
 }
 
 // --- ModelContainer: exported by the Node.js entry point ---------------------------------------------

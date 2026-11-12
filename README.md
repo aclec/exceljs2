@@ -107,8 +107,8 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 * **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
  once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
- and column splices, but are not enumerated by `definedNames.forEach()`, and removing a name from any
- cell of such a range removes the whole range.
+ and column splices, but are not enumerated by `definedNames.forEach()`. Removing a name from a cell
+ or a range inside such a range cuts it into the rectangles that remain (at most four per removal).
 * **Formulas.** Formulas longer than Excel's limit of 8,192 characters are rejected with an error
  when ExcelJS has to analyse them (translating a shared formula to another cell, `cell.dependencies`)
  instead of being scanned with regular expressions.

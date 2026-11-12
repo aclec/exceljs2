@@ -2724,7 +2724,8 @@ export interface DefinedNameCell {
 
 /**
  * The defined names of a workbook (`workbook.definedNames`). The cells of a name follow the rows and columns inserted or
- * removed; a range of more than 100,000 cells is kept as a whole (removing any of its cells removes the range).
+ * removed; a range of more than 100,000 cells is kept as a rectangle (removing cells from it cuts it into the rectangles
+ * that remain).
  */
 export interface DefinedNames {
     /**
@@ -2739,14 +2740,22 @@ export interface DefinedNames {
     addEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
 
     /**
-     * Removes a name from a cell, given as a reference (`"Sheet1!$A$1"`). A range reference removes nothing.
+     * Removes a name from a cell or from the cells of a range, given as a reference (`"Sheet1!$A$1"` or
+     * `"Sheet1!$A$1:$B$2"`).
      * @throws Error when a column or a row is out of bounds
      */
     remove(locStr: string, name: string): void;
-    /** Removes a name from a cell (and the range of more than 100,000 cells of the name that contains it). */
-    removeEx(location: DefinedNameCell, name: string): void;
-    /** Removes every name of a cell. */
-    removeAllNames(location: DefinedNameCell): void;
+    /**
+     * Removes a name from a cell, or from the cells of a range given by its 1-based bounds (`top`, `left`, `bottom`,
+     * `right`, e.g. a decoded range reference).
+     * @throws Error for a range whose bounds are not rows and columns of the sheet, or are reversed
+     */
+    removeEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
+    /**
+     * Removes every name of a cell, or of the cells of a range given by its 1-based bounds.
+     * @throws Error for a range whose bounds are not rows and columns of the sheet, or are reversed
+     */
+    removeAllNames(location: DefinedNameCell | (Location & { sheetName?: string })): void;
 
     /** Calls `callback` with each name and each of its cells (the cells of the very large ranges are not enumerated). */
     forEach(callback: (name: string, cell: DefinedNameCell) => void): void;

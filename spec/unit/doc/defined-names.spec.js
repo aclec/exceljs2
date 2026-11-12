@@ -1,4 +1,5 @@
 const DefinedNames = verquire("doc/defined-names");
+const colCache = verquire("utils/col-cache");
 
 describe("DefinedNames", () => {
     it("adds names for cells", () => {
@@ -26,6 +27,109 @@ describe("DefinedNames", () => {
         dn.remove("blort!A1", "foo");
 
         expect(dn.getNames("blort!A1")).to.deep.equal(["bar"]);
+    });
+
+    describe("removing a range", () => {
+        it("removes the cells of a range reference", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$B$2", "r");
+            dn.add("s!$A$1:$B$2", "other");
+            dn.remove("s!$A$1:$B$2", "r");
+
+            expect(dn.getRanges("r").ranges).to.deep.equal([]);
+            expect(dn.model).to.deep.equal([{ name: "other", ranges: ["s!$A$1:$B$2"] }]);
+        });
+
+        it("removes only the cells inside the range, on its sheet", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$C$3", "r");
+            dn.add("t!$A$1:$C$3", "r");
+            dn.remove("s!$B$1:$C$2", "r");
+
+            expect(dn.getRanges("r").ranges).to.deep.equal(["s!$A$1:$A$3", "s!$B$3:$C$3", "t!$A$1:$C$3"]);
+            expect(dn.getNames("s!$B$2")).to.deep.equal([]);
+            expect(dn.getNames("s!$C$3")).to.deep.equal(["r"]);
+        });
+
+        it("removes a range given by its bounds or decoded (removeEx)", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$B$2", "bounds");
+            dn.add("s!$A$1:$B$2", "decoded");
+            dn.removeEx({ sheetName: "s", top: 1, left: 1, bottom: 2, right: 2 }, "bounds");
+            dn.removeEx(colCache.decodeEx("s!$A$1:$B$2"), "decoded");
+
+            expect(dn.model).to.deep.equal([]);
+        });
+
+        it("removes a range from every name (removeAllNames)", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$B$2", "a");
+            dn.add("s!$B$2:$C$3", "b");
+            dn.removeAllNames({ sheetName: "s", top: 2, left: 2, bottom: 3, right: 3 });
+
+            expect(dn.model).to.deep.equal([{ name: "a", ranges: ["s!$A$1:$A$2", "s!$B$1"] }]);
+        });
+
+        it("throws for a range whose bounds are not rows and columns of the grid", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$B$2", "a");
+            for (const bounds of [
+                { top: 0, left: 1, bottom: 2, right: 2 },
+                { top: 2, left: 1, bottom: 1, right: 2 },
+                { top: 1, left: 1.5, bottom: 2, right: 2 },
+                { top: 1, left: 1, bottom: 2, right: 16385 },
+                { top: 1, left: 1, bottom: 1048577, right: 2 },
+            ]) {
+                expect(() => dn.removeEx({ sheetName: "s", ...bounds }, "a")).to.throw(Error, /Invalid range/);
+                expect(() => dn.removeAllNames({ sheetName: "s", ...bounds })).to.throw(Error, /Invalid range/);
+            }
+            expect(dn.model).to.deep.equal([{ name: "a", ranges: ["s!$A$1:$B$2"] }]);
+        });
+
+        it("removes a range from a name without cells there, or an unknown name", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1", "a");
+            dn.remove("s!$C$3:$D$4", "a");
+            dn.remove("s!$C$3:$D$4", "unknown");
+
+            expect(dn.model).to.deep.equal([{ name: "a", ranges: ["s!$A$1"] }]);
+        });
+
+        it("cuts a range kept as a rectangle into the rectangles that remain, without expanding it", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$XFD$1048576", "everything");
+            dn.remove("s!$B$2:$C$3", "everything");
+
+            expect(dn.getRanges("everything").ranges).to.deep.equal([
+                "s!$A$1:$XFD$1",
+                "s!$A$2:$A$3",
+                "s!$D$2:$XFD$3",
+                "s!$A$4:$XFD$1048576",
+            ]);
+            expect(dn.getNames("s!$B$2")).to.deep.equal([]);
+            expect(dn.getNames("s!$C$3")).to.deep.equal([]);
+            expect(dn.getNames("s!$D$3")).to.deep.equal(["everything"]);
+            expect(dn.matrixMap.everything).to.equal(undefined);
+        });
+
+        it("removes a rectangle covered by the range, and keeps one of another sheet", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$XFD$1048576", "big");
+            dn.add("t!$A$1:$XFD$1048576", "big");
+            dn.remove("s!$A$1:$XFD$1048576", "big");
+
+            expect(dn.getRanges("big").ranges).to.deep.equal(["t!$A$1:$XFD$1048576"]);
+        });
+
+        it("cuts a cell out of a range kept as a rectangle (the rest of the range stays named)", () => {
+            const dn = new DefinedNames();
+            dn.add("s!$A$1:$B$100000", "big");
+            dn.remove("s!$A$50", "big");
+
+            expect(dn.getRanges("big").ranges).to.deep.equal(["s!$A$1:$B$49", "s!$B$50", "s!$A$51:$B$100000"]);
+            expect(dn.getNames("s!$A$50")).to.deep.equal([]);
+            expect(dn.getNames("s!$A$51")).to.deep.equal(["big"]);
+        });
     });
 
     // get ranges example

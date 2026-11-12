@@ -1,4 +1,4 @@
-import colCache, { type DecodedEx } from "./col-cache";
+import colCache, { type DecodedEx, type RangeBounds } from "./col-cache";
 import { eachEntry, spliceEntries } from "./sparse-array";
 
 /** A cell of a {@link CellMatrix}: where it is. Cells created from a location are that location object itself. */
@@ -132,6 +132,32 @@ class CellMatrix<T extends object = object> {
         // a hole, as in all the sparse arrays (Object.keys must not list it)
         // eslint-disable-next-line @typescript-eslint/no-array-delete -- deliberate: no splice, the indexes are column numbers
         delete row[colIndex(address)];
+    }
+
+    /**
+     * Removes the cells of a rectangle of a sheet (a range without a sheet name: the cells of the sheet "undefined"), in
+     * time proportional to the cells of the sheet, whatever the size of the rectangle.
+     */
+    removeCellsIn(range: RangeBounds & { readonly sheetName?: string | undefined }): void {
+        const sheet = this.sheets[String(range.sheetName)];
+        if (!sheet) {
+            return;
+        }
+        eachEntry(sheet, (row, rowNumber) => {
+            if (rowNumber >= range.top && rowNumber <= range.bottom) {
+                const removed: number[] = [];
+                eachEntry(row, (_cell, colNumber) => {
+                    if (colNumber >= range.left && colNumber <= range.right) {
+                        removed.push(colNumber);
+                    }
+                });
+                for (const colNumber of removed) {
+                    // a hole, as in removeCellEx
+                    // eslint-disable-next-line @typescript-eslint/no-array-delete -- deliberate: no splice, the indexes are column numbers
+                    delete row[colNumber];
+                }
+            }
+        });
     }
 
     /** Calls callback for each cell of a sheet, by row then column. */

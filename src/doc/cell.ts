@@ -515,7 +515,7 @@ class Cell {
         this.workbook.definedNames.addEx(this.fullAddress, name);
     }
 
-    /** Removes the cell from a defined name (a large range kept as a rectangle is removed whole). */
+    /** Removes the cell from a defined name (a large range kept as a rectangle is cut around the cell). */
     removeName(name: string): void {
         this.workbook.definedNames.removeEx(this.fullAddress, name);
     }

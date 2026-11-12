@@ -28,8 +28,8 @@ export interface LargeNameRange {
 }
 
 /**
- * A location given to {@link DefinedNames.addEx}: a cell, a decoded reference (`colCache.decodeEx`), or a range given by
- * its bounds only (index.d.ts `Location & { sheetName }`).
+ * A location given to {@link DefinedNames.addEx} and {@link DefinedNames.removeEx}: a cell, a decoded reference
+ * (`colCache.decodeEx`), or a range given by its bounds only (index.d.ts `Location & { sheetName }`).
  */
 export type NameLocation = MatrixLocation | (RangeBounds & { sheetName?: string | undefined });
 
@@ -59,22 +59,75 @@ function spliceInterval(lo: number, hi: number, start: number, numDelete: number
 
 /** Whether a large range contains a cell location (a range or an error reference has no row: never contained). */
 function rangeContains(range: LargeNameRange, address: MatrixLocation): boolean {
-    const { row, col } = address as Partial<MatrixCell>;
     return (
+        "row" in address &&
         range.sheetName === address.sheetName &&
-        row !== undefined &&
-        col !== undefined &&
-        row >= range.top &&
-        row <= range.bottom &&
-        col >= range.left &&
-        col <= range.right
+        address.row >= range.top &&
+        address.row <= range.bottom &&
+        address.col >= range.left &&
+        address.col <= range.right
     );
+}
+
+/** Whether a bound is a row (or column) number of the grid: an integer from 1 to `max`. */
+const inGrid = (n: number, max: number): boolean => Number.isInteger(n) && n >= 1 && n <= max;
+
+/**
+ * The rectangle of a range location, validated.
+ * @throws Error for bounds that are not rows and columns of the grid, or are reversed
+ */
+function validRectangle(range: RangeBounds & { readonly sheetName?: string | undefined }): LargeNameRange {
+    const { sheetName, top, left, bottom, right } = range;
+    if (
+        !inGrid(top, colCache.MAX_ROWS) ||
+        !inGrid(bottom, colCache.MAX_ROWS) ||
+        !inGrid(left, colCache.MAX_COLS) ||
+        !inGrid(right, colCache.MAX_COLS) ||
+        top > bottom ||
+        left > right
+    ) {
+        throw new Error(`Invalid range: top ${top}, left ${left}, bottom ${bottom}, right ${right}`);
+    }
+    return { sheetName, top, left, bottom, right };
+}
+
+/**
+ * The parts of a large range outside a rectangle: the range itself when they do not intersect (or are on different
+ * sheets), else up to four rectangles (above, left of, right of, below the rectangle), never expanded per cell.
+ */
+function subtractRectangle(range: LargeNameRange, cut: LargeNameRange): LargeNameRange[] {
+    if (
+        range.sheetName !== cut.sheetName ||
+        cut.bottom < range.top ||
+        cut.top > range.bottom ||
+        cut.right < range.left ||
+        cut.left > range.right
+    ) {
+        return [range];
+    }
+    const { sheetName, top, left, bottom, right } = range;
+    const middleTop = Math.max(top, cut.top);
+    const middleBottom = Math.min(bottom, cut.bottom);
+    const parts: LargeNameRange[] = [];
+    if (top < cut.top) {
+        parts.push({ sheetName, top, left, bottom: cut.top - 1, right });
+    }
+    if (left < cut.left) {
+        parts.push({ sheetName, top: middleTop, left, bottom: middleBottom, right: cut.left - 1 });
+    }
+    if (right > cut.right) {
+        parts.push({ sheetName, top: middleTop, left: cut.right + 1, bottom: middleBottom, right });
+    }
+    if (bottom > cut.bottom) {
+        parts.push({ sheetName, top: cut.bottom + 1, left, bottom, right });
+    }
+    return parts;
 }
 
 /**
  * The defined names of a workbook. The cells of each name are kept one by one in a {@link CellMatrix} (so that names
  * follow the row and column splices); a range of more than 100,000 cells is kept as a rectangle (see
- * {@link LargeNameRange}): removing any cell of it removes the whole range.
+ * {@link LargeNameRange}): removing cells from it cuts it into the rectangles that remain.
  */
 class DefinedNames {
     /** Name → its cells. No prototype: names come from files. */
@@ -138,34 +191,68 @@ class DefinedNames {
         }
     }
 
-    /** Removes a cell from a name (`SheetName!$col$row`). */
+    /**
+     * Removes a cell or the cells of a range from a name.
+     * @param locStr - `SheetName!$col$row` or `SheetName!$c1$r1:$c2$r2`
+     * @throws Error when a column or a row is out of bounds
+     */
     remove(locStr: string, name: string): void {
         const location = colCache.decodeEx(locStr);
         this.removeEx(location, name);
     }
 
-    /** Removes a cell from a name (and the large ranges of the name that contain it). */
-    removeEx(location: MatrixLocation, name: string): void {
-        const matrix = this.getMatrix(name);
-        matrix.removeCellEx(location);
-        this._removeFromRanges(location, name);
+    /**
+     * Removes a cell or the cells of a range from a name: its cells there, and those parts of its large ranges (cut into
+     * the rectangles that remain, never expanded per cell).
+     * @throws Error for a range whose bounds are not rows and columns of the grid, or are reversed
+     */
+    removeEx(location: NameLocation, name: string): void {
+        this._removeCells(location, [name]);
     }
 
-    /** Removes a cell from all the names. */
-    removeAllNames(location: MatrixLocation): void {
-        for (const name of Object.keys(this.matrixMap)) {
-            this.matrixMap[name]!.removeCellEx(location);
-        }
-        for (const name of Object.keys(this.rangeMap)) {
-            this._removeFromRanges(location, name);
-        }
+    /**
+     * Removes a cell or the cells of a range from all the names.
+     * @throws Error for a range whose bounds are not rows and columns of the grid, or are reversed
+     */
+    removeAllNames(location: NameLocation): void {
+        this._removeCells(location, [...new Set([...Object.keys(this.matrixMap), ...Object.keys(this.rangeMap)])]);
     }
 
-    /** Large ranges are atomic: removing any cell of one removes the whole range. */
-    _removeFromRanges(location: MatrixLocation, name: string): void {
-        const ranges = this.rangeMap[name];
-        if (ranges) {
-            this.rangeMap[name] = ranges.filter((range) => !this._rangeContains(range, location));
+    /**
+     * Removes a cell or the cells of a range from names: the cells of their matrices (for a range, in time proportional
+     * to the cells of the sheet), and the rectangle of the location out of their large ranges.
+     * @throws Error for a range whose bounds are not rows and columns of the grid, or are reversed
+     */
+    _removeCells(location: NameLocation, names: readonly string[]): void {
+        let rectangle: LargeNameRange | undefined;
+        if ("top" in location) {
+            rectangle = validRectangle(location);
+            for (const name of names) {
+                const matrix = this.matrixMap[name];
+                if (matrix) {
+                    matrix.removeCellsIn(rectangle);
+                }
+            }
+        } else {
+            // a cell is a 1 x 1 rectangle; an error reference (#REF!) names no cell of the large ranges
+            rectangle =
+                "row" in location
+                    ? { sheetName: location.sheetName, top: location.row, left: location.col, bottom: location.row, right: location.col }
+                    : undefined;
+            for (const name of names) {
+                const matrix = this.matrixMap[name];
+                if (matrix) {
+                    matrix.removeCellEx(location);
+                }
+            }
+        }
+        if (rectangle) {
+            for (const name of names) {
+                const ranges = this.rangeMap[name];
+                if (ranges) {
+                    this.rangeMap[name] = ranges.flatMap((range) => subtractRectangle(range, rectangle));
+                }
+            }
         }
     }
 
