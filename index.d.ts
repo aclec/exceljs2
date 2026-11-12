@@ -1037,6 +1037,10 @@ export interface ConditionalFormattingBaseRule {
 	 */
 	priority?: number;
 	style?: Partial<Style>;
+	/**
+	 * When true, lower-priority rules are not evaluated for a cell this rule applies to
+	 */
+	stopIfTrue?: boolean;
 }
 export interface ExpressionRuleType extends ConditionalFormattingBaseRule {
 	type: 'expression';

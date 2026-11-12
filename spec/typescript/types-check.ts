@@ -74,7 +74,7 @@ function conditionalFormatting(): void {
   worksheet.addConditionalFormatting({
     ref: 'A1:A10',
     rules: operators.map(
-      (operator): ExcelJS.ConditionalFormattingRule => ({type: 'cellIs', operator, formulae: [1]})
+      (operator): ExcelJS.ConditionalFormattingRule => ({type: 'cellIs', operator, formulae: [1], stopIfTrue: true})
     ),
   });
   worksheet.addConditionalFormatting({
