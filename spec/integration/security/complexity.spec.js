@@ -1,6 +1,6 @@
 // Regression tests for hostile input that used to cost super-linear time or memory
 // (ReDoS, quadratic lookups, per-index traversals of sparse arrays).
-const { baseWorkbookBuffer, tamper, zipParts } = require("../../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, readPart, zipParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -200,5 +200,33 @@ describe("hostile input: algorithmic complexity", function () {
             expect(tl.col).to.equal(1.5);
             expect(tl.row).to.equal(1.5);
         });
+    });
+
+    it("writes a long rich text shared by many cells in linear time", async () => {
+        const CELLS = 4000;
+        let data = "";
+        for (let i = 1; i <= CELLS; i++) {
+            data += `<row r="${i}"><c r="A${i}" t="s"><v>0</v></c></row>`;
+        }
+        const buffer = await tamper(await baseWorkbookBuffer(), {
+            "xl/sharedStrings.xml": (xml) => xml.replace(/<si>.*<\/si>/, `<si>${"<r><t>a</t></r>".repeat(4000)}</si>`),
+            [SHEET]: (xml) => xml.replace(/<sheetData>.*<\/sheetData>/, `<sheetData>${data}</sheetData>`),
+        });
+        const wb = await load(buffer);
+        const { result: written, ms } = await timed(() => wb.xlsx.writeBuffer());
+        expect(ms).to.be.below(1000);
+        const ws = (await load(written)).getWorksheet(1);
+        expect(ws.getCell(`A${CELLS}`).value.richText.length).to.equal(4000);
+    });
+
+    it("still writes equal rich texts of different cells once", async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("s");
+        ws.getCell("A1").value = { richText: [{ text: "a", font: { bold: true } }, { text: "b" }] };
+        ws.getCell("A2").value = { richText: [{ text: "a", font: { bold: true } }, { text: "b" }] };
+        ws.getCell("A3").value = ws.getCell("A1").value;
+        ws.getCell("A4").value = { richText: [{ text: "a" }, { text: "b" }] };
+        const sst = await readPart(await wb.xlsx.writeBuffer(), "xl/sharedStrings.xml");
+        expect(sst).to.include('count="4" uniqueCount="2"');
     });
 });
