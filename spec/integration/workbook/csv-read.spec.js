@@ -134,6 +134,12 @@ describe('CSV read', () => {
       await ws.workbook.xlsx.writeBuffer();
     });
 
+    it('does not copy a value into several columns with an empty header', async () => {
+      const ws = await readCsv('a,,b,\n1,2,3,4\n', {parserOptions: {headers: true}});
+      // fast-csv keys both empty headers by '' and keeps the last value only
+      expect(ws.getRow(2).values).to.deep.equal([undefined, 1, undefined, 3, 4]);
+    });
+
     it('still reads rows as arrays without the option', async () => {
       const ws = await readCsv(CSV);
       expect(ws.getRow(1).values.slice(1)).to.deep.equal(['Name', 'Full Name', 'Birthday', 'Age']);
