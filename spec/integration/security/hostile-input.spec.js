@@ -195,6 +195,29 @@ describe("hostile input", function () {
             });
         });
 
+        it("keeps removals and overrides of cells inside a range key after a write", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                [SHEET]: (xml) =>
+                    afterSheetData(xml)(
+                        '<dataValidations count="1"><dataValidation type="list" sqref="B1:C1048576">' +
+                            '<formula1>"a,b"</formula1></dataValidation></dataValidations>'
+                    ),
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            ws.dataValidations.remove("B5");
+            ws.getCell("C7").dataValidation = { type: "whole", operator: "greaterThan", formulae: [3] };
+            const out = await ws.workbook.xlsx.writeBuffer();
+            const ws2 = (await load(out)).getWorksheet("Sheet1");
+            expect(ws2.getCell("B5").dataValidation).to.equal(undefined);
+            expect(ws2.getCell("C7").dataValidation).to.deep.include({ type: "whole", formulae: [3] });
+            ["B4", "B6", "C5", "B7", "C6", "C8", "C1048576"].forEach((address) => {
+                expect(ws2.getCell(address).dataValidation, address).to.deep.include({ type: "list" });
+            });
+            // no overlapping sqref is written
+            const sqrefs = [...(await readPart(out, SHEET)).matchAll(/sqref="([^"]+)"/g)].map((m) => m[1]);
+            expect(sqrefs).to.have.members(["B1:C4", "C5", "B6:C6", "B7", "B8:C1048576", "C7"]);
+        });
+
         it("does not write validations that were removed", async () => {
             const wb = new ExcelJS.Workbook();
             const ws = wb.addWorksheet("s");

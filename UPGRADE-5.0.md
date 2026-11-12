@@ -81,8 +81,9 @@ that do not fit are stored under a single **range key**:
 worksheet.dataValidations.model;
 ```
 
-`cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected.
-Code that reads `dataValidations.model` directly must handle keys of the form `'A1:B2'`.
+`cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected:
+setting or removing the validation of a cell inside a range key replaces that key by the rectangles around the cell. Code that reads
+`dataValidations.model` directly must handle keys of the form `'A1:B2'`.
 
 Also:
 
