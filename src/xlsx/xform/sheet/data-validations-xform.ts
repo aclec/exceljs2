@@ -191,12 +191,30 @@ function optimiseDataValidations(dvs: DataValidationsModel | undefined): SqrefDa
             dvList.push({ address, dataValidation, marked: false });
         }
     }
-    dvList.sort((a, b) => _.strcmp(a.address, b.address));
+    // the cells in reading order (row, then column: a text sort put G10 before G2, and a range started at G10 then
+    // overlapped the one started at G2), the ranges after them
+    const position = (dv: DvEntry): readonly [number, number] => {
+        const addr = decodeKey(dv.address);
+        return "row" in addr && "col" in addr ? [addr.row, addr.col] : [Infinity, Infinity];
+    };
+    const positions = new Map(dvList.map((dv) => [dv, position(dv)]));
+    dvList.sort((a, b) => {
+        const [rowA, colA] = positions.get(a) ?? [Infinity, Infinity];
+        const [rowB, colB] = positions.get(b) ?? [Infinity, Infinity];
+        return rowA - rowB || colA - colB || (rowA === Infinity ? _.strcmp(a.address, b.address) : 0);
+    });
     const dvMap = new Map(dvList.map((dv) => [dv.address, dv]));
-    const matchCol = (addr: { row: number; address: string }, height: number, col: number): boolean => {
+    // a cell that can join the range being built: same validation, not already in a range
+    const joins = (address: string, dataValidation: DataValidationModel): boolean => {
+        const entry = dvMap.get(address);
+        return entry !== undefined && !entry.marked && _.isEqual(dataValidation, entry.dataValidation);
+    };
+    const matchCol = (addr: { row: number }, dataValidation: DataValidationModel, height: number, col: number): boolean => {
+        if (col > colCache.MAX_COLS) {
+            return false;
+        }
         for (let i = 0; i < height; i++) {
-            const otherAddress = colCache.encodeAddress(addr.row + i, col);
-            if (!dvs[otherAddress] || !_.isEqual(dvs[addr.address], dvs[otherAddress])) {
+            if (!joins(colCache.encodeAddress(addr.row + i, col), dataValidation)) {
                 return false;
             }
         }
@@ -225,16 +243,14 @@ function optimiseDataValidations(dvs: DataValidationsModel | undefined): SqrefDa
 
         // iterate downwards - finding matching cells
         let height = 1;
-        let otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
-        while (dvs[otherAddress] && _.isEqual(dv.dataValidation, dvs[otherAddress])) {
+        while (addr.row + height <= colCache.MAX_ROWS && joins(colCache.encodeAddress(addr.row + height, addr.col), dv.dataValidation)) {
             height++;
-            otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
         }
 
         // iterate rightwards...
 
         let width = 1;
-        while (matchCol(addr, height, addr.col + width)) {
+        while (matchCol(addr, dv.dataValidation, height, addr.col + width)) {
             width++;
         }
 
@@ -242,8 +258,7 @@ function optimiseDataValidations(dvs: DataValidationsModel | undefined): SqrefDa
         // is not a cell address in its normal form)
         for (let i = 0; i < height; i++) {
             for (let j = 0; j < width; j++) {
-                otherAddress = colCache.encodeAddress(addr.row + i, addr.col + j);
-                const entry = dvMap.get(otherAddress);
+                const entry = dvMap.get(colCache.encodeAddress(addr.row + i, addr.col + j));
                 if (!entry) {
                     throw new Error(`Invalid data validation address: ${dv.address}`);
                 }

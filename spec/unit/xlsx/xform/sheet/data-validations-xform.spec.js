@@ -295,6 +295,31 @@ describe("DataValidationsXform formulae", () => {
         }
     });
 
+    it("squeezes the cells of a column or a block into ranges that do not overlap (rows beyond 9 included)", () => {
+        const dv = { type: "list", formulae: ['"a,b"'] };
+        const other = { type: "whole", operator: "between", formulae: [1, 2] };
+        const cells = (from, to, cols, validation) => {
+            const model = {};
+            for (let r = from; r <= to; r++) {
+                for (const c of cols) {
+                    model[`${c}${r}`] = validation;
+                }
+            }
+            return model;
+        };
+        const sqrefs = (model) => [...new DataValidationsXform().toXml(model).matchAll(/sqref="([^"]*)"/g)].map((m) => m[1]).sort();
+
+        expect(sqrefs(cells(2, 20, ["G"], dv))).to.deep.equal(["G2:G20"]);
+        expect(sqrefs(cells(3, 100, ["H"], dv))).to.deep.equal(["H3:H100"]);
+        expect(sqrefs(cells(9, 12, ["A", "B"], dv))).to.deep.equal(["A9:B12"]);
+        // two validations side by side, and a block with a hole: every cell is in exactly one range
+        const mixed = { ...cells(1, 12, ["A"], dv), ...cells(1, 12, ["B"], other), ...cells(1, 12, ["C"], dv) };
+        delete mixed.C5;
+        expect(sqrefs(mixed)).to.deep.equal(["A1:A12", "B1:B12", "C1:C4", "C6:C12"]);
+        // the last column and the last row of the grid
+        expect(sqrefs({ XFD1: dv, XFD2: dv, A1048576: dv, XFD1048576: dv })).to.deep.equal(["A1048576", "XFD1048576", "XFD1:XFD2"]);
+    });
+
     it("writes the formulas of a date rule that are not dates as they are", () => {
         for (const formula of ["TODAY()", "$B$1", "DATE(2020,1,5)", "B1+30", "Sheet1!A1", "mayday"]) {
             const xml = new DataValidationsXform().toXml({ A1: { type: "date", operator: "greaterThan", formulae: [formula] } });
