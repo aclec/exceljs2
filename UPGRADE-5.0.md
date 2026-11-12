@@ -46,7 +46,8 @@ Side effects:
 - The streaming `WorkbookReader` spools worksheets that come before the shared strings to a temporary directory (`os.tmpdir()/exceljs-*`)
   that is removed when the iteration ends, including when you `break` out of it early or an error is thrown. 4.x leaked the files and their
   file descriptors in that case.
-- Streams created by ExcelJS are `node:stream` streams instead of `readable-stream` ones.
+- Streams created by ExcelJS are `node:stream` streams instead of `readable-stream` ones. The streaming `WorkbookReader` still accepts any
+  readable stream as input, including `readable-stream` streams created by other libraries (through2, duplexify, ...).
 
 ## Limits when reading files
 
@@ -80,8 +81,9 @@ that do not fit are stored under a single **range key**:
 worksheet.dataValidations.model;
 ```
 
-`cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected.
-Code that reads `dataValidations.model` directly must handle keys of the form `'A1:B2'`.
+`cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected:
+removing or changing the validation of one cell inside a range key (`dataValidations.remove(address)`, `cell.dataValidation = ...`) is kept
+when the file is written. Code that reads `dataValidations.model` directly must handle keys of the form `'A1:B2'`.
 
 Also:
 
@@ -103,12 +105,62 @@ cells** (for example `Sheet1!$A$1:$XFD$1048576`) is now kept as a single rectang
 Excel limits formulas to 8,192 characters. ExcelJS now throws `Formula exceeds the Excel limit of 8192 characters` when it has to analyse a
 longer formula: translating a shared formula to another cell (`cell.formula` on a shared-formula clone) and `cell.dependencies`.
 
+## Hyperlinks to a place in the workbook
+
+Internal links (Excel's "Place in This Document": a `location` without a relationship) are now read. 4.x ignored them and returned the plain
+cell value. Such cells now have type `ValueType.Hyperlink` and a `{text, hyperlink}` value, with `#` before the location:
+
+```js
+// 4.x: 42                                   (type Number)
+// 5.0: {text: 42, hyperlink: '#Data!A1'}    (type Hyperlink)
+worksheet.getCell("A1").value;
+```
+
+`String(cell.value)` then gives `[object Object]`; use `cell.text`. An external link with a location (an anchor) is read as
+`'https://example.com/doc#part2'`.
+
+On write, a hyperlink that starts with `#` (`'#Sheet2!A1'`, `"#'My Sheet'!B2:C3"`, `'#MyDefinedName'`) is written as Excel writes internal
+links: `location="Sheet2!A1"`, without `#` and without an external relationship. 4.x wrote a relationship to `#...` (and, for `Sheet!A1`
+targets, a location with the `#`). The legacy form without `#` (`'Sheet2!A1'`) is also written as an internal link, so it reads back as
+`'#Sheet2!A1'`.
+
+## Styles are copied on write
+
+Style setters (`cell.font = ...`, `row.fill = ...`, `column.alignment = ...`, `cell.style = ...`) no longer modify a style object that is
+shared with other cells, rows or columns, or that your code passed in. In 4.x, cells that shared a style object (loaded from a file, or
+assigned with `b.style = a.style`) were all restyled:
+
+```js
+b.style = a.style;
+a.font = { bold: true };
+b.font; // 4.x: {bold: true}; 5.0: unchanged
+```
+
+Set the property on each cell that must change. Merged cells still share the style of their master cell. Copying costs time and memory when
+restyling many cells: about twice as slow per setter, and about 26 MB of heap for restyling 200,000 loaded cells.
+
 ## Other behaviour changes
 
 - **Invalid XML characters are removed on write.** U+FFFE, U+FFFF and unpaired surrogates (which are not allowed in XML 1.0) are stripped
   from text when writing xlsx, like control characters already were. Valid surrogate pairs (emoji, etc.) are kept.
 - **CSV special values.** When reading CSV, cells whose text is `__proto__`, `constructor`, `toString`, ... are read as plain strings. 4.x
   returned `Object.prototype` or built-in functions.
+- **CSV numbers.** Whitespace-only cells (`' '`) are read as strings (4.x: `0`). Integers beyond `Number.MAX_SAFE_INTEGER` (20-digit ids)
+  are read as strings instead of rounded numbers.
+- **CSV headers.** `parserOptions.headers` is supported (4.x threw). The header names become the column keys and row 1 of the worksheet; the
+  data starts at row 2.
+- **Tables.** When a file omits `headerRowCount` (default 1), `table.headerRow` and `filterButton` are read as `true` (4.x: `false`). A
+  table without a header row is written without `<autoFilter>`.
+- **Alignment.** `wrapText` and `shrinkToFit` attributes equal to `0` (the default) are no longer read into `alignment` as `false`.
+- **`worksheet.tables`** is still a plain object keyed by table name. Use `worksheet.getTable(name)`, which only returns tables (a table may
+  be named `constructor` or `__proto__`).
+- **Streaming `WorksheetReader.id`** is the `sheetId` of the worksheet (a number) whenever the worksheet can be matched to `workbook.xml`.
+  4.x failed to match more files (absolute relationship targets, worksheets stored before `workbook.xml`) and then gave the number of the
+  sheet file as a string (`'1'` for `sheet1.xml`).
+- **Streaming `parse()` with `sharedStrings: 'emit'`** yields `{eventType: 'shared-strings', value: {index, text}}`, like the other events.
+  4.x yielded a bare `{index, text}`.
+- **ISO 8601 date cells (`t="d"`)** are read as dates by both readers, as UTC when they have no offset. `T24:00` is 00:00 of the next day;
+  values that are not valid dates stay strings.
 - **Object keys `__proto__`, `constructor` and `prototype`** in objects given to ExcelJS (for example `cell.note = JSON.parse(...)`) are
   ignored when they are merged into internal models.
 - **Pivot tables** (experimental): field names and values are XML-escaped.
