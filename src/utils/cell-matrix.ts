@@ -3,7 +3,10 @@ import { deepMerge } from "./under-dash";
 import { createDictionary } from "./utils";
 import { eachEntry, spliceEntries } from "./sparse-array";
 
-/** A cell of a {@link CellMatrix}: where it is. Cells created from a location are that location object itself. */
+/**
+ * A cell of a {@link CellMatrix}: where it is. Cells created from a location are a copy of it (the matrix changes its
+ * cells: a defined name marks them, the splices move them; a location may be an address shared by colCache).
+ */
 export interface MatrixCell {
     sheetName?: string | undefined;
     /** The address without `$` signs, e.g. `"B3"`. */
@@ -107,7 +110,7 @@ class CellMatrix<T extends object = object> {
     }
 
     /**
-     * The cell of a location; when it is missing and create is true, the location itself becomes the cell (merged with
+     * The cell of a location; when it is missing and create is true, a copy of the location becomes the cell (merged with
      * a copy of the template). A location without row and column (a range, an error reference) is found by its sheet
      * name only: one such location is kept per sheet.
      */
@@ -243,7 +246,7 @@ class CellMatrix<T extends object = object> {
     }
 
     /**
-     * The cell of the location's column in row; when missing and create is true, the location itself merged with a copy
+     * The cell of the location's column in row; when missing and create is true, a copy of the location merged with a copy
      * of the template.
      */
     findRowCell(row: MatrixEntry<T>[], address: MatrixCell, create?: boolean): MatrixEntry<T> | undefined {
@@ -257,7 +260,7 @@ class CellMatrix<T extends object = object> {
         return undefined;
     }
 
-    /** The location without row and column kept for the location's sheet; when missing and create is true, the location. */
+    /** The location without row and column kept for the location's sheet; when missing and create is true, a copy of the location. */
     private findUnaddressed(address: UnaddressedLocation, create?: boolean): (UnaddressedLocation & Partial<T>) | undefined {
         const key = sheetKey(address);
         const found = this.unaddressed.get(key);
@@ -273,12 +276,13 @@ class CellMatrix<T extends object = object> {
     }
 
     /**
-     * The location itself, with a deep copy of the template merged in (plain objects and arrays copied, undefined values
+     * A copy of the location (never the location itself: it may be an address that colCache shares, and the matrix
+     * changes its cells), with a deep copy of the template merged in (plain objects and arrays copied, undefined values
      * skipped: for a JSON template, what a JSON copy gives).
      */
     private withTemplate<L extends object>(location: L): L & Partial<T> {
         const copy: Partial<T> = this.template ? deepMerge({}, this.template) : {};
-        return Object.assign(location, copy);
+        return { ...location, ...copy };
     }
 
     /** Moves the rows of a sheet as Array#splice(start, numDelete, numInsert empty rows) would. */
