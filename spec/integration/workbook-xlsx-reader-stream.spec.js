@@ -297,6 +297,49 @@ describe("WorkbookReader (stream)", () => {
             expect(files.handles[0].fd).to.equal(-1);
         });
 
+        it("does not leave an unhandled rejection when closing the file of a collected worksheet fails", async function () {
+            this.timeout(10000);
+            const gc = exposeGc();
+            const files = trackOpenedFiles();
+            const { open } = fs.promises;
+            fs.promises.open = async (...args) => {
+                const handle = await open.apply(fs.promises, args);
+                const close = handle.close.bind(handle);
+                handle.close = async () => {
+                    await close();
+                    throw new Error("simulated close failure");
+                };
+                return handle;
+            };
+            // the rejection would be reported to mocha's own listener: record it instead
+            const listeners = process.listeners("unhandledRejection");
+            process.removeAllListeners("unhandledRejection");
+            const unhandled = [];
+            process.on("unhandledRejection", (reason) => unhandled.push(reason));
+            try {
+                const buffer = await bigSheetFirstBuffer();
+                for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                    if (worksheet.name !== "Second") continue;
+                    // eslint-disable-next-line no-unused-vars
+                    for await (const row of worksheet) {
+                        // read
+                    }
+                }
+                for (let i = 0; i < 50 && files.handles[0].fd !== -1; i++) {
+                    gc();
+                    await new Promise((resolve) => setTimeout(resolve, 20));
+                }
+                expect(files.handles[0].fd).to.equal(-1);
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            } finally {
+                fs.promises.open = open;
+                files.restore();
+                process.removeAllListeners("unhandledRejection");
+                listeners.forEach((listener) => process.on("unhandledRejection", listener));
+            }
+            expect(unhandled.map((reason) => reason.message)).to.deep.equal([]);
+        });
+
         it("closes the spooled worksheet file before removing the temp dir when every worksheet is read", async () => {
             const files = trackOpenedFiles();
             const removed = trackRemovals(files);
