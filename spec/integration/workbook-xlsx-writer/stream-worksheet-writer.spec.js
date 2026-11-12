@@ -1,5 +1,5 @@
 // Streaming writer (ExcelJS.stream.xlsx.WorkbookWriter): sheet XML structure and shared strings.
-const {PassThrough} = require('stream');
+const {PassThrough, Readable} = require('stream');
 const JSZip = require('jszip');
 
 const ExcelJS = verquire('exceljs');
@@ -92,5 +92,44 @@ describe('WorkbookWriter (stream)', () => {
     expect(ws2.pageSetup.showGridLines).to.equal(true);
     expect(ws2.conditionalFormattings[0].rules[0].type).to.equal('dataBar');
     expect(ws2.getCell('B1').hyperlink).to.equal('https://example.com');
+  });
+
+  it('keeps distinct rich text values apart in shared strings', async () => {
+    const bold = {richText: [{font: {bold: true}, text: 'first'}]};
+    const mixed = {richText: [{text: 'second '}, {font: {italic: true}, text: 'part'}]};
+    const json = JSON.stringify(bold);
+    const values = [bold, mixed, json, '[object Object]', bold, 'plain'];
+    const buffer = await writeBuffer(
+      wb => {
+        const ws = wb.addWorksheet('Sheet');
+        values.forEach((value, index) => {
+          ws.getCell(index + 1, 1).value = value;
+        });
+      },
+      {useSharedStrings: true}
+    );
+
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(buffer);
+    const read = values.map((value, index) => wb2.getWorksheet('Sheet').getCell(index + 1, 1).value);
+    expect(read[0].richText.map(({text}) => text)).to.deep.equal(['first']);
+    expect(read[0].richText[0].font.bold).to.equal(true);
+    expect(read[1].richText.map(({text}) => text)).to.deep.equal(['second ', 'part']);
+    expect(read.slice(2, 4)).to.deep.equal([json, '[object Object]']);
+    expect(read[4]).to.deep.equal(read[0]);
+    expect(read[5]).to.equal('plain');
+
+    // the streaming reader sees the same values
+    const streamed = [];
+    for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]))) {
+      for await (const row of worksheet) {
+        streamed.push(row.values[1]);
+      }
+    }
+    const text = value => (value.richText ? value.richText.map(run => run.text).join('|') : value);
+    expect(streamed.map(text)).to.deep.equal(['first', 'second |part', json, '[object Object]', 'first', 'plain']);
+
+    const xml = await readPart(buffer, 'xl/sharedStrings.xml');
+    expect(xml).to.match(/<sst [^>]*uniqueCount="5"/);
   });
 });
