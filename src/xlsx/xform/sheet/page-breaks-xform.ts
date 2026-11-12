@@ -1,29 +1,88 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
-import type { RowBreak } from "../../../../index";
+import type { RowBreakModel } from "../../../types";
+import colCache from "../../../utils/col-cache";
 import BaseXform from "../base-xform";
 
+/** An xsd:unsignedInt written in decimal digits (at most 10 of them: anchored, no backtracking). */
+const unsignedIntRegex = /^[0-9]{1,10}$/;
+
+/** The longest attribute value quoted in an error message. */
+const MAX_QUOTED = 32;
+
 /**
- * A page break, `<brk id="5" max="16383" man="1"/>` (ECMA-376 CT_Break), rendered from index.d.ts `RowBreak` (its
- * properties are written as the attributes). Parsing keeps the `ref` attribute, which CT_Break does not have (so
- * `undefined`): the breaks are not read back.
+ * An unsigned integer attribute of a `<brk>`, or its default.
+ * @param max - the largest valid value
+ * @throws Error for anything but decimal digits, or a value above `max`
  */
-class PageBreaksXform extends BaseXform<Partial<RowBreak> | string> {
+function unsignedAttribute(node: SaxTag, name: "id" | "min" | "max", max: number): number | undefined {
+    const value = node.attributes[name];
+    if (value === undefined) {
+        return undefined;
+    }
+    const n = unsignedIntRegex.test(value) ? Number(value) : Number.NaN;
+    if (!(n <= max)) {
+        throw new Error(
+            `Invalid page break <brk ${name}=${JSON.stringify(value.slice(0, MAX_QUOTED))}>: an integer from 0 to ${max} is expected`
+        );
+    }
+    return n;
+}
+
+/**
+ * The `man` attribute (xsd:boolean, default false) of a `<brk>`, as the model holds it: 1 or 0.
+ * @throws Error for a value that is not an xsd:boolean
+ */
+function manualAttribute(node: SaxTag): number {
+    const value = node.attributes.man;
+    switch (value) {
+        case "1":
+        case "true":
+            return 1;
+        case undefined:
+        case "0":
+        case "false":
+            return 0;
+        default:
+            throw new Error(`Invalid page break <brk man=${JSON.stringify(value.slice(0, MAX_QUOTED))}>: a boolean is expected`);
+    }
+}
+
+/**
+ * A page break between rows, `<brk id="5" max="16383" man="1"/>` (ECMA-376 CT_Break), rendered from a
+ * {@link RowBreakModel} (its properties are the attributes). Parsing gives the CT_Break defaults for the
+ * absent attributes (`id`, `max` 0; `man` 0, i.e. an automatic break; `min` absent), the `pt` attribute is not kept.
+ */
+class PageBreaksXform extends BaseXform<RowBreakModel> {
     get tag(): string {
         return "brk";
     }
 
-    override render(xmlStream: XmlStream, model: Partial<RowBreak>): void {
-        xmlStream.leafNode("brk", model);
+    override render(xmlStream: XmlStream, model: RowBreakModel): void {
+        // in the order of the properties of row.addPageBreak (an absent min is not written)
+        xmlStream.leafNode("brk", { id: model.id, max: model.max, man: model.man, min: model.min });
     }
 
-    /** @returns `true` for `<brk>` */
+    /**
+     * @returns `true` for `<brk>`
+     * @throws Error for an attribute that is not of its xsd type, or out of the worksheet: `id` (the row) from 0 to
+     * 1,048,576, `min` and `max` (0-based columns) from 0 to 16,383
+     */
     override parseOpen(node: SaxTag): boolean {
-        if (node.name === "brk") {
-            this.model = node.attributes.ref;
-            return true;
+        if (node.name !== "brk") {
+            return false;
         }
-        return false;
+        const model: RowBreakModel = {
+            id: unsignedAttribute(node, "id", colCache.MAX_ROWS) ?? 0,
+            max: unsignedAttribute(node, "max", colCache.MAX_COLS - 1) ?? 0,
+            man: manualAttribute(node),
+        };
+        const min = unsignedAttribute(node, "min", colCache.MAX_COLS - 1);
+        if (min !== undefined) {
+            model.min = min;
+        }
+        this.model = model;
+        return true;
     }
 
     override parseText(): void {}

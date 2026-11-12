@@ -11,9 +11,10 @@ type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B 
 declare const workbook: ExcelJS.Workbook;
 declare const worksheet: ExcelJS.Worksheet;
 
-// --- views: null for a worksheet read without <sheetViews>; flat model with style / workbookViewId / tabSelected -----
+// --- views: [] also for a worksheet read without <sheetViews>; flat model with style / workbookViewId / tabSelected --
 function views(): void {
-    const nullable: Equals<typeof worksheet.views, ExcelJS.WorksheetViewModel[] | null> = true;
+    const list: Equals<typeof worksheet.views, ExcelJS.WorksheetViewModel[]> = true;
+    worksheet.views.push({ state: "frozen", ySplit: 1 });
     worksheet.views = [{ state: "frozen", xSplit: 1, ySplit: 1, style: "pageLayout", tabSelected: true, workbookViewId: 0 }];
     worksheet.views = [{ state: "normal" }];
     const style: ExcelJS.WorksheetViewModel["style"] = "pageBreakPreview";
@@ -21,7 +22,7 @@ function views(): void {
     worksheet.views = [view];
     // @ts-expect-error an unknown style
     worksheet.views = [{ style: "normal" }];
-    void nullable;
+    void list;
     void style;
 }
 
@@ -37,11 +38,12 @@ function viewCommon(): ExcelJS.WorksheetViewCommon {
     };
 }
 
-// --- header and footer: null for a worksheet read without <headerFooter> ---------------------------------------------
+// --- header and footer: the default also for a worksheet read without <headerFooter> ----------------------------------
 function headerFooter(): void {
-    const nullable: Equals<typeof worksheet.headerFooter, ExcelJS.WorksheetHeaderFooter | null> = true;
+    const defined: Equals<typeof worksheet.headerFooter, ExcelJS.WorksheetHeaderFooter> = true;
+    worksheet.headerFooter.oddFooter = "&P";
     worksheet.headerFooter = { oddHeader: "&CPage &P", evenHeader: null };
-    void nullable;
+    void defined;
 }
 
 // --- page setup: margins null when read without <pageMargins>; printer defaults, copies, first page number ----------
@@ -126,7 +128,8 @@ function model(): void {
     const dimensions: Equals<typeof m.dimensions, ExcelJS.Range> = true;
     const merges: Equals<typeof m.merges, string[]> = true;
     const state: Equals<typeof m.state, ExcelJS.WorksheetState> = true;
-    const views: Equals<typeof m.views, ExcelJS.WorksheetViewModel[] | null> = true;
+    const views: Equals<typeof m.views, ExcelJS.WorksheetViewModel[]> = true;
+    const headerFooter: Equals<typeof m.headerFooter, ExcelJS.WorksheetHeaderFooter> = true;
     const media: Equals<typeof m.media, ExcelJS.WorksheetMediumModel[]> = true;
     const rows: ExcelJS.RowModel[] = m.rows;
     const tables: ExcelJS.WorksheetTableModel[] = m.tables;
@@ -137,12 +140,14 @@ function model(): void {
             void col;
         }
     }
-    // a copy of a worksheet keeps its merges through mergeCells
-    workbook.addWorksheet("copy").model = { ...m, name: "copy", mergeCells: m.merges };
+    // a copy of a worksheet keeps its merges (read from merges when mergeCells is absent)
+    workbook.addWorksheet("copy").model = { ...m, name: "copy" };
+    workbook.addWorksheet("copy2").model = { ...m, name: "copy2", mergeCells: m.merges };
     void dimensions;
     void merges;
     void state;
     void views;
+    void headerFooter;
     void media;
     void rows;
     void tables;

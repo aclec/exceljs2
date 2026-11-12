@@ -295,8 +295,9 @@ export interface ConditionalFormattingModel {
 // Views, page setup, properties, protection
 
 /**
- * A manual page break after a row (`row.addPageBreak`, rendered as a `<brk>` of `<rowBreaks>`): `id` is the row number,
- * `min` / `max` the 0-based first and last columns (`min` absent for the first column), `man` 1 (manual).
+ * A page break after a row (`row.addPageBreak`, a `<brk>` of `<rowBreaks>`): `id` is the row number, `min` / `max` the
+ * 0-based first and last columns (`min` absent for the first column), `man` 1 for a manual break (`row.addPageBreak`),
+ * 0 for an automatic one (read from a file).
  */
 export interface RowBreakModel {
     id: number;
@@ -334,8 +335,9 @@ export interface SheetViewModel {
 
 /**
  * The page setup of a worksheet: index.d.ts `PageSetup` (with `margins`, the print options, the print area and titles).
- * Parse: `{ fitToPage, margins }` merged with the page-setup and print-options models; also `useFirstPageNumber`,
- * `usePrinterDefaults`, `copies`. The document defaults have `rowBreaks` / `colBreaks` set to `null`.
+ * Parse: `{ fitToPage, margins }` merged with the page-setup and print-options models; also `usePrinterDefaults`,
+ * `copies`, and `firstPageNumber` with `useFirstPageNumber` when the file gives or uses a first page number. The document
+ * defaults have `rowBreaks` / `colBreaks` set to `null`.
  */
 export type PageSetupModel = Partial<Omit<PageSetup, "margins">> & {
     /** `null` when a parsed worksheet has no `<pageMargins>`. */
@@ -528,8 +530,8 @@ export interface TableModel {
  * A worksheet as the document produces it (`Worksheet.model`, src/doc/worksheet.ts) and consumes it (`Worksheet.model =`),
  * and as worksheet-xform prepares and renders it.
  *
- * Doc getter only: `id`, `state`, `rowBreaks`, `dimensions`, `merges`, `pivotTables`. Doc setter only: `mergeCells` (not
- * `merges`). Write-side additions (worksheet-xform prepare): `mergeCells`, `hyperlinks`, `comments`, `rels`, `drawing`,
+ * Doc getter only: `id`, `state`, `dimensions`, `merges` (the setter reads them when `mergeCells` is absent),
+ * `pivotTables`. Doc setter: `mergeCells`, else `merges`; `rowBreaks` (none when absent). Write-side additions (worksheet-xform prepare): `mergeCells`, `hyperlinks`, `comments`, `rels`, `drawing`,
  * `background`, `image`; xlsx.ts adds `rId`, `shapeBlock`.
  *
  * Index.d.ts `WorksheetModel` is a subset of this (it lacks dataValidations, state, sheetProtection, tables, ...).
@@ -541,12 +543,12 @@ export interface WorksheetModel {
     dataValidations: DataValidationsModel;
     properties: WorksheetPropertiesModel;
     pageSetup: PageSetupModel;
-    /** `null` for a worksheet read from a file without `<headerFooter>`. */
-    headerFooter: HeaderFooterModel | null;
-    /** The manual page breaks between rows (`<rowBreaks>`). */
+    /** The default (see header-footer-xform `defaultHeaderFooter`) for a worksheet read from a file without them. */
+    headerFooter: HeaderFooterModel;
+    /** The page breaks between rows (`<rowBreaks>`): always given by the getter and a parse. */
     rowBreaks?: RowBreakModel[];
-    /** `null` for a worksheet read from a file without `<sheetViews>`. */
-    views: SheetViewModel[] | null;
+    /** `[]` for a worksheet read from a file without `<sheetViews>`. */
+    views: SheetViewModel[];
     autoFilter?: AutoFilterModel | null;
     media: WorksheetMediumModel[];
     sheetProtection?: SheetProtectionModel | null;
@@ -559,9 +561,9 @@ export interface WorksheetModel {
     rows: RowModel<CellModel>[];
     /** Doc getter: the used range (a Range, rendered as its `range`). Parse: the `ref` string. */
     dimensions?: Range | string;
-    /** Doc getter: the merged ranges (`A1:B2`). */
+    /** Doc getter: the merged ranges (`A1:B2`); read by the doc setter when `mergeCells` is absent. */
     merges?: string[];
-    /** Write (prepare) and parse: the merged ranges; read by the doc setter. */
+    /** Write (prepare) and parse: the merged ranges; read first by the doc setter. */
     mergeCells?: string[];
 
     // write side (worksheet-xform prepare, xlsx.ts)
@@ -597,12 +599,16 @@ export interface ParsedWorksheetModel {
     /** reconcile: compacted (no holes), every row and cell with its number / address. */
     rows?: RowModel<ParsedCellModel>[] | null;
     mergeCells?: string[] | null;
+    /** The page breaks between rows (`[]` without `<rowBreaks>`). */
+    rowBreaks: RowBreakModel[];
     hyperlinks?: SheetHyperlinkModel[] | null;
     dataValidations?: DataValidationsModel | null;
     properties: WorksheetPropertiesModel;
-    views?: SheetViewModel[] | null;
+    /** `[]` without `<sheetViews>`. */
+    views: SheetViewModel[];
     pageSetup: PageSetupModel;
-    headerFooter?: HeaderFooterModel | null;
+    /** The default (header-footer-xform `defaultHeaderFooter`) without `<headerFooter>`. */
+    headerFooter: HeaderFooterModel;
     background?: SheetPartRefModel | null;
     drawing?: SheetPartRefModel | null;
     /** The `<tablePart>`s; reconcile: the table models of the worksheet. */

@@ -143,12 +143,13 @@ export interface WorkbookPivotCacheModel {
 
 /**
  * `xl/workbook.xml` as book/workbook-xform parses it: the lists absent from the file are `undefined` (`definedNames`
- * absent); `properties` is `{ date1904 }` (`{}` without `<workbookPr>`); `calcProperties` is always `{}`.
+ * absent), but `views` (`[]`); `properties` is `{ date1904 }` (`{}` without `<workbookPr>`); `calcProperties` is always
+ * `{}`.
  */
 export interface WorkbookPartModel {
     sheets?: SheetDefModel[];
     properties: Partial<WorkbookProperties>;
-    views?: WorkbookViewModel[];
+    views: WorkbookViewModel[];
     calcProperties: Partial<CalculationProperties>;
     definedNames?: DefinedNameModel[];
 }
@@ -208,8 +209,8 @@ export interface WorkbookModel extends CoreModel {
     worksheets: WorksheetModel[];
     sheets?: WorksheetModel[] | SheetDefModel[];
     definedNames: DefinedNameModel[];
-    /** `undefined` once a file without `<bookViews>` is read */
-    views: WorkbookViewModel[] | undefined;
+    /** `[]` for a file without `<bookViews>` */
+    views: WorkbookViewModel[];
     company?: string;
     manager?: string;
     /** theme part name (`theme1`) → XML */
@@ -265,7 +266,8 @@ export interface WorkbookReadModel extends CoreModel {
     workbookRels?: RelationshipModel[];
     sheets?: SheetDefModel[];
     definedNames?: DefinedNameModel[];
-    views?: WorkbookViewModel[];
+    /** The workbook views (`[]` until `xl/workbook.xml` is read, and for a file without `<bookViews>`). */
+    views: WorkbookViewModel[];
     properties?: Partial<WorkbookProperties>;
     calcProperties?: Partial<CalculationProperties>;
     company?: string;

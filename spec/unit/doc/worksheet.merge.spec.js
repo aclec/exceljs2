@@ -260,5 +260,26 @@ describe("Worksheet", () => {
             expect(slave.value).to.equal(1);
             expect(ws.getCell("A1").value).to.equal("top");
         });
+
+        it("keeps the merges when a worksheet model is copied (the getter gives `merges`)", () => {
+            const wb = new Excel.Workbook();
+            const ws1 = wb.addWorksheet("one");
+            ws1.getCell("A1").value = "top";
+            ws1.mergeCells("A1:B2");
+            const ws2 = wb.addWorksheet("two");
+            ws2.model = { ...ws1.model, name: "two" };
+            expect(ws2.model.merges).to.deep.equal(["A1:B2"]);
+            expect(ws2.getCell("B2").isMerged).to.be.true();
+            expect(ws2.getCell("B2").value).to.equal("top");
+        });
+
+        it("reads `mergeCells` rather than `merges` when a model has both", () => {
+            const wb = new Excel.Workbook();
+            const ws1 = wb.addWorksheet("one");
+            ws1.mergeCells("A1:B2");
+            const ws2 = wb.addWorksheet("two");
+            ws2.model = { ...ws1.model, name: "two", mergeCells: ["C3:D4"] };
+            expect(ws2.model.merges).to.deep.equal(["C3:D4"]);
+        });
     });
 });

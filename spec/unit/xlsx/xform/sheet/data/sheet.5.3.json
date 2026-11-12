@@ -18,12 +18,22 @@
     ],
     "background": null,
     "mergeCells": null,
+    "rowBreaks": [],
     "dataValidations": null,
     "drawing": null,
-    "headerFooter": null,
+    "headerFooter": {
+        "differentFirst": false,
+        "differentOddEven": false,
+        "oddHeader": null,
+        "oddFooter": null,
+        "evenHeader": null,
+        "evenFooter": null,
+        "firstHeader": null,
+        "firstFooter": null
+    },
     "cols": null,
     "hyperlinks": null,
-    "views": null,
+    "views": [],
     "tables": null,
     "conditionalFormattings": []
 }

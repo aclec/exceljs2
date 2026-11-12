@@ -23,7 +23,8 @@ export type DocumentProperties = [
     Assert<Equals<ExcelJS.Workbook["contentStatus"], string | undefined>>,
     Assert<Equals<ExcelJS.Workbook["properties"], Partial<ExcelJS.WorkbookProperties>>>,
     Assert<Equals<ExcelJS.Workbook["calcProperties"], Partial<ExcelJS.CalculationProperties>>>,
-    Assert<Equals<ExcelJS.Workbook["views"], ExcelJS.WorkbookView[] | undefined>>,
+    Assert<Equals<ExcelJS.Workbook["views"], ExcelJS.WorkbookView[]>>,
+    Assert<Equals<ExcelJS.WorkbookModel["views"], ExcelJS.WorkbookView[]>>,
     Assert<Equals<ExcelJS.WorkbookView["activeTab"], number | undefined>>,
     Assert<Equals<ExcelJS.WorkbookModel["revision"], number | undefined>>,
     Assert<Equals<ExcelJS.WorkbookModel["themes"], Record<string, string> | undefined>>,
@@ -36,7 +37,7 @@ function documentProperties(): void {
     workbook.title = "Report";
     workbook.properties = {};
     workbook.calcProperties = { fullCalcOnLoad: true };
-    // @ts-expect-error -- undefined after loading a file without <bookViews>
+    // [] also after loading a file without <bookViews>
     workbook.views.push({ x: 0, y: 0, width: 10000, height: 20000, visibility: "visible" });
     workbook.views = [{ x: 0, y: 0, width: 10000, height: 20000, visibility: "visible" }];
     // @ts-expect-error -- a getter: assigning throws

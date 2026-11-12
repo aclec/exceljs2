@@ -3,6 +3,23 @@ import type XmlStream from "../../../utils/xml-stream";
 import type { HeaderFooterModel } from "../../../types";
 import BaseXform from "../base-xform";
 
+/**
+ * The header and footer of a new worksheet, and of a worksheet read from a file without `<headerFooter>`: no flag, no
+ * text (a new object on each call). Renders nothing.
+ */
+export function defaultHeaderFooter(): HeaderFooterModel {
+    return {
+        differentFirst: false,
+        differentOddEven: false,
+        oddHeader: null,
+        oddFooter: null,
+        evenHeader: null,
+        evenFooter: null,
+        firstHeader: null,
+        firstFooter: null,
+    };
+}
+
 /** The header / footer texts: the child elements of `<headerFooter>`, in CT_HeaderFooter order. */
 type HeaderFooterText = "oddHeader" | "oddFooter" | "evenHeader" | "evenFooter" | "firstHeader" | "firstFooter";
 

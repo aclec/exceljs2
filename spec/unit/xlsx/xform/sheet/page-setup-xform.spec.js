@@ -33,8 +33,6 @@ const expectations = [
             orientation: "portrait",
             horizontalDpi: 4294967295,
             verticalDpi: 4294967295,
-            firstPageNumber: 1,
-            useFirstPageNumber: false,
             usePrinterDefaults: false,
             copies: 1,
             blackAndWhite: false,
@@ -69,8 +67,6 @@ const expectations = [
             draft: true,
             cellComments: "atEnd",
             errors: "dash",
-            firstPageNumber: 1,
-            useFirstPageNumber: false,
             usePrinterDefaults: false,
             copies: 1,
             horizontalDpi: 4294967295,
@@ -96,8 +92,6 @@ const expectations = [
             orientation: "portrait",
             cellComments: "None",
             errors: "displayed",
-            firstPageNumber: 1,
-            useFirstPageNumber: false,
             usePrinterDefaults: false,
             copies: 1,
             horizontalDpi: 4294967295,
@@ -127,8 +121,6 @@ const expectations = [
             fitToWidth: 2,
             fitToHeight: 3,
             orientation: "landscape",
-            firstPageNumber: 1,
-            useFirstPageNumber: false,
             usePrinterDefaults: false,
             copies: 1,
             horizontalDpi: 4294967295,
@@ -160,6 +152,46 @@ describe("PageSetupXform", () => {
         it("does not write None, the default", () => {
             const xform = new PageSetupXform();
             expect(xform.toXml({ cellComments: "None", paperSize: 9 })).to.equal('<pageSetup paperSize="9"/>');
+        });
+    });
+
+    describe("first page number", () => {
+        function parse(attributes) {
+            const xform = new PageSetupXform();
+            xform.parseOpen({ name: "pageSetup", attributes });
+            const { firstPageNumber, useFirstPageNumber } = xform.model;
+            return { firstPageNumber, useFirstPageNumber, keys: Object.keys(xform.model) };
+        }
+
+        it("reads no first page number (automatic numbering) without the attributes", () => {
+            for (const attributes of [{}, { useFirstPageNumber: "0" }, { useFirstPageNumber: "false" }]) {
+                const { keys } = parse(attributes);
+                expect(keys).to.not.include("firstPageNumber");
+                expect(keys).to.not.include("useFirstPageNumber");
+            }
+        });
+
+        it("reads a first page number, used or not", () => {
+            expect(parse({ firstPageNumber: "5" })).to.include({ firstPageNumber: 5, useFirstPageNumber: false });
+            expect(parse({ firstPageNumber: "5", useFirstPageNumber: "0" })).to.include({ firstPageNumber: 5, useFirstPageNumber: false });
+            expect(parse({ firstPageNumber: "5", useFirstPageNumber: "1" })).to.include({ firstPageNumber: 5, useFirstPageNumber: true });
+            expect(parse({ firstPageNumber: "5", useFirstPageNumber: "true" })).to.include({
+                firstPageNumber: 5,
+                useFirstPageNumber: true,
+            });
+            // the CT_PageSetup default firstPageNumber, used
+            expect(parse({ useFirstPageNumber: "1" })).to.include({ firstPageNumber: 1, useFirstPageNumber: true });
+        });
+
+        it("writes useFirstPageNumber with a first page number, unless the model says it is not used", () => {
+            const xform = new PageSetupXform();
+            expect(xform.toXml({ firstPageNumber: 3 })).to.equal('<pageSetup firstPageNumber="3" useFirstPageNumber="1"/>');
+            expect(xform.toXml({ firstPageNumber: 3, useFirstPageNumber: true })).to.equal(
+                '<pageSetup firstPageNumber="3" useFirstPageNumber="1"/>'
+            );
+            expect(xform.toXml({ firstPageNumber: 3, useFirstPageNumber: false })).to.equal('<pageSetup firstPageNumber="3"/>');
+            expect(xform.toXml({ useFirstPageNumber: true })).to.equal('<pageSetup useFirstPageNumber="1"/>');
+            expect(xform.toXml({ useFirstPageNumber: false, paperSize: 9 })).to.equal('<pageSetup paperSize="9"/>');
         });
     });
 });
