@@ -49,17 +49,28 @@ type Erase<T, D extends number = 3> = [D] extends [never]
             ? { [K in keyof T as K extends BackReference | `_${string}` ? never : K]: Erase<T[K], Previous[D]> }
             : T;
 
-/** The members of `P` that the runtime class `I` lacks (`missing:name`) or does not conform to. */
+/**
+ * The members of `P` that the runtime class `I` lacks (`missing:name`) or does not conform to (their type, or an
+ * optional member where `P` declares a required one).
+ */
 type Mismatches<I, P> = {
     [K in Exclude<keyof P, BackReference>]-?: K extends keyof I
-        ? [Erase<I[K]>] extends [Erase<P[K]>]
+        ? [Erase<Pick<I, K>>] extends [Erase<Pick<P, K>>]
             ? never
             : K
         : `missing:${K & string}`;
 }[Exclude<keyof P, BackReference>];
 
-/** `true` when `I` conforms to `P` but for the members `Except`; else the names of the other mismatches. */
-type Check<I, P, Except extends keyof P = never> = [Mismatches<I, Omit<P, Except>>] extends [never] ? true : Mismatches<I, Omit<P, Except>>;
+/**
+ * `true` when `I` conforms to `P` but for the members `Except`, and every member of `Except` still mismatches; else
+ * the names of the other mismatches, and `stale:name` for an exception that conforms now (remove it from the list).
+ */
+type Check<I, P, Except extends keyof P = never> = [Mismatches<I, Omit<P, Except>> | Stale<I, P, Except>] extends [never]
+    ? true
+    : Mismatches<I, Omit<P, Except>> | Stale<I, P, Except>;
+
+/** The members of `Except` that conform (`stale:name`). */
+type Stale<I, P, Except extends keyof P> = `stale:${Exclude<Except, Mismatches<I, P>> & string}`;
 
 /** Compiles only for `true`: a failing check names its mismatches in the error. */
 type Assert<T extends true> = T;
@@ -76,7 +87,7 @@ export type CellConforms = Assert<
     Check<
         Cell,
         Public.Cell,
-        // `value` returns two kinds of values that index.d.ts `CellValue` keeps out on purpose (rule 2: they come only
+        // `value` returns two kinds of values that index.d.ts `CellValue` keeps out on purpose (they come only
         // from invalid input; describing them would make every cell value an untyped `object`):
         // - a JSON value: any object that is not a cell value (only from a value outside `CellValue`, such as an
         //   untyped one, or from the falsy-marker quirk: `{ text: "", hyperlink }`, `{ sharedString: 0 }`...);
@@ -91,8 +102,8 @@ export type RowConforms = Assert<
     Check<
         Row,
         Public.Row,
-        // Only through `Cell.value` (see CellConforms): `values` holds cell values, the others give or take Cells.
-        "values" | "findCell" | "getCellEx" | "getCell" | "eachCell"
+        // Only through `Cell.value` (see CellConforms): `values` holds cell values, the others give Cells.
+        "values" | "findCell" | "getCellEx" | "getCell"
     >
 >;
 /** The runtime Column conforms to index.d.ts `Column`, but for the known mismatches listed. */
@@ -100,8 +111,8 @@ export type ColumnConforms = Assert<
     Check<
         Column,
         Public.Column,
-        // Only through `Cell.value` (see CellConforms): `values` holds cell values, `eachCell` gives Cells.
-        "values" | "eachCell"
+        // Only through `Cell.value` (see CellConforms): `values` holds cell values.
+        "values"
     >
 >;
 /** The runtime DefinedNames conforms to index.d.ts `DefinedNames`, but for the known mismatches listed. */
@@ -120,33 +131,14 @@ export type WorksheetConforms = Assert<
     Check<
         Worksheet,
         Public.Worksheet,
-        // TODO(align) worksheet settings
-        | "properties"
-        | "views"
-        | "model"
-        | "pageSetup"
-        // rows, columns and cells: undefined only for an invalid column number (not an integer >= 1), typed `Column`
-        // as documented (and also the Column cascade below)
+        // undefined only for an invalid column number (not an integer >= 1), typed `Column` as documented; it
+        // also mismatches through `Cell.value`, like the next ones
         | "getColumn"
-        // TODO(align) rows, columns and cells: their signatures are aligned; they fail only through the Row / Cell /
-        // Column / CellValue types they return or take (removed once Row, Cell, Column and CellValue conform)
+        // only through `Cell.value` (see CellConforms): they give Cells, or Rows / Columns whose cells hold values
         | "findCell"
         | "getCell"
-        | "columns"
-        | "insertRows"
         | "lastColumn"
-        | "getColumnKey"
-        | "setColumnKey"
         | "lastRow"
-        | "findRow"
-        | "findRows"
-        | "addRow"
-        | "addRows"
-        | "insertRow"
-        | "getRow"
-        | "getRows"
-        | "eachRow"
-        | "getSheetValues"
     >
 >;
 /** The runtime Workbook conforms to index.d.ts `Workbook`, but for the known mismatches listed. */
@@ -157,7 +149,6 @@ export type WorkbookConforms = Assert<
         // TODO(align)
         | "properties"
         | "calcProperties"
-        | "worksheets"
         | "definedNames"
         | "views"
         | "company"
@@ -175,10 +166,6 @@ export type WorkbookConforms = Assert<
         | "modified"
         | "xlsx"
         | "csv"
-        | "addWorksheet"
-        | "removeWorksheetEx"
-        | "getWorksheet"
-        | "eachSheet"
         | "getImage"
     >
 >;

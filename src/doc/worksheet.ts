@@ -57,6 +57,17 @@ export interface WorksheetOptions {
     autoFilter?: AutoFilterModel | null | undefined;
 }
 
+/**
+ * {@link Worksheet.model} as the getter produces it: a {@link WorksheetModel} with the fields only the getter sets
+ * (`state`, `rowBreaks`, the used range `dimensions` and the merged ranges `merges`).
+ */
+export type DocumentWorksheetModel = Omit<WorksheetModel, "state" | "rowBreaks" | "dimensions" | "merges"> & {
+    state: WorksheetState;
+    rowBreaks: RowBreakModel[];
+    dimensions: Range;
+    merges: string[];
+};
+
 /** Options of {@link Worksheet.eachRow}. */
 export interface EachRowOptions {
     /** Also visit the empty rows, up to the last one (creating the missing ones). */
@@ -174,12 +185,12 @@ class Worksheet {
     properties: WorksheetPropertiesModel;
     /** For all things printing. */
     pageSetup: PageSetupModel;
-    /** Headers and footers of the printed pages (`null` texts by default). */
-    headerFooter: HeaderFooterModel;
+    /** Headers and footers of the printed pages (`null` texts by default; `null` when read from a file without them). */
+    headerFooter: HeaderFooterModel | null;
     /** The data validations of the cells. */
     dataValidations: DataValidations;
-    /** For freezepanes, split, zoom, gridlines, etc. */
-    views: SheetViewModel[];
+    /** For freezepanes, split, zoom, gridlines, etc. (`null` when read from a file without `<sheetViews>`). */
+    views: SheetViewModel[] | null;
     /** The auto filter of the worksheet (a range such as `"A1:C1"`, or its corners), if any. */
     autoFilter: AutoFilterModel | null | undefined;
     /** The images (and background image). */
@@ -1400,13 +1411,13 @@ class Worksheet {
      * The model of the worksheet (for the xlsx writer): the settings by reference, the rows and columns as models, the
      * used range (`dimensions`) and the merged ranges (`merges`).
      */
-    get model(): WorksheetModel {
+    get model(): DocumentWorksheetModel {
         // ==========================================================
         // Rows
         const rows: RowModel[] = [];
         const dimensions = new Range();
         const merges: string[] = [];
-        const model: WorksheetModel = {
+        const model: DocumentWorksheetModel = {
             id: this.id,
             name: this.name,
             dataValidations: this.dataValidations.model,
