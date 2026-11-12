@@ -20,7 +20,8 @@ import type {
     WorksheetState,
     WorksheetView,
 } from "../../index";
-import type { CellModel, ColModel, ParsedCellModel, RowModel } from "./cell";
+import type { CellModel, ColModel, FormulaResult, ParsedCellModel, RowModel } from "./cell";
+import type { PivotTable } from "../doc/pivot-table";
 import type { DxfModel } from "./style";
 import type { MediaModel, RelationshipModel } from "./book";
 
@@ -113,6 +114,17 @@ export interface ConditionalFormattingModel {
 // Views, page setup, properties, protection
 
 /**
+ * A manual page break after a row (`row.addPageBreak`, rendered as a `<brk>` of `<rowBreaks>`): `id` is the row number,
+ * `min` / `max` the 0-based first and last columns (`min` absent for the first column), `man` 1 (manual).
+ */
+export interface RowBreakModel {
+    id: number;
+    max: number;
+    man: number;
+    min?: number;
+}
+
+/**
  * A sheet view (sheet-view-xform): index.d.ts `WorksheetView` plus `workbookViewId` (parsed) and `tabSelected` (rendered;
  * parsed but not kept). prepare forces an unknown `state` to `"normal"`.
  */
@@ -128,13 +140,17 @@ export type SheetViewModel = Partial<WorksheetView> & {
  */
 export type PageSetupModel = Partial<PageSetup> & {
     margins?: Margins;
+    /** The document defaults only: always null (the page breaks are `rowBreaks` of the worksheet). */
+    rowBreaks?: null;
+    /** The document defaults only: always null. */
+    colBreaks?: null;
     useFirstPageNumber?: boolean;
     usePrinterDefaults?: boolean;
     copies?: number;
 };
 
 /** Header and footer (header-footer-xform): index.d.ts `HeaderFooter` (the document defaults are `null` strings). */
-export type HeaderFooterModel = Partial<HeaderFooter>;
+export type HeaderFooterModel = { [K in keyof HeaderFooter]?: HeaderFooter[K] | (HeaderFooter[K] extends string ? null : never) };
 
 /**
  * Sheet properties: `sheetFormatPr` (defaultRowHeight, dyDescent, outlineLevelRow, outlineLevelCol, defaultColWidth?)
@@ -221,6 +237,8 @@ export interface DrawingAnchorModel {
  * and the parse-side `dxfId` (a string). PARTIAL: refined by the table xforms.
  */
 export type TableColumnModel = TableColumnProperties & {
+    /** Document side: the cached result of the totals row formula (written in the totals row cell). */
+    totalsRowResult?: FormulaResult;
     id?: number;
     colId?: string;
     dxfId?: number | string;
@@ -274,14 +292,14 @@ export interface WorksheetModel {
     properties: WorksheetPropertiesModel;
     pageSetup: PageSetupModel;
     headerFooter: HeaderFooterModel;
-    rowBreaks?: unknown[];
+    rowBreaks?: RowBreakModel[];
     views: SheetViewModel[];
     autoFilter?: AutoFilterModel | null;
     media: WorksheetMediumModel[];
     sheetProtection?: SheetProtectionModel | null;
     tables: TableModel[];
-    /** PARTIAL: the document's PivotTable objects (src/doc/pivot-table.ts); absent after a load. */
-    pivotTables?: unknown[];
+    /** The document's pivot tables (src/doc/pivot-table.ts); absent after a load. */
+    pivotTables?: PivotTable[];
     conditionalFormattings: ConditionalFormattingModel[];
     /** `undefined` when there is no column definition. */
     cols?: ColModel[];

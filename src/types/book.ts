@@ -7,6 +7,7 @@
 import type { CalculationProperties, WorkbookProperties } from "../../index";
 import type { DrawingModel, NoteModel, TableModel, WorksheetModel, ParsedWorksheetModel } from "./sheet";
 import type { SharedStringValue } from "./strings";
+import type { PivotTable } from "../doc/pivot-table";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Package parts
@@ -165,8 +166,8 @@ export interface WorkbookModel extends CoreModel {
     /** theme part name (`theme1`) → XML */
     themes?: Record<string, string>;
     media: MediaModel[];
-    /** PARTIAL: the document's PivotTable objects. */
-    pivotTables: unknown[];
+    /** The document's pivot tables (src/doc/pivot-table.ts). */
+    pivotTables: PivotTable[];
 }
 
 /**

@@ -1,72 +1,142 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import colCache from "../utils/col-cache";
+// A table of a worksheet (`worksheet.addTable`): a header row, data rows and an optional totals row, written in the
+// cells of the worksheet and described by its model (written as `xl/tables/tableN.xml`).
 
+import colCache from "../utils/col-cache";
+import type { TableColumnModel, TableModel } from "../types";
+import type Cell from "./cell";
+import type { CellValue } from "./cell";
+import type { StyleModel } from "../types";
+
+/** What a {@link Table} reads of its worksheet: its rows, to write the table in their cells. */
+export interface TableWorksheet {
+    getRow(row: number): { getCell(col: number): Cell };
+}
+
+/** The state of a table before a change, to clear its previous footprint on commit. */
+interface TableCache {
+    ref: string | undefined;
+    width: number;
+    tableHeight: number;
+}
+
+/** @throws Error with the message when the test is falsy */
+function assert(test: unknown, message: string): asserts test {
+    if (!test) {
+        throw new Error(message);
+    }
+}
+
+/** Sets `o[name]` to `dflt` when it is undefined. */
+function assign<T extends object, K extends keyof T>(o: T, name: K, dflt: T[K]): void {
+    if (o[name] === undefined) {
+        o[name] = dflt;
+    }
+}
+
+/**
+ * The data rows of a table. A loaded table has none (nor `ref`): the members that need them throw, as they always did.
+ */
+function rowsOf(table: TableModel): unknown[][] {
+    return table.rows as unknown[][];
+}
+
+/** Copies the properties of a column style into the style of a cell (no copy on write: as it always did). */
+function assignStyle(cell: Cell, style: StyleModel | undefined): void {
+    if (style) {
+        Object.assign(cell.style, style);
+    }
+}
+
+/** A column of a table (`table.getColumn(i)`): reads and writes the column model; most changes need `table.commit()`. */
 class Column {
+    /** The table. */
+    table: Table;
+    /** The column model (by reference). */
+    column: TableColumnModel;
+    /** 0-based index of the column in the table. */
+    index: number;
+
     // wrapper around column model, allowing access and manipulation
-    constructor(table, column, index) {
+    constructor(table: Table, column: TableColumnModel, index: number) {
         this.table = table;
         this.column = column;
         this.index = index;
     }
 
-    _set(name, value) {
+    /** Sets a field of the column model, after saving the table state (for commit). */
+    _set<K extends keyof TableColumnModel>(name: K, value: TableColumnModel[K]): void {
         this.table.cacheState();
         this.column[name] = value;
     }
 
-    get name() {
+    get name(): string {
         return this.column.name;
     }
-    set name(value) {
+    set name(value: string) {
         this._set("name", value);
     }
 
-    get filterButton() {
+    get filterButton(): boolean | undefined {
         return this.column.filterButton;
     }
-    set filterButton(value) {
+    set filterButton(value: boolean | undefined) {
         this.column.filterButton = value;
     }
 
-    get style() {
+    get style(): TableColumnModel["style"] {
         return this.column.style;
     }
-    set style(value) {
+    set style(value: TableColumnModel["style"]) {
         this.column.style = value;
     }
 
-    get totalsRowLabel() {
+    get totalsRowLabel(): string | undefined {
         return this.column.totalsRowLabel;
     }
-    set totalsRowLabel(value) {
+    set totalsRowLabel(value: string | undefined) {
         this._set("totalsRowLabel", value);
     }
 
-    get totalsRowFunction() {
+    get totalsRowFunction(): TableColumnModel["totalsRowFunction"] {
         return this.column.totalsRowFunction;
     }
-    set totalsRowFunction(value) {
+    set totalsRowFunction(value: TableColumnModel["totalsRowFunction"]) {
         this._set("totalsRowFunction", value);
     }
 
-    get totalsRowResult() {
+    get totalsRowResult(): TableColumnModel["totalsRowResult"] {
         return this.column.totalsRowResult;
     }
-    set totalsRowResult(value) {
+    set totalsRowResult(value: TableColumnModel["totalsRowResult"]) {
         this._set("totalsRowResult", value);
     }
 
-    get totalsRowFormula() {
+    get totalsRowFormula(): string | undefined {
         return this.column.totalsRowFormula;
     }
-    set totalsRowFormula(value) {
+    set totalsRowFormula(value: string | undefined) {
         this._set("totalsRowFormula", value);
     }
 }
 
+/**
+ * A table of a worksheet. Created from index.d.ts `TableProperties` (validated and completed with the defaults, then
+ * written in the cells), or from a loaded model (without data rows nor `ref`).
+ */
 class Table {
-    constructor(worksheet, table) {
+    /** The worksheet (none for a table set from a loaded model). */
+    worksheet: TableWorksheet | undefined;
+    /** The model (by reference: `validate` completes it in place). */
+    declare table: TableModel;
+    /** The state before the first change since the last commit. */
+    declare _cache?: TableCache | undefined;
+
+    /**
+     * @param table - the table properties: validated, completed, and written in the cells of the worksheet; nothing for a
+     *   table set from a model next
+     * @throws Error for invalid table properties (see validate)
+     */
+    constructor(worksheet?: TableWorksheet, table?: TableModel) {
         this.worksheet = worksheet;
         if (table) {
             this.table = table;
@@ -77,7 +147,11 @@ class Table {
         }
     }
 
-    getFormula(column) {
+    /**
+     * The formula of the totals row of a column (`SUBTOTAL(109,Table[Column])`), or null for the function "none".
+     * @throws Error for an unknown totals row function
+     */
+    getFormula(column: TableColumnModel): string | null | undefined {
         // get the correct formula to apply to the totals row
         switch (column.totalsRowFunction) {
             case "none":
@@ -100,54 +174,56 @@ class Table {
                 return `SUBTOTAL(109,${this.table.name}[${column.name}])`;
             case "custom":
                 return column.totalsRowFormula;
+            case undefined:
             default:
-                throw new Error(`Invalid Totals Row Function: ${column.totalsRowFunction}`);
+                throw new Error(`Invalid Totals Row Function: ${String(column.totalsRowFunction)}`);
         }
     }
 
-    get width() {
+    /** The number of columns. */
+    get width(): number {
         // width of the table
         return this.table.columns.length;
     }
 
-    get height() {
+    /** The number of data rows. */
+    get height(): number {
         // height of the table data
-        return this.table.rows.length;
+        return rowsOf(this.table).length;
     }
 
-    get filterHeight() {
+    /** The height of the data plus the header row, if any. */
+    get filterHeight(): number {
         // height of the table data plus optional header row
         return this.height + (this.table.headerRow ? 1 : 0);
     }
 
-    get tableHeight() {
+    /** The full height of the table in the worksheet (header and totals rows included). */
+    get tableHeight(): number {
         // full height of the table on the sheet
         return this.filterHeight + (this.table.totalsRow ? 1 : 0);
     }
 
-    validate() {
+    /**
+     * Completes the model with the defaults (header row, no totals row, style "TableStyleMedium2"...), the position
+     * (`tl`, `autoFilterRef`, `tableRef`) and the totals row formulas.
+     * @throws Error without ref, columns or rows, for a column without name, for an unknown totals row function
+     */
+    validate(): void {
         const { table } = this;
         // set defaults and check is valid
-        const assign = (o, name, dflt) => {
-            if (o[name] === undefined) {
-                o[name] = dflt;
-            }
-        };
         assign(table, "headerRow", true);
         assign(table, "totalsRow", false);
 
         assign(table, "style", {});
-        assign(table.style, "theme", "TableStyleMedium2");
-        assign(table.style, "showFirstColumn", false);
-        assign(table.style, "showLastColumn", false);
-        assign(table.style, "showRowStripes", false);
-        assign(table.style, "showColumnStripes", false);
+        // assigned just above
+        const style = table.style!;
+        assign(style, "theme", "TableStyleMedium2");
+        assign(style, "showFirstColumn", false);
+        assign(style, "showLastColumn", false);
+        assign(style, "showRowStripes", false);
+        assign(style, "showColumnStripes", false);
 
-        const assert = (test, message) => {
-            if (!test) {
-                throw new Error(message);
-            }
-        };
         assert(table.ref, "Table must have ref");
         assert(table.columns, "Table must have column definitions");
         assert(table.rows, "Table must have row definitions");
@@ -171,24 +247,19 @@ class Table {
                 assign(column, "totalsRowLabel", "Total");
             } else {
                 assign(column, "totalsRowFunction", "none");
-                column.totalsRowFormula = this.getFormula(column);
+                column.totalsRowFormula = this.getFormula(column) as string | undefined;
             }
         });
     }
 
-    store() {
+    /** Writes the table in the cells of the worksheet: headers, data (with the column styles), totals row. */
+    store(): void {
         // where the table needs to store table data, headers, footers in
         // the sheet...
-        const assignStyle = (cell, style) => {
-            if (style) {
-                Object.keys(style).forEach((key) => {
-                    cell.style[key] = style[key];
-                });
-            }
-        };
-
-        const { worksheet, table } = this;
-        const { row, col } = table.tl;
+        const { table } = this;
+        // a table from properties has a worksheet and its position (validate)
+        const worksheet = this.worksheet!;
+        const { row, col } = table.tl!;
         let count = 0;
         if (table.headerRow) {
             const r = worksheet.getRow(row + count++);
@@ -199,13 +270,13 @@ class Table {
                 assignStyle(cell, style);
             });
         }
-        table.rows.forEach((data) => {
+        rowsOf(table).forEach((data) => {
             const r = worksheet.getRow(row + count++);
             data.forEach((value, j) => {
                 const cell = r.getCell(col + j);
-                cell.value = value;
+                cell.value = value as CellValue;
 
-                assignStyle(cell, table.columns[j].style);
+                assignStyle(cell, table.columns[j]!.style);
             });
         });
 
@@ -232,10 +303,12 @@ class Table {
         }
     }
 
-    load(worksheet) {
+    /** Writes the headers, data and totals of the table in the cells of a worksheet (without styles; unused). */
+    load(worksheet: TableWorksheet): void {
         // where the table will read necessary features from a loaded sheet
         const { table } = this;
-        const { row, col } = table.tl;
+        // validate() set the position
+        const { row, col } = table.tl!;
         let count = 0;
         if (table.headerRow) {
             const r = worksheet.getRow(row + count++);
@@ -244,11 +317,11 @@ class Table {
                 cell.value = column.name;
             });
         }
-        table.rows.forEach((data) => {
+        rowsOf(table).forEach((data) => {
             const r = worksheet.getRow(row + count++);
             data.forEach((value, j) => {
                 const cell = r.getCell(col + j);
-                cell.value = value;
+                cell.value = value as CellValue;
             });
         });
 
@@ -271,17 +344,19 @@ class Table {
         }
     }
 
-    get model() {
+    /** The model (by reference). */
+    get model(): TableModel {
         return this.table;
     }
 
-    set model(value) {
+    set model(value: TableModel) {
         this.table = value;
     }
 
     // ================================================================
     // TODO: Mutating methods
-    cacheState() {
+    /** Saves the position and size of the table before a change (once until the next commit). */
+    cacheState(): void {
         if (!this._cache) {
             this._cache = {
                 ref: this.ref,
@@ -291,7 +366,12 @@ class Table {
         }
     }
 
-    commit() {
+    /**
+     * Applies the changes made since the last commit: validates the table, clears the cells it no longer covers, and
+     * writes it again. Does nothing without a change.
+     * @throws Error for invalid table properties (see validate)
+     */
+    commit(): void {
         // changes may have been made that might have on-sheet effects
         if (!this._cache) {
             return;
@@ -300,11 +380,13 @@ class Table {
         // check things are ok first
         this.validate();
 
-        const ref = colCache.decodeAddress(this._cache.ref);
+        // validate() checked that the table has a ref (and a worksheet: it was created from properties)
+        const worksheet = this.worksheet!;
+        const ref = colCache.decodeAddress(this._cache.ref!);
         if (this.ref !== this._cache.ref) {
             // wipe out whole table footprint at previous location
             for (let i = 0; i < this._cache.tableHeight; i++) {
-                const row = this.worksheet.getRow(ref.row + i);
+                const row = worksheet.getRow(ref.row + i);
                 for (let j = 0; j < this._cache.width; j++) {
                     const cell = row.getCell(ref.col + j);
                     cell.value = null;
@@ -313,7 +395,7 @@ class Table {
         } else {
             // clear out below table if it has shrunk
             for (let i = this.tableHeight; i < this._cache.tableHeight; i++) {
-                const row = this.worksheet.getRow(ref.row + i);
+                const row = worksheet.getRow(ref.row + i);
                 for (let j = 0; j < this._cache.width; j++) {
                     const cell = row.getCell(ref.col + j);
                     cell.value = null;
@@ -322,7 +404,7 @@ class Table {
 
             // clear out to right of table if it has lost columns
             for (let i = 0; i < this.tableHeight; i++) {
-                const row = this.worksheet.getRow(ref.row + i);
+                const row = worksheet.getRow(ref.row + i);
                 for (let j = this.width; j < this._cache.width; j++) {
                     const cell = row.getCell(ref.col + j);
                     cell.value = null;
@@ -333,130 +415,152 @@ class Table {
         this.store();
     }
 
-    addRow(values, rowNumber) {
+    /** Adds a row of data, inserted at `rowNumber` (0-based) or appended (needs `commit()`). */
+    addRow(values: unknown[], rowNumber?: number): void {
         // Add a row of data, either insert at rowNumber or append
         this.cacheState();
 
         if (rowNumber === undefined) {
-            this.table.rows.push(values);
+            rowsOf(this.table).push(values);
         } else {
-            this.table.rows.splice(rowNumber, 0, values);
+            rowsOf(this.table).splice(rowNumber, 0, values);
         }
     }
 
-    removeRows(rowIndex, count = 1) {
+    /** Removes `count` rows of data from `rowIndex` (0-based; needs `commit()`). */
+    removeRows(rowIndex: number, count = 1): void {
         // Remove a rows of data
         this.cacheState();
-        this.table.rows.splice(rowIndex, count);
+        rowsOf(this.table).splice(rowIndex, count);
     }
 
-    getColumn(colIndex) {
-        const column = this.table.columns[colIndex];
+    /** A column of the table (0-based index). */
+    getColumn(colIndex: number): Column {
+        // a missing column gives a Column without model, as it always did
+        const column = this.table.columns[colIndex]!;
         return new Column(this, column, colIndex);
     }
 
-    addColumn(column, values, colIndex) {
+    /** Adds a column with its values, inserted at `colIndex` (0-based) or appended (needs `commit()`). */
+    addColumn(column: TableColumnModel, values: readonly unknown[], colIndex?: number): void {
         // Add a new column, including column defn and values
         // Inserts at colNumber or adds to the right
         this.cacheState();
 
         if (colIndex === undefined) {
             this.table.columns.push(column);
-            this.table.rows.forEach((row, i) => {
+            rowsOf(this.table).forEach((row, i) => {
                 row.push(values[i]);
             });
         } else {
             this.table.columns.splice(colIndex, 0, column);
-            this.table.rows.forEach((row, i) => {
+            rowsOf(this.table).forEach((row, i) => {
                 row.splice(colIndex, 0, values[i]);
             });
         }
     }
 
-    removeColumns(colIndex, count = 1) {
+    /** Removes `count` columns from `colIndex` (0-based) with their data (needs `commit()`). */
+    removeColumns(colIndex: number, count = 1): void {
         // Remove a column with data
         this.cacheState();
 
         this.table.columns.splice(colIndex, count);
-        this.table.rows.forEach((row) => {
+        rowsOf(this.table).forEach((row) => {
             row.splice(colIndex, count);
         });
     }
 
-    _assign(target, prop, value) {
+    /** Sets a field of the model, after saving the table state (for commit). */
+    _assign<K extends keyof TableModel>(target: TableModel, prop: K, value: TableModel[K]): void {
         this.cacheState();
         target[prop] = value;
     }
 
-    get ref() {
+    /** The top-left cell (`"B2"`); needs `commit()` once changed. */
+    get ref(): string | undefined {
         return this.table.ref;
     }
-    set ref(value) {
+    set ref(value: string | undefined) {
         this._assign(this.table, "ref", value);
     }
 
-    get name() {
+    get name(): string {
         return this.table.name;
     }
-    set name(value) {
+    set name(value: string) {
         this.table.name = value;
     }
 
-    get displayName() {
-        return this.table.displyName || this.table.name;
+    /** The display name (the name when there is none). */
+    get displayName(): string {
+        return this.table.displayName || this.table.name;
     }
-    set displayNamename(value) {
+    set displayName(value: string | undefined) {
         this.table.displayName = value;
     }
 
-    get headerRow() {
+    /** @deprecated misspelled: use `displayName` */
+    set displayNamename(value: string | undefined) {
+        this.table.displayName = value;
+    }
+
+    /** Whether the table has a header row; needs `commit()` once changed. */
+    get headerRow(): boolean | undefined {
         return this.table.headerRow;
     }
-    set headerRow(value) {
+    set headerRow(value: boolean | undefined) {
         this._assign(this.table, "headerRow", value);
     }
 
-    get totalsRow() {
+    /** Whether the table has a totals row; needs `commit()` once changed. */
+    get totalsRow(): boolean | undefined {
         return this.table.totalsRow;
     }
-    set totalsRow(value) {
+    set totalsRow(value: boolean | undefined) {
         this._assign(this.table, "totalsRow", value);
     }
 
-    get theme() {
-        return this.table.style.name;
+    // the style is set by validate() (a loaded table has one too)
+
+    /** The table style (`"TableStyleMedium2"`), or null for none. */
+    get theme(): TableStyle["theme"] {
+        return this.table.style!.theme;
     }
-    set theme(value) {
-        this.table.style.name = value;
+    set theme(value: TableStyle["theme"]) {
+        this.table.style!.theme = value;
     }
 
-    get showFirstColumn() {
-        return this.table.style.showFirstColumn;
+    get showFirstColumn(): boolean | undefined {
+        return this.table.style!.showFirstColumn;
     }
-    set showFirstColumn(value) {
-        this.table.style.showFirstColumn = value;
-    }
-
-    get showLastColumn() {
-        return this.table.style.showLastColumn;
-    }
-    set showLastColumn(value) {
-        this.table.style.showLastColumn = value;
+    set showFirstColumn(value: boolean | undefined) {
+        this.table.style!.showFirstColumn = value;
     }
 
-    get showRowStripes() {
-        return this.table.style.showRowStripes;
+    get showLastColumn(): boolean | undefined {
+        return this.table.style!.showLastColumn;
     }
-    set showRowStripes(value) {
-        this.table.style.showRowStripes = value;
+    set showLastColumn(value: boolean | undefined) {
+        this.table.style!.showLastColumn = value;
     }
 
-    get showColumnStripes() {
-        return this.table.style.showColumnStripes;
+    get showRowStripes(): boolean | undefined {
+        return this.table.style!.showRowStripes;
     }
-    set showColumnStripes(value) {
-        this.table.style.showColumnStripes = value;
+    set showRowStripes(value: boolean | undefined) {
+        this.table.style!.showRowStripes = value;
+    }
+
+    get showColumnStripes(): boolean | undefined {
+        return this.table.style!.showColumnStripes;
+    }
+    set showColumnStripes(value: boolean | undefined) {
+        this.table.style!.showColumnStripes = value;
     }
 }
+
+/** The style of a table model. */
+type TableStyle = NonNullable<TableModel["style"]>;
 
 export default Table;
