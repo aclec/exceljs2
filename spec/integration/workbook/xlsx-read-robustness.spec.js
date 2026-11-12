@@ -164,6 +164,35 @@ describe('xlsx read robustness', function() {
     });
   });
 
+  describe('column widths', () => {
+    it('keeps a width of 9 when the sheet default column width differs', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.properties.defaultColWidth = 20;
+        ws.getColumn(2).width = 9;
+        ws.getColumn(3).width = 20;
+        ws.getColumn(4).width = 12;
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.properties.defaultColWidth).to.equal(20);
+      expect(ws.getColumn(2).width).to.equal(9);
+      expect(ws.getColumn(3).width).to.equal(20);
+      expect(ws.getColumn(4).width).to.equal(12);
+    });
+
+    it('keeps image anchors positioned as before', async () => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Sheet1');
+      ws.properties.defaultColWidth = 20;
+      ws.getColumn(2).width = 9;
+      ws.getColumn(3).width = 20;
+      const imageId = wb.addImage({buffer: Buffer.alloc(8), extension: 'png'});
+      ws.addImage(imageId, {tl: {col: 1.5, row: 0}, br: {col: 2.5, row: 1}});
+      const {range} = ws.getImages()[0];
+      expect(range.tl.nativeColOff).to.equal(320000);
+      expect(range.br.nativeColOff).to.equal(100000);
+    });
+  });
+
   describe('cell values', () => {
     it('reads ISO 8601 date cells (t="d") as UTC dates', async () => {
       const buffer = await tamper(await baseWorkbookBuffer(), {
