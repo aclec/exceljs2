@@ -49,4 +49,37 @@ const expectations = [
 
 describe("HyperlinkXform", () => {
     testXformHelper(expectations);
+
+    describe("getLocation", () => {
+        it("reads '#'-prefixed targets as a place in the workbook", () => {
+            expect(HyperlinkXform.getLocation("#Name")).to.equal("Name");
+            expect(HyperlinkXform.getLocation("#Sheet1!A1")).to.equal("Sheet1!A1");
+            expect(HyperlinkXform.getLocation("#'My Sheet'!B2:C3")).to.equal("'My Sheet'!B2:C3");
+        });
+
+        it("reads legacy unprefixed sheet references as a place in the workbook", () => {
+            ["Sheet1!A1", "'My Sheet'!B2", "'It''s'!A1", "My Sheet!$B$2", "Data.2024!A1:B20", "'a/b#c'!XFD1048576"].forEach((target) =>
+                expect(HyperlinkXform.getLocation(target), target).to.equal(target)
+            );
+        });
+
+        it("reads URLs and paths whose tail looks like a sheet reference as external", () => {
+            [
+                "Name",
+                "https://x/#!a1",
+                "https://example.com/#!page1",
+                "http://example.com?x!A1",
+                "mailto:a@b",
+                "mailto:a!b1",
+                "file:///c:/x.xlsx#Sheet!A1",
+                "../other.xlsx#Sheet1!A1",
+                "..\\other.xlsx!A1",
+                "dir/Sheet1!A1",
+                "Sheet1!A1x",
+                "Sheet1!ABCD1",
+                "'unterminated!A1",
+                undefined,
+            ].forEach((target) => expect(HyperlinkXform.getLocation(target), target).to.equal(undefined));
+        });
+    });
 });

@@ -33,6 +33,28 @@ Applications that must run on an older Node.js or on Internet Explorer should st
 | `require('core-js/...')`, `require('regenerator-runtime/runtime')` before ExcelJS | not needed                      |
 | `<script src="polyfill.js">` + `<script src="exceljs.js">`                        | `<script src="exceljs.min.js">` |
 
+## Package exports
+
+`package.json` now has an `exports` map. Two consequences:
+
+- **Deep imports** are limited to `exceljs/lib/...` (with or without `.js`; `.json` and `.xml` files with their extension),
+  `exceljs/dist/...`, `exceljs/excel(.js)` and `exceljs/package.json`. Other paths (`exceljs/index.d.ts`, `exceljs/lib/doc/data/theme1`
+  without `.json`, ...) no longer resolve. The internal modules `lib/csv/stream-converter.js`, `lib/utils/auto-drain`,
+  `browser-buffer-encode`, `iterate-stream`, `stream-base64`, `string-builder`, `stuttered-pipe` and `typed-stack` were removed.
+- **The `browser` condition** resolves the package to the browser bundle `dist/exceljs.min.js` (bundlers targeting browsers did so through
+  the `browser` field already). The bundle has no `stream` namespace and no file APIs. Test runners that apply the `browser` condition in
+  Node now load the bundle too: **Jest with the jsdom environment** does by default (`customExportConditions: ['browser']`). To test with
+  the Node build, either change the conditions or map the package to its Node entry point:
+
+```javascript
+// jest.config.js
+module.exports = {
+    testEnvironment: "jsdom",
+    testEnvironmentOptions: { customExportConditions: ["node", "node-addons"] },
+    // or: moduleNameMapper: { "^exceljs$": "<rootDir>/node_modules/exceljs/excel.js" },
+};
+```
+
 ## Dependencies
 
 Runtime dependencies were upgraded, three were removed and the three zip libraries were replaced by one. They are internal to ExcelJS, but
@@ -86,10 +108,22 @@ General (`cell.numFmt` is `undefined`).
 
 ### Merged cells are capped
 
-A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()` throws
-`Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. A file loaded with `xlsx.load` / `xlsx.read` can have at
-most 1,048,576 merged cells **in all its worksheets together**, and is rejected with
-`Cannot merge <range>: the workbook would exceed 1048576 merged cells` otherwise.
+Every cell of a merge is created in memory (300 to 600 bytes each), so merges are capped, with the same rules when a workbook is built and
+when it is read (a workbook ExcelJS writes with the defaults can be read back with the defaults):
+
+- A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()`, a splice that
+  moves or widens merges, the streaming `WorkbookWriter` and loading a file throw
+  `Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. This cap is not configurable.
+- A workbook can have at most **`workbook.maxMergedCells`** merged cells in all its worksheets together, **4,194,304** (four full
+  worksheets) by default. Beyond it they throw
+  `Cannot merge <range>: the workbook would exceed 4194304 merged cells (see the maxMergedCells option)`. Raise it with the `maxMergedCells`
+  option of `xlsx.load` / `read` / `readFile` (the loaded workbook keeps that value), by setting `workbook.maxMergedCells` before merging or
+  loading, or with the `maxMergedCells` option of the streaming `WorkbookWriter`:
+
+```javascript
+const workbook = new ExcelJS.Workbook();
+await workbook.xlsx.load(data, { maxMergedCells: 16 * 1048576 }); // trusted input only
+```
 
 The check for overlapping merges now takes time proportional to the area being merged instead of the number of existing merges, so files
 with tens of thousands of merges load quickly. The `Cannot merge already merged cells` error is unchanged.
@@ -108,7 +142,10 @@ worksheet.dataValidations.model;
 
 `cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected:
 setting or removing the validation of a cell inside a range key replaces that key by the rectangles around the cell. Code that reads
-`dataValidations.model` directly must handle keys of the form `'A1:B2'`.
+`dataValidations.model` directly must handle keys of the form `'A1:B2'`. Range keys are looked up through an index (a lookup does not scan
+every key). Range keys may also be written to the model directly: write through a fresh `worksheet.dataValidations.model` (reading the
+property refreshes the index), or use `dataValidations.add(range, validation)`; a reference to the model kept across lookups is not
+re-indexed.
 
 Also:
 
@@ -147,8 +184,10 @@ worksheet.getCell("A1").value;
 
 On write, a hyperlink that starts with `#` (`'#Sheet2!A1'`, `"#'My Sheet'!B2:C3"`, `'#MyDefinedName'`) is written as Excel writes internal
 links: `location="Sheet2!A1"`, without `#` and without an external relationship. 4.x wrote a relationship to `#...` (and, for `Sheet!A1`
-targets, a location with the `#`). The legacy form without `#` (`'Sheet2!A1'`) is also written as an internal link, so it reads back as
-`'#Sheet2!A1'`.
+targets, a location with the `#`). The legacy form without `#` (`'Sheet2!A1'`, `"'My Sheet'!B2:C3"`: a sheet name, `!`, then a cell or a
+range) is also written as an internal link, so it reads back as `'#Sheet2!A1'`. An unquoted sheet name in that form cannot contain `:`, `/`,
+`\`, `?` or `#`, so URLs and paths whose end looks like a sheet reference (`'https://example.com/#!page1'`, `'../book.xlsx#Sheet1!A1'`) stay
+external links; prefix the target with `#`, or quote the sheet name, for any other sheet name.
 
 ## Styles are copied on write
 
@@ -166,6 +205,31 @@ Set the property on each cell that must change. Merged cells still share the sty
 restyling many cells: about twice as slow per setter, and about 26 MB of heap for restyling 200,000 loaded cells.
 
 ## Other behaviour changes
+
+- **Number formats keep their `\` escapes.** 4.x removed every backslash of the number formats it read (cells, columns, rows and the
+  differential formats of conditional formatting), so formats were written back changed, `\#0` became a digit placeholder and `0.0\ \m` was
+  taken for a date format. Excel writes escaped formats routinely; code that compares `cell.numFmt` with a string may need the escaped form:
+
+    | Format in the file | `cell.numFmt` in 4.x | `cell.numFmt` in 5.0 |
+    | ------------------ | -------------------- | -------------------- |
+    | `yyyy\-mm\-dd;@`   | `yyyy-mm-dd;@`       | `yyyy\-mm\-dd;@`     |
+    | `d\ mmmm\ yyyy`    | `d mmmm yyyy`        | `d\ mmmm\ yyyy`      |
+    | `#,##0.00\ "€"`    | `#,##0.00 "€"`       | `#,##0.00\ "€"`      |
+
+- **Conditional formatting read model.** Rules read from files now match what ExcelJS writes:
+    - the `numFmt` of a rule `style` is the format code string (`'0.00%'`), like any style (4.x: `{id, formatCode}`);
+    - `beginsWith`, `endsWith` and `notContainsText` rules are read as `{type: 'containsText', operator: 'beginsWith', text: 'x'}` (4.x:
+      `type: 'beginsWith'` without `text`, and they were dropped on write); `text` is read for all text rules;
+    - x14 data bars without explicit attributes get the schema defaults: `direction: 'context'`, `negativeBarColorSameAsPositive: false`,
+      `minLength: 10`, `maxLength: 90` (4.x: `'leftToRight'`, `true`, `0`, `100`). New data bars are still written with Excel's 0 / 100;
+    - threshold values (`cfvo.value`) that are formulas or cell references are kept as strings (4.x: `NaN` or a partial number).
+
+- **Merged cells follow splices.** `spliceRows`, `insertRow(s)`, `duplicateRow` and `spliceColumns` move, shrink or widen the merges with
+  the cells (4.x left the merges at their old place, see the [README](README.md#merged-cells)). As in Excel, rows or columns inserted inside
+  a merge widen it, and only its master cell holds a value: inserting values into the cells of a merge now throws
+  `Cannot insert a value in B3: it would be inside the merged cells B2:C5, unmerge them first`, before anything changes (4.x kept the values
+  in a broken merge). Empty inserted cells (`null`, `undefined`, `''`) are accepted. Call `worksheet.unMergeCells()` first to insert values
+  there.
 
 - **Invalid XML characters are removed on write.** U+FFFE, U+FFFF and unpaired surrogates (which are not allowed in XML 1.0) are stripped
   from text when writing xlsx, like control characters already were. Valid surrogate pairs (emoji, etc.) are kept.
@@ -209,6 +273,7 @@ The typings were corrected to match the runtime. Code that relied on the old (wr
 | `TableStyleProperties.theme`                                  | theme names                                 | theme names or `null` (no style)                          |
 | `stream.xlsx.WorksheetReader` `dimensions`, `columns`         | methods                                     | getters; `columns` may be `null`                          |
 | `csv.createInputStream()`                                     | declared                                    | removed (it has thrown since 4.0: use `csv.read(stream)`) |
+| `writeBuffer()` result (`ExcelJS.Buffer`)                     | an `ArrayBuffer`-like interface             | a Node `Buffer` backed by an `ArrayBuffer`                |
 
 `editAs` is now checked: an object literal stored in a variable before the call widens `editAs` to `string` and no longer compiles. Annotate
 it instead:
@@ -219,10 +284,17 @@ const position = { tl: { col: 0, row: 0 }, ext: { width: 100, height: 50 }, edit
 worksheet.addImage(imageId, position);
 ```
 
-New or widened types: `DataValidationType`, `ImageEditAs`, all `cellIs` operators (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`,
-`notBetween`), optional conditional-formatting `priority`, data bar colours, optional `worksheet.protect()` arguments, optional
-`WorkbookReader` options, `WorksheetReader` `id`/`name`/`state`, and the EventEmitter methods of the streaming readers. `xlsx.load()`
-accepts Node Buffers and `Uint8Array`, and `Image.buffer` accepts Node Buffers, with TypeScript 5.7+ typed arrays.
+`(await workbook.xlsx.writeBuffer()) as Buffer` failed with TS2352 in 4.x; the result is now typed as what it is at run time (a Node
+`Buffer`, or the Buffer polyfill in the browser bundle): it can be passed to `fs.writeFile` or cast to `Buffer`, and still to
+`new Blob([data])`. Assigning it to an `ArrayBuffer` variable no longer compiles (it never was one); copy it with
+`data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)` when an `ArrayBuffer` is needed. `xlsx.load()` is typed
+`ArrayBuffer | Uint8Array` (Node Buffers included).
+
+New or widened types: `worksheet.dataValidations` (`DataValidations`: `add`, `find`, `remove`, `model`), `DataValidationType`,
+`ImageEditAs`, all `cellIs` operators (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`, `notBetween`), optional conditional-formatting
+`priority`, data bar colours, optional `worksheet.protect()` arguments, optional `WorkbookReader` options, `WorksheetReader`
+`id`/`name`/`state`, and the EventEmitter methods of the streaming readers. `xlsx.load()` accepts Node Buffers and `Uint8Array`, and
+`Image.buffer` accepts Node Buffers, with TypeScript 5.7+ typed arrays.
 
 `index.d.ts` now starts with `/// <reference types="node" />`, so that it works with TypeScript 6 and 7, which no longer load `@types/*`
 packages automatically. Install `@types/node` as a dev dependency (also in browser projects), or enable `skipLibCheck`. As a consequence,

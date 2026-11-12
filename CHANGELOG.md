@@ -13,8 +13,9 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
 
 - Requires Node.js >= 22.12. Bun >= 1.4 is supported.
 - The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles target ES2020 and need no polyfills.
-- Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet and per
-  loaded workbook, large data-validation and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
+- Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet (1,048,576)
+  and per workbook (`maxMergedCells`, 4,194,304 by default, the same when building, streaming and loading a workbook), large data-validation
+  and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#limits-when-reading-files).
 - TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers). See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#typescript).
@@ -59,6 +60,11 @@ All fixes have regression tests in `spec/integration/security`.
   or names; they are now shared by the whole workbook being loaded.
 - Shared-formula translation was quadratic per clone; `DataValidations.find` and `DefinedNames.model` / `cell.names` were quadratic in the
   number of validations or names. All are linear.
+- Shared parts: a comments part referenced by the relationships of W worksheets was materialised W times (a 61 KiB file gave 400,000 notes
+  and 391 MB of heap). A comments, notes VML, drawing or table part now belongs to the first worksheet that refers to it; the references of
+  other worksheets are ignored.
+- Data validations: every `cell.dataValidation` lookup scanned all the range keys (an unbounded number once 100,000 cells are expanded: 0.75
+  ms per lookup with 250,000 keys). Range keys are indexed by position and size; a lookup no longer depends on their number.
 
 ### Dependencies
 
@@ -81,12 +87,14 @@ upstream PR code was merged) and has a regression test.
     - worksheet elements written in `CT_Worksheet` order, by both writers (`legacyDrawing` #2079; streaming writer #2685, #2803); `sheetPr`
       children order (#2807); data bar extension colour order (#2651);
     - multiple print areas written as one `_xlnm.Print_Area` name, whole-column/row print areas, apostrophes in sheet names (#1516, #3071);
-    - `theme1.xml` always written (#2009); comment VML shape ids unique per sheet, both writers (#3070); unique picture `creationId`
-      (#3092); the right image when pictures repeat (#3094);
+    - `theme1.xml` always written (#2009); comment VML shape ids unique across the workbook, both writers, also for worksheets with more
+      than 1,023 notes, which claim several id blocks (#3070; the streaming writer writes the notes VML when the worksheet is committed);
+      unique picture `creationId` (#3092); the right image when pictures repeat (#3094);
     - empty rich-text runs (#2737); distinct rich-text shared strings in the streaming writer (#2588); dxf number format written as
       `[object Object]` (#2698);
     - internal hyperlinks (`#Sheet!A1`, `#DefinedName`) written as a `location` without an external relationship, by both writers (#2002);
-      `inset="NaNmm,..."` written for notes whose VML textbox had no inset.
+      URLs and paths ending like a sheet reference (`https://example.com/#!page1`) stay external links; `inset="NaNmm,..."` written for
+      notes whose VML textbox had no inset.
 - Data lost or wrong on read:
     - rows/cells without an `r` attribute (#2962, both readers); `t="d"` ISO 8601 date cells (#2702, both readers);
     - falsy formula results (#3048); only numeric formula results converted to dates (#3111);
@@ -113,6 +121,23 @@ upstream PR code was merged) and has a regression test.
   support (#2080), keeping the values of columns with empty or repeated header names; `read()` rejects instead of crashing or hanging when a
   listener throws (e.g. a header row wider than 16,384 columns) or the input stream fails.
 
+- Conditional formatting:
+    - `beginsWith`, `endsWith` and `notContainsText` rules were read as unknown types and dropped on write; they are read as `containsText`
+      rules with that `operator`, their `text` is read and written, and they get Excel's formula when none is given (656fd9bd);
+    - rules that Excel stores only in the x14 extension (cross-sheet `expression` / `cellIs` / text / time period rules, x14-only rules)
+      were written back as main rules, which Excel may repair; they are written in the extension again (d32353ee, f3eb6d94);
+    - data bars use the schema defaults of `CT_DataBar` (`direction: 'context'`, `negativeBarColorSameAsPositive: false`, `minLength` 10,
+      `maxLength` 90 when absent), `showValue` is read and written, and data bars read from a file keep their x14 settings (negative
+      colours, axis, border, lengths, `autoMin` / `autoMax` thresholds) on write (1ffd02ba, 503c07cf);
+    - rules without `priority` were numbered from the highest given priority instead of the next one, so two rules shared it (9c3245b4);
+    - formula and cell-reference threshold values (`<cfvo val="$A$1">`, `xm:f`) were read with `parseFloat` (`NaN` or a partial number);
+      they are kept as written (8da19e03);
+    - a differential format with both a border and a protection was written in the wrong element order (c897f516);
+    - the streaming writer without `useStyles` threw on any rule with a style (ddeacb2b).
+- Number formats read from files keep their `\` escapes (`yyyy\-mm\-dd`, `#,##0.00\ "€"`): 4.x removed every backslash, so formats were read
+  and written back changed (`\#0` even turned a literal `#` into a digit placeholder) and `0.0\ \m` was taken for a date format. Escaped,
+  padding and fill characters are ignored when detecting date formats, quoted texts included (d30edbd0, 5347e2f3).
+- Streaming writer: `<sst count>` is the number of references to the shared strings, not the number of strings (ddb85b85).
 - Streaming reader: worksheets and shared strings were silently dropped when the zip stream ended before all entries had been read (#2790,
   #2915, #3095).
 - TypeScript typings:
@@ -125,18 +150,22 @@ upstream PR code was merged) and has a regression test.
     - Streaming readers: optional `WorkbookReader` options (#1922), `WorksheetReader` properties and getters (#1901, #3097), EventEmitter
       methods.
     - The `csv.createInputStream()` typing was removed (it has thrown since 4.0). Comment typos (#3003, #3081).
+- Data validations: a range key written directly into `dataValidations.model` after a lookup was ignored by later lookups.
 - Data validations on whole columns or rows (`dataValidations.add("A:A", ...)`, `"1:3"`, `sqref="D:E"` in a file) crashed the writers, were
   ignored by `find()` and were dropped on read; they are kept as the rectangle they cover (`A1:A1048576`), never expanded per cell.
 - Merged cells after `spliceRows` / `insertRow(s)` / `duplicateRow` / `spliceColumns`: the merge index used by the writers was not moved
   with the cells (merges written at their old place), `spliceRows` with deletions and insertions shifted merges by the number of inserted
   rows instead of the net offset, and slaves could point at a replaced master. Merges now move as rectangles: they shrink when some of their
   rows / columns are removed, widen when rows / columns are inserted inside them (as in Excel), disappear when reduced to one cell, and
-  `duplicateRow` copies the single-row merges of the duplicated row.
+  `duplicateRow` copies the single-row merges of the duplicated row. Inserting values into the cells of a merge (which would be lost, only
+  the master holds a value) throws before anything changes.
 - Notes (comments) were dropped from the rows that `spliceRows` / `insertRow(s)` moved; they move with their cells, as `spliceColumns`
   already did.
 - Notes on cells without a value were lost on read: Excel (and ExcelJS) write no `<c>` element for such cells. The cells, and their rows
   when missing, are now created.
 - Streaming writer: notes on the cells of a row without values were dropped (the row was skipped).
+- Streaming reader: error and boolean formula results (`t="e"`, `t="b"`) were read as `NaN` and `1` / `0`; they are read as
+  `{error: '#N/A'}` and `true` / `false`, as the document reader does.
 - Hyperlink tooltips were lost on read (document reader). The streaming reader's `hyperlink` events now carry `location`, `tooltip` and
   `display` too (an internal link was an event without target).
 - Streaming writer: memory grew with the number of rows (about 0.5 KB per row: 170 MB for 300,000 rows) because rows were committed faster
@@ -146,6 +175,10 @@ upstream PR code was merged) and has a regression test.
 - Streaming reader: the temp file of a worksheet spooled before the shared strings stayed open for the life of the process when the consumer
   skipped that worksheet (or with `worksheets: 'ignore'`); it is closed once its reader is garbage collected. Removing the temp dir no
   longer waits forever for a spooled file that was closed before it opened.
+- `xlsx.load` / `read` / `readFile` and `xlsx.write` / `writeBuffer` / `writeFile` never gave the event loop a turn (2 s and 4 s for a
+  200,000-row sheet, during which a server answered nothing). They now pause about every 25 ms while parsing, reconciling, preparing and
+  rendering worksheets, at no measurable cost. Building the workbook from the parsed model and compressing one part are still done at once
+  (about 0.5 s and 1.5 s for that sheet).
 
 ### Documentation
 
@@ -174,6 +207,9 @@ upstream PR code was merged) and has a regression test.
   file) and, by the streaming writer, in the relationship XML (relationship injection). Both writers now require 1 to 5 letters or digits,
   and the streaming writer XML-encodes relationship targets.
 - Removed the internal modules that no longer had a user (`lib/utils/auto-drain`, `browser-buffer-encode`, `iterate-stream`,
-  `stream-base64`, `string-builder`, `stuttered-pipe`, `typed-stack`); they were only reachable through deep imports (`exceljs/lib/...`).
+  `stream-base64`, `string-builder`, `stuttered-pipe`, `typed-stack`, and `lib/csv/stream-converter`); they were only reachable through deep
+  imports (`exceljs/lib/...`).
+- `package.json` has an `exports` map: deep imports are limited to `lib/`, `dist/`, `excel(.js)` and `package.json`, and the `browser`
+  condition resolves the package to the browser bundle (see [UPGRADE-5.0.md](UPGRADE-5.0.md#package-exports)).
 - The streaming `WorkbookReader` accepts any stream with a `pipe` method (e.g. `readable-stream`), web `ReadableStream`s and async
   iterables, not only `stream.Readable` instances.

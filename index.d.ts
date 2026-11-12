@@ -2,9 +2,12 @@
 
 import { EventEmitter } from "events";
 
-// Binary data returned by ExcelJS (a Node Buffer in Node/Bun, a Buffer polyfill in the browser bundle).
-// Kept ArrayBuffer-compatible so that results can be passed to browser APIs such as Blob.
-declare interface Buffer extends ArrayBuffer {}
+/**
+ * Binary data returned by ExcelJS (`writeBuffer()`): a Node Buffer in Node.js and Bun, the Buffer polyfill (a `Uint8Array`
+ * with the Node Buffer methods) in the browser bundle. Its `buffer` is an `ArrayBuffer`, so that it can be passed to browser
+ * APIs such as `new Blob([data])` (TypeScript 5.7+ DOM typings); it can be used as, or cast to, a Node `Buffer`.
+ */
+export type Buffer = globalThis.Buffer & { readonly buffer: ArrayBuffer };
 
 export declare enum RelationshipType {
     None = 0,
@@ -335,6 +338,30 @@ export type DataValidationOperator =
     "between" | "notBetween" | "equal" | "notEqual" | "greaterThan" | "lessThan" | "greaterThanOrEqual" | "lessThanOrEqual";
 
 export type DataValidationType = "list" | "whole" | "decimal" | "date" | "textLength" | "custom";
+
+/**
+ * The data validations of a worksheet (`worksheet.dataValidations`).
+ */
+export interface DataValidations {
+    /**
+     * The validations by cell address (`'B2'`) or by range (`'B1:B1048576'`: ranges read from a file once 100,000 cells
+     * have been expanded, whole columns or rows added with `add('B:B', ...)`). A key may hold `undefined` once removed.
+     * Write a range key through a fresh `worksheet.dataValidations.model`, or use `add()`.
+     */
+    model: { [address: string]: DataValidation | undefined };
+    /**
+     * Sets the validation of a cell, a range (`'A1:B10'`) or whole columns or rows (`'A:A'`, `'1:3'`).
+     */
+    add(address: string, validation: DataValidation): DataValidation;
+    /**
+     * The validation of a cell, from its own key or from a range key that contains it.
+     */
+    find(address: string): DataValidation | undefined;
+    /**
+     * Removes the validation of a cell (splitting a range key around it) or a range key.
+     */
+    remove(address: string): void;
+}
 
 export interface DataValidation {
     type: DataValidationType;
@@ -936,7 +963,7 @@ export interface Image {
     extension: "jpeg" | "png" | "gif";
     base64?: string;
     filename?: string;
-    buffer?: Buffer | globalThis.Buffer;
+    buffer?: ArrayBuffer | globalThis.Buffer;
 }
 export interface IAnchor {
     col: number;
@@ -1235,6 +1262,11 @@ export interface Worksheet {
     name: string;
     readonly workbook: Workbook;
     readonly hasMerges: boolean;
+
+    /**
+     * The data validations of the worksheet (`cell.dataValidation` reads and writes them cell by cell)
+     */
+    readonly dataValidations: DataValidations;
 
     readonly dimensions: Range;
     /**
@@ -1666,6 +1698,13 @@ export interface XlsxReadOptions extends ZipReadLimits {
      * The list of XML node names to ignore while parsing an XLSX file
      */
     ignoreNodes: string[];
+    /**
+     * Maximum number of cells covered by merges in all the worksheets of the file (every merged cell is created in
+     * memory). One worksheet holds at most 1,048,576 merged cells whatever this option. The loaded workbook keeps this
+     * value as its `maxMergedCells`.
+     * @default workbook.maxMergedCells (4194304, four full worksheets)
+     */
+    maxMergedCells: number;
 }
 
 export interface XlsxWriteOptions extends stream.xlsx.WorkbookWriterOptions {
@@ -1691,7 +1730,7 @@ export interface Xlsx {
      * load from a Buffer, an ArrayBuffer or a Uint8Array
      * @param buffer
      */
-    load(buffer: Buffer | Uint8Array, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
+    load(buffer: ArrayBuffer | Uint8Array, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
 
     /**
      * write to a buffer
@@ -1936,6 +1975,13 @@ export class Workbook {
     readonly nextId: number;
 
     readonly definedNames: DefinedNames;
+
+    /**
+     * Maximum number of cells covered by merges in all the worksheets (`mergeCells` throws beyond it; one worksheet holds
+     * at most 1,048,576). Also the default `maxMergedCells` of `xlsx.load` / `read` / `readFile`.
+     * @default 4194304 (four full worksheets)
+     */
+    maxMergedCells: number;
 
     model: WorkbookModel;
 
@@ -2227,6 +2273,12 @@ export namespace stream {
              * Styles can add some performance overhead. Default is false
              */
             zip: Partial<ZipOptions>;
+            /**
+             * Maximum number of cells covered by merges in all the worksheets (one worksheet holds at most 1,048,576).
+             * Reading the file back with `xlsx.load` needs a `maxMergedCells` load option at least as large.
+             * @default 4194304 (four full worksheets)
+             */
+            maxMergedCells: number;
         }
 
         class WorkbookWriter extends Workbook {

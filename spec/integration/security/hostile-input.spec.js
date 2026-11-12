@@ -1,7 +1,8 @@
 // Regression tests for hostile xlsx/csv input: each case used to crash the process
 // (heap OOM), block the event loop, or pollute Object.prototype.
+const fs = require("fs");
 const { Readable } = require("stream");
-const { baseWorkbookBuffer, tamper, readPart } = require("../../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, readPart, editParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -65,10 +66,10 @@ describe("hostile input", function () {
         });
 
         it("caps the merged cells of the whole workbook, not of each worksheet", async () => {
-            // each worksheet is under the cap of 1048576 merged cells, the workbook is not
+            // each worksheet is under the cap of 1048576 merged cells, the workbook is over the default of 4 * 1048576
             const buffer = await tamper(
-                await sheetsBuffer(2),
-                afterEachSheetData(2, () => '<mergeCells count="1"><mergeCell ref="B1:B524289"/></mergeCells>')
+                await sheetsBuffer(5),
+                afterEachSheetData(5, () => '<mergeCells count="1"><mergeCell ref="B1:B1048576"/></mergeCells>')
             );
             const { result: error, ms } = await timed(() => load(buffer).catch((e) => e));
             expect(error).to.be.an("error");
@@ -109,6 +110,62 @@ describe("hostile input", function () {
             ws.unMergeCells("B2");
             ws.mergeCells("A1:B2");
             expect(ws.getCell("B2").master.address).to.equal("A1");
+        });
+    });
+
+    describe("parts shared by several worksheets", () => {
+        // the relationships of sheets 2..count point at the comments, notes VML, drawing and table of sheet 1
+        async function sharedPartsBuffer(count, notes) {
+            const buffer = await baseWorkbookBuffer((wb, ws) => {
+                for (let row = 1; row <= notes; row++) {
+                    ws.getCell(`B${row}`).note = `note ${row}`;
+                }
+                ws.addTable({ name: "T1", ref: "D1", columns: [{ name: "a" }], rows: [[1]] });
+                const imageId = wb.addImage({ buffer: fs.readFileSync(`${__dirname}/../data/image.png`), extension: "png" });
+                ws.addImage(imageId, "F1:G2");
+                for (let i = 2; i <= count; i++) {
+                    wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+                }
+            });
+            return editParts(buffer, (parts) => {
+                const rels = parts["xl/worksheets/_rels/sheet1.xml.rels"];
+                const refs =
+                    '<drawing r:id="rId3"/><legacyDrawing r:id="rId2"/><tableParts count="1"><tablePart r:id="rId4"/></tableParts>';
+                for (let i = 2; i <= count; i++) {
+                    parts[`xl/worksheets/_rels/sheet${i}.xml.rels`] = rels;
+                    const sheet = Buffer.from(parts[`xl/worksheets/sheet${i}.xml`]).toString();
+                    parts[`xl/worksheets/sheet${i}.xml`] = sheet.replace("</worksheet>", `${refs}</worksheet>`);
+                }
+            });
+        }
+
+        it("lets only the first worksheet claim a comments, VML, drawing or table part", async () => {
+            const wb = await load(await sharedPartsBuffer(3, 2));
+            const ws1 = wb.getWorksheet("Sheet1");
+            expect(ws1.getCell("B2").note).to.equal("note 2");
+            expect(ws1.getTables()).to.have.length(1);
+            expect(ws1.getImages()).to.have.length(1);
+            ["Sheet2", "Sheet3"].forEach((name) => {
+                const ws = wb.getWorksheet(name);
+                expect(ws.getCell("B2").note, name).to.equal(undefined);
+                expect(ws.getTables(), name).to.have.length(0);
+                expect(ws.getImages(), name).to.have.length(0);
+            });
+            // and the workbook can be written again
+            await load(await wb.xlsx.writeBuffer());
+        });
+
+        it("does not materialise the notes of a shared comments part once per worksheet", async () => {
+            const wb = await load(await sharedPartsBuffer(20, 2000));
+            let notes = 0;
+            wb.eachSheet((ws) =>
+                ws.eachRow({ includeEmpty: true }, (row) =>
+                    row.eachCell({ includeEmpty: true }, (cell) => {
+                        notes += cell.note ? 1 : 0;
+                    })
+                )
+            );
+            expect(notes).to.equal(2000);
         });
     });
 

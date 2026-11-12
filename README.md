@@ -90,14 +90,19 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 * **Number formats.** Custom number formats longer than Excel's limit of 255 characters are
  ignored when a file is read.
 * **Merged cells.** At most 1,048,576 cells (one full column) can be covered by merges in one
- worksheet, and in a whole workbook loaded from a file. `mergeCells` throws beyond that, and so
- does loading a file that exceeds it.
+ worksheet, and `workbook.maxMergedCells` (4,194,304 by default, four full worksheets) in a whole
+ workbook. `mergeCells`, the streaming writer and loading a file throw beyond that, so a workbook
+ written with the defaults can always be read back with the defaults. Raise the workbook budget for
+ trusted files with `workbook.xlsx.load(data, {maxMergedCells: n})` (the `WorkbookWriter` takes the
+ same option).
  Checking for overlapping merges takes time proportional to the merged area, not to the number of merges.
 * **Data validations.** Validations read from a file are expanded to one entry per cell in
  `worksheet.dataValidations.model` until 100,000 cells have been expanded for the workbook. Ranges
  that do not fit (for example a whole column) are kept as a single range key such as `'B1:B1048576'`.
  `sqref` tokens that are not cell references are ignored.
- `cell.dataValidation` resolves both forms and both are written back to the file.
+ `cell.dataValidation` resolves both forms (range keys through an index, not a scan of every key)
+ and both are written back to the file. To add a range key directly, write it through a fresh
+ `worksheet.dataValidations.model` (or call `dataValidations.add('B1:B10', validation)`).
 * **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
  once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
@@ -778,7 +783,7 @@ worksheet.getColumn(7).values = [,,2,3,,5,,7,,,,11];
 
 // cut one or more columns (columns to the right are shifted left)
 // If column properties have been defined, they will be cut or moved accordingly
-// Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
+// Merged cells move with the columns (see Merged Cells)
 worksheet.spliceColumns(3,2);
 
 // remove one column and insert two more.
@@ -941,7 +946,8 @@ const html = '<div>' + cell.html + '</div>';
 
 ## Merged Cells[⬆](#contents)<!-- Link generated with jump2header -->
 
-A worksheet can have at most 1,048,576 merged cells in total (see <a href="#security--limits">Security &amp; limits</a>).
+A worksheet can have at most 1,048,576 merged cells in total, and a workbook `workbook.maxMergedCells` (4,194,304 by default;
+see <a href="#security--limits">Security &amp; limits</a>).
 
 ```javascript
 // merge a range of cells
@@ -967,6 +973,22 @@ worksheet.mergeCells('K10', 'M12');
 
 // merge by start row, start column, end row, end column (equivalent to K10:M12)
 worksheet.mergeCells(10,11,12,13);
+```
+
+Merges follow the rows and columns moved by `spliceRows`, `insertRow(s)`, `duplicateRow` and `spliceColumns`: a merge below
+(or to the right of) the splice moves with its cells and keeps its value and styles, a merge whose rows (or columns) are all
+removed is removed, and a merge that loses some of them shrinks (down to a single cell, which is no longer merged).
+
+As in Excel, rows or columns inserted inside a merge widen it. Only the master cell of a merge holds a value, so inserting a
+value into the cells of a merge throws before anything changes; `null`, `undefined` and `''` are not values. Unmerge first to
+keep such values:
+
+```javascript
+worksheet.mergeCells('B2:C4');
+worksheet.insertRow(3, ['a']);                // B2:C5, 'a' in A3
+worksheet.insertRow(3, ['a', 'b']);           // throws: Cannot insert a value in B3: it would be inside the merged cells B2:C6...
+worksheet.unMergeCells('B2');
+worksheet.insertRow(3, ['a', 'b']);           // 'b' in B3, no merge
 ```
 
 ## Insert Rows[⬆](#contents)<!-- Link generated with jump2header -->
@@ -1028,7 +1050,7 @@ const insertedRowsOriginal = worksheet.insertRows(1, rows, 'o');
 
 ```javascript
 // Cut one or more rows (rows below are shifted up)
-// Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
+// Merged cells move with the rows (see Merged Cells)
 worksheet.spliceRows(4, 3);
 
 // remove one row and insert two more.
@@ -2214,6 +2236,7 @@ Options supported when reading XLSX files.
 | maxEntrySize     |     N       |  Number     | Maximum decompressed size of one part (zip entry) of the file, in bytes. Default is 1 GiB. See [Security & limits](#security--limits). |
 | maxUncompressedSize | N        |  Number     | Maximum decompressed size of all parts of the file, in bytes. Default is 2 GiB. |
 | maxCompressionRatio | N        |  Number     | Maximum compression ratio of a part larger than 10 MiB. Default is 1000. |
+| maxMergedCells   |     N       |  Number     | Maximum number of cells covered by merges in all the worksheets. Default is `workbook.maxMergedCells` (4,194,304); one worksheet holds at most 1,048,576 whatever this option. See [Security & limits](#security--limits). |
 | ignoreNodes      |     N       |  Array      | A list of node names to ignore while loading the XLSX document. Improves performance in some situations. <br/> Available: `sheetPr`, `dimension`, `sheetViews `, `sheetFormatPr`, `cols `, `sheetData`, `autoFilter `, `mergeCells `, `rowBreaks`, `hyperlinks `, `pageMargins`, `dataValidations`, `pageSetup`, `headerFooter `, `printOptions `, `picture`, `drawing`, `sheetProtection`, `tableParts `, `conditionalFormatting`, `extLst`,|
 
 ```javascript
@@ -2452,6 +2475,7 @@ The constructor takes an optional options object with the following fields:
 | filename         | If stream not specified, this field specifies the path to a file to write the XLSX workbook to. |
 | useSharedStrings | Specifies whether to use shared strings in the workbook. Default is `false`. |
 | useStyles        | Specifies whether to add style information to the workbook. Styles can add some performance overhead. Default is `false`. |
+| maxMergedCells   | Maximum number of cells covered by merges in all the worksheets, see [Security & limits](#security--limits). Default is 4,194,304. |
 | zip              | Zip options: `level` (0 to 9, 0 stores the parts uncompressed, default 6), `forceZip64` (write ZIP64 records even when they are not needed; they are added automatically past 4 GiB or 65,535 entries) and `comment`. The same options are accepted by `xlsx.write` / `writeBuffer` / `writeFile`. Default is `undefined`. |
 
 If neither stream nor filename is specified in the options, the workbook writer will create a StreamBuf object
@@ -2984,7 +3008,7 @@ sudo apt-get install libfontconfig
 
 ## Splice vs Merge[⬆](#contents)<!-- Link generated with jump2header -->
 
-If any splice operation affects a merged cell, the merge group will not be moved correctly
+Fixed in 5.0: merged cells move with the rows and columns that splices move, see [Merged Cells](#merged-cells).
 
 # Release History[⬆](#contents)<!-- Link generated with jump2header -->
 

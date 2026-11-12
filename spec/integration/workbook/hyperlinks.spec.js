@@ -132,6 +132,30 @@ describe("Hyperlinks", () => {
         expect((await load(buffer)).getWorksheet("Sheet1").getCell("A1").hyperlink).to.equal("#Data!B3");
     });
 
+    it("writes external URLs ending like a sheet reference (hash-bang) as relationships, with both writers", async () => {
+        const url = "https://example.com/#!page1";
+        const docBuffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("A1").value = { text: "app", hyperlink: url };
+        });
+
+        const stream = new PassThrough();
+        const chunks = [];
+        stream.on("data", (chunk) => chunks.push(chunk));
+        const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream });
+        const ws = wb.addWorksheet("Sheet1");
+        ws.getCell("A1").value = { text: "app", hyperlink: url };
+        ws.commit();
+        await wb.commit();
+
+        for (const buffer of [docBuffer, Buffer.concat(chunks)]) {
+            expect(await hyperlinkNodes(buffer)).to.deep.equal(['<hyperlink ref="A1" r:id="rId1"/>']);
+            const rels = await hyperlinkRels(buffer);
+            expect(rels).to.have.length(1);
+            expect(rels[0]).to.include(`Target="${url}"`);
+            expect((await load(buffer)).getWorksheet("Sheet1").getCell("A1").hyperlink).to.equal(url);
+        }
+    });
+
     it("streaming writer: internal links are a location, external links a relationship", async () => {
         const stream = new PassThrough();
         const chunks = [];
