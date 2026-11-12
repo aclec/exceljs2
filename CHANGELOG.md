@@ -286,6 +286,10 @@ Found while aligning the typings with the runtime (each with a regression test t
 - Streaming reader: shared-formula clones get the formula of their master, translated as `workbook.xlsx.load` does (they had an empty
   formula).
 - `spliceColumns` dropped the values inserted for rows past the last one, and inserted `0`, `false` and `""` as empty cells.
+- `xlsx.load(data, { base64: true })` decodes base64 text given as bytes (a `Uint8Array`, `ArrayBuffer`, `Blob`...), not only as a string or
+  a Buffer. The streaming reader gives the numeric result of a formula in a date-formatted cell as a Date, and the `t="s"` cells of a
+  workbook without shared strings part an empty value, as `xlsx.load` does. A hyperlink on a date is written as a date (it was written as
+  its locale text). Defined names no longer mutate the cell addresses that the address cache shares.
 - `<formula1>` outside `<dataValidation>`, a `<sheet>` or table without name, a table without `<tableColumns>` and other malformed parts
   threw `TypeError`s: they are skipped or throw a clear `Error`. Invalid enumerated attribute values (page orientation, pane, view style,
   validation type or operator, cfvo type, data bar axis, border style, pattern type, underline, image `editAs`, sheet state...) read as the
