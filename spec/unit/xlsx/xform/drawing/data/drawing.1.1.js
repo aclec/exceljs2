@@ -8,6 +8,7 @@ module.exports = {
       },
       picture: {
         index: 1,
+        creationId: '{00000000-0008-0000-0000-000000000001}',
         rId: 'rId1',
         hyperlinks: {
           tooltip: 'exceljs',
@@ -28,6 +29,7 @@ module.exports = {
       },
       picture: {
         index: 2,
+        creationId: '{00000000-0008-0000-0000-000000000002}',
         rId: 'rId2',
       },
     },
