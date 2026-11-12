@@ -166,8 +166,9 @@ describe("WorkbookWriter (stream)", () => {
         const text = (value) => (value.richText ? value.richText.map((run) => run.text).join("|") : value);
         expect(streamed.map(text)).to.deep.equal(["first", "second |part", json, "[object Object]", "first", "plain"]);
 
+        // count: the references to the shared strings, uniqueCount: the shared strings
         const xml = await readPart(buffer, "xl/sharedStrings.xml");
-        expect(xml).to.match(/<sst [^>]*uniqueCount="5"/);
+        expect(xml).to.match(/<sst [^>]* count="6" uniqueCount="5">/);
     });
 
     it("treats column keys named like Object.prototype members as plain keys", async () => {
