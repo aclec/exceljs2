@@ -71,12 +71,19 @@ class ColorScaleXform extends CompositeXform<ColorScaleModel> {
 
     override onParserClose(name: string): void {
         // the element was opened before its children (createNewModel)
-        const model = this.model!;
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
-            case "cfvo":
+            case "cfvo": {
                 // set by the start tag of <cfvo>
-                model.cfvo.push(this.cfvoXform.model!);
+                const cfvo = this.cfvoXform.model;
+                if (cfvo) {
+                    model.cfvo.push(cfvo);
+                }
                 break;
+            }
             case "color":
                 // undefined for a <color> without color attribute
                 model.color.push(this.colorXform.model ?? undefined);

@@ -29,6 +29,10 @@ export function cellValues(): void {
     cell.value = { formula: "A1*2", shareType: "normal" };
     type SharedResult = Assert<Equals<ExcelJS.CellSharedFormulaValue["result"], ExcelJS.CellFormulaResult | undefined>>;
 
+    // an error code of the file (recent versions of Excel), as read; the codes of ErrorValue are offered
+    cell.value = { error: "#SPILL!" };
+    cell.value = { error: ExcelJS.ErrorValue.NotApplicable };
+
     // undefined empties the cell
     cell.value = undefined;
     // @ts-expect-error an object that is not a cell value is not typed (the runtime holds it as a JSON value)

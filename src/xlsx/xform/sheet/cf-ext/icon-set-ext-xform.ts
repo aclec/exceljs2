@@ -1,23 +1,25 @@
 import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
 import type { CfIconModel, CfvoModel, IconSetRuleModel } from "../../../../types";
+import { parseBoolean } from "../../../../utils/utils";
 import BaseXform from "../../base-xform";
+import { parseOptionalBoolean } from "../attribute-values";
 import CompositeXform from "../../composite-xform";
 
 import CfvoExtXform from "./cfvo-ext-xform";
 import CfIconExtXform from "./cf-icon-ext-xform";
-import { DEFAULT_ICON_SET, iconSetAttribute } from "../cf/icon-sets";
+import { DEFAULT_ICON_SET, iconSetAttribute, isIconSet } from "../cf/icon-sets";
 
 /**
- * The model of `<x14:iconSet>` (merged into the rule). The parsed `iconSet` is the attribute (unvalidated),
- * `"3TrafficLights1"` (the default) when absent.
+ * The model of `<x14:iconSet>` (merged into the rule). The parsed `iconSet` is `"3TrafficLights1"` (the default) when
+ * absent or unknown.
  */
 export interface IconSetExtModel {
     cfvo: CfvoModel[];
     iconSet: NonNullable<IconSetRuleModel["iconSet"]>;
     reverse: boolean;
     showValue: boolean;
-    /** The `custom` attribute (`true` for `"1"`), `undefined` when absent. */
+    /** The `custom` attribute (an xsd:boolean), `undefined` when absent. */
     custom: boolean | undefined;
     /** The custom icons (`<x14:cfIcon>`), when there are some. */
     icons?: CfIconModel[];
@@ -84,30 +86,39 @@ class IconSetExtXform extends CompositeXform<IconSetExtModel> {
     }
 
     override createNewModel({ attributes }: SaxTag): IconSetExtModel {
+        const { iconSet } = attributes;
         return {
             cfvo: [],
-            // unvalidated ST_IconSetType
-            iconSet: BaseXform.toStringValue(attributes.iconSet, DEFAULT_ICON_SET) as IconSetExtModel["iconSet"],
-            reverse: BaseXform.toBoolValue(attributes.reverse, false),
-            showValue: BaseXform.toBoolValue(attributes.showValue, true),
-            custom: BaseXform.toBoolValue(attributes.custom),
+            iconSet: iconSet !== undefined && isIconSet(iconSet) ? iconSet : DEFAULT_ICON_SET,
+            reverse: parseBoolean(attributes.reverse, false),
+            showValue: parseBoolean(attributes.showValue, true),
+            custom: parseOptionalBoolean(attributes.custom),
         };
     }
 
     override onParserClose(name: string): void {
         // the element was opened before its children (createNewModel); a child model is set by its start tag
-        const model = this.model!;
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
-            case "x14:cfvo":
-                model.cfvo.push(this.cfvoXform.model!);
-                break;
-
-            case "x14:cfIcon":
-                if (!model.icons) {
-                    model.icons = [];
+            case "x14:cfvo": {
+                const cfvo = this.cfvoXform.model;
+                if (cfvo) {
+                    model.cfvo.push(cfvo);
                 }
-                model.icons.push(this.cfIconXform.model!);
                 break;
+            }
+
+            case "x14:cfIcon": {
+                const icon = this.cfIconXform.model;
+                if (icon) {
+                    model.icons = model.icons || [];
+                    model.icons.push(icon);
+                }
+                break;
+            }
         }
     }
 }

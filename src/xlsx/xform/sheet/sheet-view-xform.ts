@@ -2,10 +2,17 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { SheetViewModel } from "../../../types";
 import colCache from "../../../utils/col-cache";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
+import { isLiteralOf } from "./attribute-values";
 
 /** A pane of a sheet view (ECMA-376 ST_Pane). */
 type Pane = NonNullable<SheetViewModel["activePane"]>;
+
+const isPane = isLiteralOf<Pane>({ topLeft: true, topRight: true, bottomLeft: true, bottomRight: true });
+
+/** The presentations of ST_SheetViewType other than `normal` (the default, read as no style). */
+const isViewStyle = isLiteralOf<NonNullable<SheetViewModel["style"]>>({ pageBreakPreview: true, pageLayout: true });
 
 /** The attributes of `<sheetView>`, kept until the element is closed. */
 interface SheetViewAttributes {
@@ -160,15 +167,15 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
             case "sheetView":
                 this.sheetView = {
                     workbookViewId: BaseXform.toIntValue(attributes.workbookViewId, NaN),
-                    rightToLeft: attributes.rightToLeft === "1",
-                    tabSelected: attributes.tabSelected === "1",
-                    showRuler: !(attributes.showRuler === "0"),
-                    showRowColHeaders: !(attributes.showRowColHeaders === "0"),
-                    showGridLines: !(attributes.showGridLines === "0"),
+                    rightToLeft: parseBoolean(attributes.rightToLeft),
+                    tabSelected: parseBoolean(attributes.tabSelected),
+                    showRuler: parseBoolean(attributes.showRuler, true),
+                    showRowColHeaders: parseBoolean(attributes.showRowColHeaders, true),
+                    showGridLines: parseBoolean(attributes.showGridLines, true),
                     zoomScale: parseInt(attributes.zoomScale || "100", 10),
                     zoomScaleNormal: parseInt(attributes.zoomScaleNormal || "100", 10),
-                    // unvalidated ST_SheetViewType
-                    style: attributes.view as SheetViewModel["style"],
+                    // ST_SheetViewType: normal (the default) or an unknown value is no style
+                    style: isViewStyle(attributes.view) ? attributes.view : undefined,
                 };
                 this.pane = undefined;
                 this.selections = new Map();
@@ -179,8 +186,8 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
                     xSplit: parseInt(attributes.xSplit || "0", 10),
                     ySplit: parseInt(attributes.ySplit || "0", 10),
                     topLeftCell: attributes.topLeftCell,
-                    // unvalidated ST_Pane
-                    activePane: (attributes.activePane || "topLeft") as Pane,
+                    // ST_Pane: topLeft (the default) when absent or unknown
+                    activePane: isPane(attributes.activePane) ? attributes.activePane : "topLeft",
                     state: attributes.state,
                 };
                 return true;
@@ -206,8 +213,10 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
         switch (name) {
             case "sheetView": {
                 // set by the start tag of this element
-                const sheetView = this.sheetView!;
-                const { pane } = this;
+                const { sheetView, pane } = this;
+                if (!sheetView) {
+                    return false;
+                }
                 let model: SheetViewModel;
                 let selection;
                 if (pane) {

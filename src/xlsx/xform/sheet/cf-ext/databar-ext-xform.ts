@@ -1,8 +1,10 @@
 import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel, ColorModel, DataBarRuleModel } from "../../../../types";
+import { parseBoolean } from "../../../../utils/utils";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
+import { isLiteralOf } from "../attribute-values";
 
 import ColorXform from "../../style/color-xform";
 import CfvoExtXform from "./cfvo-ext-xform";
@@ -10,9 +12,15 @@ import CfvoExtXform from "./cfvo-ext-xform";
 /** The settings of an x14 data bar that are colors (the child elements other than the thresholds). */
 type DatabarExtColor = "borderColor" | "negativeFillColor" | "negativeBorderColor" | "axisColor";
 
+/** [MS-XLSX] ST_DataBarAxisPosition. */
+const isAxisPosition = isLiteralOf<NonNullable<DataBarRuleModel["axisPosition"]>>({ auto: true, middle: true, none: true });
+/** [MS-XLSX] ST_DataBarDirection. */
+const isDirection = isLiteralOf<NonNullable<DataBarRuleModel["direction"]>>({ context: true, leftToRight: true, rightToLeft: true });
+
 /**
  * The model of `<x14:dataBar>` (merged into the rule): the parsed attributes, with the defaults of [MS-XLSX] CT_DataBar
- * (except `minLength` / `maxLength`: 10 / 90), the thresholds and the colors (`undefined` for an `auto` color).
+ * (except `minLength` / `maxLength`: 10 / 90; also for an unknown `axisPosition` or `direction`), the thresholds and the
+ * colors (`undefined` for an `auto` color).
  */
 export type DatabarExtModel = Required<
     Pick<
@@ -137,24 +145,30 @@ class DatabarExtXform extends CompositeXform<DatabarExtModel> {
             cfvo: [],
             minLength: BaseXform.toIntValue(attributes.minLength, 10),
             maxLength: BaseXform.toIntValue(attributes.maxLength, 90),
-            border: BaseXform.toBoolValue(attributes.border, false),
-            gradient: BaseXform.toBoolValue(attributes.gradient, true),
-            negativeBarColorSameAsPositive: BaseXform.toBoolValue(attributes.negativeBarColorSameAsPositive, false),
-            negativeBarBorderColorSameAsPositive: BaseXform.toBoolValue(attributes.negativeBarBorderColorSameAsPositive, true),
-            // unvalidated ST_DataBarAxisPosition / ST_DataBarDirection
-            axisPosition: BaseXform.toStringValue(attributes.axisPosition, "auto") as DatabarExtModel["axisPosition"],
-            direction: BaseXform.toStringValue(attributes.direction, "context") as DatabarExtModel["direction"],
+            border: parseBoolean(attributes.border, false),
+            gradient: parseBoolean(attributes.gradient, true),
+            negativeBarColorSameAsPositive: parseBoolean(attributes.negativeBarColorSameAsPositive, false),
+            negativeBarBorderColorSameAsPositive: parseBoolean(attributes.negativeBarBorderColorSameAsPositive, true),
+            axisPosition: isAxisPosition(attributes.axisPosition) ? attributes.axisPosition : "auto",
+            direction: isDirection(attributes.direction) ? attributes.direction : "context",
         };
     }
 
     override onParserClose(name: string): void {
         // the element was opened before its children (createNewModel)
-        const model = this.model!;
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
-            case "x14:cfvo":
+            case "x14:cfvo": {
                 // set by the start tag of <x14:cfvo>
-                model.cfvo.push(this.cfvoXform.model!);
+                const cfvo = this.cfvoXform.model;
+                if (cfvo) {
+                    model.cfvo.push(cfvo);
+                }
                 break;
+            }
 
             // undefined for a color element without color attribute
             case "x14:borderColor":

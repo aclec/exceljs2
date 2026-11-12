@@ -53,6 +53,11 @@ function pageSetup(): void {
     const used: boolean | undefined = worksheet.pageSetup.useFirstPageNumber;
     // @ts-expect-error not a value of cellComments
     worksheet.pageSetup.cellComments = "asDisplyed";
+    // ST_Orientation: a file may give the default orientation of the printer
+    const orientation: Equals<typeof worksheet.pageSetup.orientation, "portrait" | "landscape" | "default" | undefined> = true;
+    // @ts-expect-error not a value of ST_Orientation
+    worksheet.pageSetup.orientation = "upright";
+    void orientation;
     void margins;
     void used;
 }

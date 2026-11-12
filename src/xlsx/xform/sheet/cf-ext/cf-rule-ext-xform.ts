@@ -1,19 +1,12 @@
 import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
-import type {
-    CfFormula,
-    ConditionalFormattingRuleModel,
-    DataBarRuleModel,
-    DxfModel,
-    FormulaRuleModel,
-    IconSetRuleModel,
-} from "../../../../types";
+import type { CfFormula, ConditionalFormattingRuleModel, DataBarRuleModel, FormulaRuleModel, IconSetRuleModel } from "../../../../types";
 import uuidv4 from "../../../../utils/uuid";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
 
 import DxfXform from "../../style/dxf-xform";
-import CfRuleXform, { getTextFormula, getTimePeriodFormula, opType } from "../cf/cf-rule-xform";
+import CfRuleXform, { getTextFormula, getTimePeriodFormula, mergeChild, ruleOfAttributes } from "../cf/cf-rule-xform";
 import DatabarExtXform from "./databar-ext-xform";
 import IconSetExtXform from "./icon-set-ext-xform";
 import FExtXform from "./f-ext-xform";
@@ -39,9 +32,10 @@ const isFormula = (formula: CfFormula | undefined): formula is CfFormula => Bool
  * An `<x14:cfRule>` of the x14 extension of a worksheet: the x14 version of a data bar (see DatabarExtXform.isExt), the
  * custom and x14 icon sets, and the formula rules that Excel 2007 cannot read (see CfRuleXform.isX14), with their
  * formulae and format inline. Linked to a main rule by its `id` (`x14Id`). Parsing gives a rule with the parsed
- * attributes (text rules as `containsText`, like the main `<cfRule>`), merged with the model of its children.
+ * attributes (text rules as `containsText`, like the main `<cfRule>`), merged with the model of its children; `null` for a
+ * type that the model does not have.
  */
-class CfRuleExtXform extends CompositeXform<ConditionalFormattingRuleModel> {
+class CfRuleExtXform extends CompositeXform<ConditionalFormattingRuleModel | null> {
     /** The xform of a data bar. */
     readonly databarXform = new DatabarExtXform();
     /** The xform of an icon set. */
@@ -205,37 +199,48 @@ class CfRuleExtXform extends CompositeXform<ConditionalFormattingRuleModel> {
         xmlStream.closeNode();
     }
 
-    override createNewModel({ attributes }: SaxTag): ConditionalFormattingRuleModel {
-        // the attributes of the file, unvalidated
-        return {
-            // text rules: containsText with the type as operator, like the main <cfRule>
-            ...opType(attributes),
-            x14Id: attributes.id,
-            priority: BaseXform.toIntValue(attributes.priority),
-            stopIfTrue: BaseXform.toBoolValue(attributes.stopIfTrue),
-            text: attributes.text,
-            timePeriod: attributes.timePeriod,
-        } as ConditionalFormattingRuleModel;
+    /** The rule of the attributes (see CfRuleXform.ruleOfAttributes: `null` for a type the model does not have), with its `x14Id`. */
+    override createNewModel({ attributes }: SaxTag): ConditionalFormattingRuleModel | null {
+        const rule = ruleOfAttributes(attributes);
+        if (rule) {
+            rule.x14Id = attributes.id;
+        }
+        return rule;
     }
 
+    /** Merges the model of a child into the rule: the settings of a data bar or icon set into a rule of that type. */
     override onParserClose(name: string): void {
-        // the element was opened before its children (createNewModel)
-        const model = this.model!;
+        // the element was opened before its children (createNewModel); null for a rule that is not read
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
-            case "xm:f":
+            case "xm:f": {
                 // set by the start tag of <xm:f>
-                model.formulae = model.formulae || [];
-                model.formulae.push(this.fExtXform.model!);
+                const formula = this.fExtXform.model;
+                if (formula !== null && formula !== undefined) {
+                    model.formulae = model.formulae || [];
+                    model.formulae.push(formula);
+                }
                 break;
-            case "x14:dxf":
-                // dxf-xform is not typed yet: its model is a DxfModel
-                model.style = this.dxfXform.model as DxfModel;
+            }
+            case "x14:dxf": {
+                const style = this.dxfXform.model;
+                if (style) {
+                    model.style = style;
+                }
                 break;
+            }
             case "x14:dataBar":
-                Object.assign(model, this.databarXform.model);
+                if (model.type === "dataBar") {
+                    mergeChild(model, this.databarXform.model);
+                }
                 break;
             case "x14:iconSet":
-                Object.assign(model, this.iconSetXform.model);
+                if (model.type === "iconSet") {
+                    mergeChild(model, this.iconSetXform.model);
+                }
                 break;
         }
     }

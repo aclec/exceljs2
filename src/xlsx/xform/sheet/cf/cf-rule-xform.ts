@@ -14,8 +14,10 @@ import type {
     TimePeriodRuleModel,
     Top10RuleModel,
 } from "../../../../types";
+import type { CellIsOperators, TimePeriodTypes } from "../../../../../index";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
+import { isLiteralOf, parseOptionalBoolean } from "../attribute-values";
 
 import Range from "../../../../doc/range";
 
@@ -164,19 +166,63 @@ const referencesOtherSheet = (formula: unknown): boolean => {
     return false;
 };
 
-/** The type and operator of a parsed rule, from the attributes of its element (unvalidated strings). */
-export interface RuleTypeAttributes {
-    type: string | undefined;
-    operator: string | undefined;
-}
+const isCellIsOperator = isLiteralOf<CellIsOperators>({
+    equal: true,
+    notEqual: true,
+    greaterThan: true,
+    greaterThanOrEqual: true,
+    lessThan: true,
+    lessThanOrEqual: true,
+    between: true,
+    notBetween: true,
+});
+
+const isTimePeriod = isLiteralOf<TimePeriodTypes>({
+    lastWeek: true,
+    thisWeek: true,
+    nextWeek: true,
+    yesterday: true,
+    today: true,
+    tomorrow: true,
+    last7Days: true,
+    lastMonth: true,
+    thisMonth: true,
+    nextMonth: true,
+});
 
 /**
- * The type and operator of a rule from the attributes of its `<cfRule>` / `<x14:cfRule>`: a text rule is `containsText`
- * with its `<cfRule>` type as operator.
+ * The rule of a `<cfRule>` / `<x14:cfRule>` from the attributes common to both (`priority`, `stopIfTrue` and those of its
+ * type), without its children: a rule of the variant of its `type`, a text rule being `containsText` with its type as
+ * operator. An unknown `operator` (cellIs) or `timePeriod` is absent.
+ *
+ * @returns `null` for a type that the model does not have (`uniqueValues`, `duplicateValues`, an unknown one): such a
+ *   rule is not read (it could not be written back)
  */
-function opType(this: void, attributes: Readonly<Record<string, string | undefined>>): RuleTypeAttributes {
-    const { type, operator } = attributes;
+function ruleOfAttributes(this: void, attributes: Readonly<Record<string, string | undefined>>): ConditionalFormattingRuleModel | null {
+    const { type } = attributes;
+    const priority = BaseXform.toIntValue(attributes.priority);
+    const stopIfTrue = parseOptionalBoolean(attributes.stopIfTrue);
     switch (type) {
+        case "expression":
+        case "colorScale":
+        case "dataBar":
+        case "iconSet":
+            return { type, priority, stopIfTrue };
+        case "cellIs": {
+            const { operator } = attributes;
+            return { type, priority, stopIfTrue, operator: isCellIsOperator(operator) ? operator : undefined };
+        }
+        case "top10":
+            return {
+                type,
+                priority,
+                stopIfTrue,
+                percent: parseOptionalBoolean(attributes.percent),
+                bottom: parseOptionalBoolean(attributes.bottom),
+                rank: BaseXform.toIntValue(attributes.rank),
+            };
+        case "aboveAverage":
+            return { type, priority, stopIfTrue, aboveAverage: parseOptionalBoolean(attributes.aboveAverage) };
         case "containsText":
         case "notContainsText":
         case "beginsWith":
@@ -185,14 +231,14 @@ function opType(this: void, attributes: Readonly<Record<string, string | undefin
         case "notContainsBlanks":
         case "containsErrors":
         case "notContainsErrors":
-            return {
-                type: "containsText",
-                operator: type,
-            };
-
+            return { type: "containsText", priority, stopIfTrue, operator: type, text: attributes.text };
+        case "timePeriod": {
+            const { timePeriod } = attributes;
+            return { type, priority, stopIfTrue, timePeriod: isTimePeriod(timePeriod) ? timePeriod : undefined };
+        }
         case undefined:
         default:
-            return { type, operator };
+            return null;
     }
 }
 
@@ -206,12 +252,12 @@ function stopIfTrueAttribute(model: ConditionalFormattingRuleModel): "1" | "0" |
 /**
  * A `<cfRule>` of a `<conditionalFormatting>` (Excel 2007 rules). The rules that Excel 2007 cannot read (see
  * {@link CfRuleXform.isPrimitive}) are written in the x14 extension instead, by cf-rule-ext-xform; a data bar is written
- * in both. Parsing gives a rule with the keys of every rule type (`undefined` when absent), merged with the model of its
- * children.
+ * in both. Parsing gives a rule of the variant of its type (see {@link ruleOfAttributes}), merged with the model of its
+ * children; the model is `null` for a rule of a type that the model does not have.
  */
-class CfRuleXform extends CompositeXform<ConditionalFormattingRuleModel> {
-    /** See {@link opType} (shared with the x14 rules). */
-    static readonly opType = opType;
+class CfRuleXform extends CompositeXform<ConditionalFormattingRuleModel | null> {
+    /** See {@link ruleOfAttributes} (shared with the x14 rules). */
+    static readonly ruleOfAttributes = ruleOfAttributes;
     /** See {@link getTextFormula} (shared with the x14 rules). */
     static readonly getTextFormula = getTextFormula;
     /** See {@link getTimePeriodFormula} (shared with the x14 rules). */
@@ -477,48 +523,68 @@ class CfRuleXform extends CompositeXform<ConditionalFormattingRuleModel> {
         xmlStream.closeNode();
     }
 
-    override createNewModel({ attributes }: SaxTag): ConditionalFormattingRuleModel {
-        // the attributes of the file, unvalidated: a rule with the keys of every rule type (undefined when absent)
-        return {
-            ...opType(attributes),
-            dxfId: BaseXform.toIntValue(attributes.dxfId),
-            priority: BaseXform.toIntValue(attributes.priority),
-            stopIfTrue: BaseXform.toBoolValue(attributes.stopIfTrue),
-            text: attributes.text,
-            timePeriod: attributes.timePeriod,
-            percent: BaseXform.toBoolValue(attributes.percent),
-            bottom: BaseXform.toBoolValue(attributes.bottom),
-            rank: BaseXform.toIntValue(attributes.rank),
-            aboveAverage: BaseXform.toBoolValue(attributes.aboveAverage),
-        } as ConditionalFormattingRuleModel;
+    /** The rule of the attributes (see {@link ruleOfAttributes}: `null` for a type the model does not have), with its `dxfId`. */
+    override createNewModel({ attributes }: SaxTag): ConditionalFormattingRuleModel | null {
+        const rule = ruleOfAttributes(attributes);
+        if (rule) {
+            rule.dxfId = BaseXform.toIntValue(attributes.dxfId);
+        }
+        return rule;
     }
 
+    /** Merges the model of a child into the rule: the settings of a data bar, color scale or icon set into a rule of that type. */
     override onParserClose(name: string): void {
-        // the element was opened before its children (createNewModel)
-        const model = this.model!;
+        // the element was opened before its children (createNewModel); null for a rule that is not read
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
-            // merge the model of the child with ours
             case "dataBar":
-                Object.assign(model, this.databarXform.model);
+                if (model.type === "dataBar") {
+                    mergeChild(model, this.databarXform.model);
+                }
                 break;
-            case "extLst":
-                Object.assign(model, this.extLstRefXform.model);
+            case "extLst": {
+                const ref = this.extLstRefXform.model;
+                if (ref && ref.x14Id !== undefined) {
+                    model.x14Id = ref.x14Id;
+                }
                 break;
+            }
             case "colorScale":
-                Object.assign(model, this.colorScaleXform.model);
+                if (model.type === "colorScale") {
+                    mergeChild(model, this.colorScaleXform.model);
+                }
                 break;
             case "iconSet":
-                Object.assign(model, this.iconSetXform.model);
+                if (model.type === "iconSet") {
+                    mergeChild(model, this.iconSetXform.model);
+                }
                 break;
 
-            case "formula":
-                // except - formula is a string and appends to formulae; set by the start tag of <formula>
-                model.formulae = model.formulae || [];
-                model.formulae.push(this.formulaXform.model!);
+            case "formula": {
+                // appended to the formulae; set by the start tag of <formula>
+                const formula = this.formulaXform.model;
+                if (formula !== null && formula !== undefined) {
+                    model.formulae = model.formulae || [];
+                    model.formulae.push(formula);
+                }
                 break;
+            }
         }
     }
 }
 
-export { opType, getTextFormula, getTimePeriodFormula };
+/**
+ * Merges the model of a child element into its rule (the keys the child has, all settings of the rule: the type of
+ * `child` is checked against the rule).
+ */
+function mergeChild<T extends object>(this: void, rule: T, child: Partial<T> | null | undefined): void {
+    if (child) {
+        Object.assign(rule, child);
+    }
+}
+
+export { ruleOfAttributes, mergeChild, getTextFormula, getTimePeriodFormula };
 export default CfRuleXform;

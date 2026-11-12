@@ -116,7 +116,9 @@ export type DataValidationFormula = string | number | Date;
 
 /**
  * One data validation (data-validations-xform): index.d.ts `DataValidation`. `formulae` and `operator` are deleted when
- * there is no formula. Parsed literal unions hold the attribute strings of the file, unvalidated.
+ * there is no formula. Parse: an unknown `type` is `any`, an unknown `operator` is `between`; the serial dates of a
+ * `date` rule are text until reconcile reads them as Dates (in the date system of the workbook). `errorStyle` is the
+ * attribute string of the file, unvalidated.
  */
 export type DataValidationModel = DataValidation;
 
@@ -138,8 +140,9 @@ export interface WorksheetLoadBudget {
 // merges the two parsed versions of a rule by `x14Id`. A rule model is index.d.ts `ConditionalFormattingRule` with the
 // internal fields; index.d.ts rules are assignable to it.
 //
-// Parsed rules are unvalidated: their literal unions (`type`, `operator`, `iconSet`, cfvo `type`...) hold the attribute
-// strings of the file, and the main `<cfRule>` parse sets the keys of every rule type (`undefined` when absent).
+// Parsed rules are validated: a rule is of the variant of its `type` (a rule of a type the model does not have, such as
+// `duplicateValues`, is not read); an unknown `operator`, `timePeriod` is absent, an unknown `iconSet` is the default
+// one, an unknown cfvo `type` is `num`. A `<conditionalFormatting>` without range or rule read is not read.
 
 /** A formula of a conditional formatting rule: the text of `<formula>` / `<xm:f>` (the application may give numbers). */
 export type CfFormula = string | number | boolean;
@@ -309,8 +312,8 @@ export interface RowBreakModel {
 /**
  * A sheet view (sheet-view-xform): index.d.ts `WorksheetView` flattened (the fields of its normal / frozen / split
  * variants, all optional) plus `workbookViewId` (parsed) and `tabSelected` (rendered; parsed but not kept). prepare
- * forces an unknown `state` to `"normal"`. Parsed literal unions (`style`, `activePane`) hold the attribute strings of the
- * file, unvalidated.
+ * forces an unknown `state` to `"normal"`. Parse: a `view` that is `normal` (the default) or unknown is no `style`, an
+ * unknown `activePane` is `topLeft` (the default).
  */
 export interface SheetViewModel {
     workbookViewId?: number;
@@ -532,7 +535,7 @@ export interface TableModel {
  *
  * Doc getter only: `id`, `state`, `dimensions`, `merges` (the setter reads them when `mergeCells` is absent),
  * `pivotTables`. Doc setter: `mergeCells`, else `merges`; `rowBreaks` (none when absent). Write-side additions (worksheet-xform prepare): `mergeCells`, `hyperlinks`, `comments`, `rels`, `drawing`,
- * `background`, `image`; xlsx.ts adds `rId`, `shapeBlock`.
+ * `background`, `image`, `date1904`; xlsx.ts adds `rId`, `shapeBlock`.
  *
  * Index.d.ts `WorksheetModel` is a subset of this (it lacks dataValidations, state, sheetProtection, tables, ...).
  */
@@ -578,6 +581,8 @@ export interface WorksheetModel {
     rId?: string;
     /** xlsx.ts: the VML shape block of the comments. */
     shapeBlock?: number;
+    /** prepare: set (to `true`) for a workbook with the 1904 date system (the serial dates of the data validations). */
+    date1904?: true;
 }
 
 /**

@@ -7,6 +7,7 @@ import colCache from "../../../utils/col-cache";
 import BaseXform from "../base-xform";
 import Range from "../../../doc/range";
 import { wholeRangeAddress } from "../../../doc/data-validations";
+import { isLiteralOf } from "./attribute-values";
 
 const addressRegex = /^[A-Z]{1,3}\d+$/;
 const rangeRegex = /^[A-Z]{1,3}\d+:[A-Z]{1,3}\d+$/;
@@ -17,31 +18,40 @@ const numberLiteralRegex = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 /**
  * A formula of a `<dataValidation>` read from a file: for `whole`, `decimal` and `textLength` a number literal is a
- * number, for `date` it is a serial date, read as a Date; any other formula (`$B$1`, `TODAY()`, `A1+1`, a literal out of
- * range) is its text.
+ * number; any other formula (`$B$1`, `TODAY()`, `A1+1`, a literal out of range) is its text. The serial dates of a
+ * `date` rule stay text until {@link reconcileFormula} (the date system of the workbook is known then).
  */
 function parseFormula(type: DataValidationModel["type"], text: string): DataValidationFormula {
     switch (type) {
         case "whole":
         case "decimal":
-        case "textLength":
-        case "date": {
+        case "textLength": {
             if (!numberLiteralRegex.test(text)) {
                 return text;
             }
             const value = Number(text);
-            if (type !== "date") {
-                return Number.isFinite(value) ? value : text;
-            }
-            const date = utils.excelToDate(value);
-            return Number.isNaN(date.getTime()) ? text : date;
+            return Number.isFinite(value) ? value : text;
         }
+        case "date":
+        case "time":
         case "any":
         case "list":
         case "custom":
         default:
             return text;
     }
+}
+
+/**
+ * A formula of a `date` rule read from a file, once the date system of the workbook is known: a number literal is a
+ * serial date, read as a Date; any other formula (`TODAY()`, a literal out of range) is its text.
+ */
+function reconcileFormula(formula: DataValidationFormula, date1904: boolean): DataValidationFormula {
+    if (typeof formula !== "string" || !numberLiteralRegex.test(formula)) {
+        return formula;
+    }
+    const date = utils.excelToDate(Number(formula), date1904);
+    return Number.isNaN(date.getTime()) ? formula : date;
 }
 
 /**
@@ -58,7 +68,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z
  * @throws Error for an invalid Date (or a number or ISO date string that is not one, for a `date` rule), or a number
  * that is not finite
  */
-function formulaText(type: DataValidationModel["type"], formula: DataValidationFormula): string {
+function formulaText(type: DataValidationModel["type"], formula: DataValidationFormula, date1904: boolean): string {
     if (typeof formula === "string" && !(type === "date" && ISO_DATE.test(formula))) {
         return formula;
     }
@@ -67,7 +77,7 @@ function formulaText(type: DataValidationModel["type"], formula: DataValidationF
         if (Number.isNaN(date.getTime())) {
             throw new Error(`Invalid date in the formulae of a data validation: ${String(formula)}`);
         }
-        return String(utils.dateToExcel(date));
+        return String(utils.dateToExcel(date, date1904));
     }
     if (!Number.isFinite(formula)) {
         throw new Error(`A formula of a data validation is not a finite number: ${String(formula)}`);
@@ -79,24 +89,43 @@ function formulaText(type: DataValidationModel["type"], formula: DataValidationF
 // workbook stays under this budget; larger ranges are kept as 'A1:B2' keys.
 const MAX_EXPANDED_CELLS = 100000;
 
-/** The attributes of a `<dataValidation>` copied as strings. */
-type StringAttribute = "operator" | "promptTitle" | "prompt" | "errorStyle" | "errorTitle" | "error";
+/** The attributes of a `<dataValidation>` copied as strings (the messages, and `errorStyle`, unvalidated). */
+type StringAttribute = "promptTitle" | "prompt" | "errorStyle" | "errorTitle" | "error";
 /** The attributes of a `<dataValidation>` parsed as booleans. */
 type BooleanAttribute = "allowBlank" | "showInputMessage" | "showErrorMessage";
+
+/** ST_DataValidationType, but `none` (the default), which is read as `any`. */
+const isDataValidationType = isLiteralOf<DataValidationModel["type"]>({
+    any: true,
+    whole: true,
+    decimal: true,
+    list: true,
+    date: true,
+    time: true,
+    textLength: true,
+    custom: true,
+});
+
+/** ST_DataValidationOperator. */
+const isOperator = isLiteralOf<NonNullable<DataValidationModel["operator"]>>({
+    between: true,
+    notBetween: true,
+    equal: true,
+    notEqual: true,
+    lessThan: true,
+    lessThanOrEqual: true,
+    greaterThan: true,
+    greaterThanOrEqual: true,
+});
 
 function assign(
     dataValidation: DataValidationModel,
     attributes: Readonly<Record<string, string | undefined>>,
-    name: StringAttribute,
-    defaultValue?: string
+    name: StringAttribute
 ): void {
     const value = attributes[name];
-    // the attribute strings of the file, unvalidated (operator, errorStyle)
-    const target = dataValidation as Record<StringAttribute, string | undefined>;
     if (value !== undefined) {
-        target[name] = value;
-    } else if (defaultValue !== undefined) {
-        target[name] = defaultValue;
+        dataValidation[name] = value;
     }
 }
 
@@ -126,19 +155,18 @@ interface DvEntry {
  *
  * @throws Error for a key of the model that is not a cell address or a range in its normal form (`A1`, `A1:B2`)
  */
-function optimiseDataValidations(model: DataValidationsModel | undefined): SqrefDataValidation[] {
-    const keys = model ? Object.keys(model) : [];
+function optimiseDataValidations(dvs: DataValidationsModel | undefined): SqrefDataValidation[] {
+    if (!dvs) {
+        return [];
+    }
     const dvList: DvEntry[] = [];
-    for (const address of keys) {
+    for (const [address, dataValidation] of Object.entries(dvs)) {
         // removed validations are kept as undefined entries
-        const dataValidation = model![address];
         if (dataValidation) {
             dvList.push({ address, dataValidation, marked: false });
         }
     }
     dvList.sort((a, b) => _.strcmp(a.address, b.address));
-    // the model is not empty (dvList has entries) from here on
-    const dvs = model!;
     const dvMap = new Map(dvList.map((dv) => [dv.address, dv]));
     const matchCol = (addr: { row: number; address: string }, height: number, col: number): boolean => {
         for (let i = 0; i < height; i++) {
@@ -243,8 +271,8 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
     declare _budget: Pick<WorksheetLoadBudget, "dataValidationCells">;
     /** While parsing: the `sqref` of the current `<dataValidation>`. */
     declare _address: string | undefined;
-    /** While parsing: the current validation. */
-    declare _dataValidation: DataValidationModel;
+    /** While parsing: the current validation (`undefined` outside of a `<dataValidation>`). */
+    declare _dataValidation: DataValidationModel | undefined;
     /** While parsing: the chunks of text of the current `<formula1>` / `<formula2>`, if any. */
     declare _formula: string[] | undefined;
 
@@ -261,9 +289,10 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
      * Writes the validations (nothing when there is none); a formula that is a Date (or a number, for a `date` rule) is
      * written as a serial date.
      *
+     * @param date1904 - the workbook uses the 1904 date system (the serial dates are of that system)
      * @throws Error for an invalid key (see {@link optimiseDataValidations}) or formula (see {@link formulaText})
      */
-    override render(xmlStream: XmlStream, model: DataValidationsModel | undefined): void {
+    override render(xmlStream: XmlStream, model: DataValidationsModel | undefined, date1904?: boolean): void {
         const optimizedModel = optimiseDataValidations(model);
         if (optimizedModel.length) {
             xmlStream.openNode("dataValidations", { count: optimizedModel.length });
@@ -305,7 +334,7 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
                 xmlStream.addAttribute("sqref", value.sqref);
                 (value.formulae || []).forEach((formula: DataValidationFormula, index) => {
                     xmlStream.openNode(`formula${index + 1}`);
-                    xmlStream.writeText(formulaText(value.type, formula));
+                    xmlStream.writeText(formulaText(value.type, formula, date1904 === true));
                     xmlStream.closeNode();
                 });
                 xmlStream.closeNode();
@@ -327,9 +356,9 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
             case "dataValidation": {
                 const { attributes } = node;
                 this._address = attributes.sqref;
-                // the type attribute of the file, unvalidated
+                // ST_DataValidationType: none (the default) or an unknown type is any
                 const dataValidation: DataValidationModel = {
-                    type: (attributes.type || "any") as DataValidationModel["type"],
+                    type: isDataValidationType(attributes.type) ? attributes.type : "any",
                     formulae: [],
                 };
 
@@ -347,10 +376,14 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
                     case "whole":
                     case "decimal":
                     case "date":
+                    case "time":
                     case "textLength":
-                    default:
-                        assign(dataValidation, attributes, "operator", "between");
+                    default: {
+                        // ST_DataValidationOperator: between (the default) when absent or unknown
+                        const { operator } = attributes;
+                        dataValidation.operator = isOperator(operator) ? operator : "between";
                         break;
+                    }
                 }
                 assign(dataValidation, attributes, "promptTitle");
                 assign(dataValidation, attributes, "prompt");
@@ -364,7 +397,10 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
 
             case "formula1":
             case "formula2":
-                this._formula = [];
+                // a formula outside of a <dataValidation> (malformed) is ignored
+                if (this._dataValidation) {
+                    this._formula = [];
+                }
                 return true;
 
             default:
@@ -384,9 +420,12 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
             case "dataValidations":
                 return false;
             case "dataValidation": {
-                const dataValidation = this._dataValidation;
-                // created by <dataValidations>, which holds this element
-                const model = this.model!;
+                const { _dataValidation: dataValidation, model } = this;
+                this._dataValidation = undefined;
+                // both created by the start tags (the model by <dataValidations>, which holds this element)
+                if (!dataValidation || !model) {
+                    return true;
+                }
                 const budget = this._budget;
                 if (!dataValidation.formulae || !dataValidation.formulae.length) {
                     delete dataValidation.formulae;
@@ -419,14 +458,31 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
             }
             case "formula1":
             case "formula2": {
-                const formula = parseFormula(this._dataValidation.type, (this._formula || []).join(""));
-                // a formula is read inside <dataValidation>, which created the formulae
-                this._dataValidation.formulae!.push(formula);
+                const { _dataValidation: dataValidation, _formula: chunks } = this;
                 this._formula = undefined;
+                // a formula is read inside <dataValidation> (see parseOpen), which created the formulae
+                if (dataValidation && dataValidation.formulae && chunks) {
+                    dataValidation.formulae.push(parseFormula(dataValidation.type, chunks.join("")));
+                }
                 return true;
             }
             default:
                 return true;
+        }
+    }
+
+    /**
+     * Reads the serial dates of the `date` rules as Dates, in the date system of the workbook (mutates the validations;
+     * one object is shared by the cells of a `<dataValidation>`).
+     */
+    override reconcile(model: DataValidationsModel | null | undefined, options: { readonly date1904?: boolean }): void {
+        const date1904 = options.date1904 === true;
+        const done = new Set<DataValidationModel>();
+        for (const dataValidation of Object.values(model || {})) {
+            if (dataValidation && dataValidation.type === "date" && dataValidation.formulae && !done.has(dataValidation)) {
+                done.add(dataValidation);
+                dataValidation.formulae = dataValidation.formulae.map((formula) => reconcileFormula(formula, date1904));
+            }
         }
     }
 }

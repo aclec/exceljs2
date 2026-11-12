@@ -1,5 +1,6 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /** The model of `<pageSetUpPr>`. */
@@ -29,7 +30,7 @@ class PageSetupPropertiesXform extends BaseXform<PageSetupPropertiesModel> {
     override parseOpen(node: SaxTag): boolean {
         if (node.name === this.tag) {
             this.model = {
-                fitToPage: node.attributes.fitToPage === "1",
+                fitToPage: parseBoolean(node.attributes.fitToPage),
             };
             return true;
         }

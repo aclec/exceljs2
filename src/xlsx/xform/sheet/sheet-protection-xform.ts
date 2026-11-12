@@ -2,14 +2,24 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { XmlValue } from "../../../utils/xml-stream";
 import type { SheetProtectionModel } from "../../../types";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 function booleanToXml<V extends string>(model: boolean | undefined, value: V): V | undefined {
     return model ? value : undefined;
 }
 
-function xmlToBoolean(value: string | undefined, equals: string): true | undefined {
-    return value === equals ? true : undefined;
+/**
+ * An xsd:boolean attribute that differs from its default (`true` for the protected sheet, `false` for an allowed
+ * operation): `true` when it says so, `undefined` otherwise (absent, or the default).
+ */
+function xmlToBoolean(value: string | undefined, equals: boolean): true | undefined {
+    return value !== undefined && parseBoolean(value) === equals ? true : undefined;
+}
+
+/** An xsd:boolean attribute that forbids (`"1"` / `"true"`): `false`, `undefined` otherwise. */
+function xmlToForbidden(value: string | undefined): false | undefined {
+    return parseBoolean(value) ? false : undefined;
 }
 
 /**
@@ -61,22 +71,22 @@ class SheetProtectionXform extends BaseXform<SheetProtectionModel> {
             case this.tag: {
                 const { attributes } = node;
                 const model: SheetProtectionModel = (this.model = {
-                    sheet: xmlToBoolean(attributes.sheet, "1"),
-                    objects: attributes.objects === "1" ? false : undefined,
-                    scenarios: attributes.scenarios === "1" ? false : undefined,
-                    selectLockedCells: attributes.selectLockedCells === "1" ? false : undefined,
-                    selectUnlockedCells: attributes.selectUnlockedCells === "1" ? false : undefined,
-                    formatCells: xmlToBoolean(attributes.formatCells, "0"),
-                    formatColumns: xmlToBoolean(attributes.formatColumns, "0"),
-                    formatRows: xmlToBoolean(attributes.formatRows, "0"),
-                    insertColumns: xmlToBoolean(attributes.insertColumns, "0"),
-                    insertRows: xmlToBoolean(attributes.insertRows, "0"),
-                    insertHyperlinks: xmlToBoolean(attributes.insertHyperlinks, "0"),
-                    deleteColumns: xmlToBoolean(attributes.deleteColumns, "0"),
-                    deleteRows: xmlToBoolean(attributes.deleteRows, "0"),
-                    sort: xmlToBoolean(attributes.sort, "0"),
-                    autoFilter: xmlToBoolean(attributes.autoFilter, "0"),
-                    pivotTables: xmlToBoolean(attributes.pivotTables, "0"),
+                    sheet: xmlToBoolean(attributes.sheet, true),
+                    objects: xmlToForbidden(attributes.objects),
+                    scenarios: xmlToForbidden(attributes.scenarios),
+                    selectLockedCells: xmlToForbidden(attributes.selectLockedCells),
+                    selectUnlockedCells: xmlToForbidden(attributes.selectUnlockedCells),
+                    formatCells: xmlToBoolean(attributes.formatCells, false),
+                    formatColumns: xmlToBoolean(attributes.formatColumns, false),
+                    formatRows: xmlToBoolean(attributes.formatRows, false),
+                    insertColumns: xmlToBoolean(attributes.insertColumns, false),
+                    insertRows: xmlToBoolean(attributes.insertRows, false),
+                    insertHyperlinks: xmlToBoolean(attributes.insertHyperlinks, false),
+                    deleteColumns: xmlToBoolean(attributes.deleteColumns, false),
+                    deleteRows: xmlToBoolean(attributes.deleteRows, false),
+                    sort: xmlToBoolean(attributes.sort, false),
+                    autoFilter: xmlToBoolean(attributes.autoFilter, false),
+                    pivotTables: xmlToBoolean(attributes.pivotTables, false),
                 });
                 if (attributes.algorithmName) {
                     model.algorithmName = attributes.algorithmName;

@@ -69,16 +69,24 @@ class ConditionalFormattingExtXform extends CompositeXform<ConditionalFormatting
     }
 
     override onParserClose(name: string): void {
-        // the element was opened before its children (createNewModel); a child model is set by its start tag
-        const model = this.model!;
+        // the element was opened before its children (createNewModel); a child model is set by its start tag (null for a
+        // rule that is not read)
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
             case "xm:sqref":
-                model.ref = this.sqRef.model!;
+                model.ref = this.sqRef.model ?? undefined;
                 break;
 
-            case "x14:cfRule":
-                model.rules.push(this.cfRule.model!);
+            case "x14:cfRule": {
+                const rule = this.cfRule.model;
+                if (rule) {
+                    model.rules.push(rule);
+                }
                 break;
+            }
         }
     }
 }

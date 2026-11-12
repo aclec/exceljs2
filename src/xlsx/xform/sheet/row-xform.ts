@@ -51,8 +51,10 @@ class RowXform extends BaseXform<RowModel<ParsedCellModel> | RowModel> {
         const cellXform = this.map.c;
         const { cells } = model;
         for (let i = 0; i < cells.length; i++) {
-            if (i in cells) {
-                cellXform.prepare(cells[i]!, options);
+            // a hole of a sparse array is undefined
+            const cell = cells[i];
+            if (cell !== undefined) {
+                cellXform.prepare(cell, options);
             }
         }
     }
@@ -87,8 +89,10 @@ class RowXform extends BaseXform<RowModel<ParsedCellModel> | RowModel> {
         const cellXform = this.map.c;
         const { cells } = model;
         for (let i = 0; i < cells.length; i++) {
-            if (i in cells) {
-                cellXform.render(xmlStream, cells[i]!);
+            // a hole of a sparse array is undefined
+            const cell = cells[i];
+            if (cell !== undefined) {
+                cellXform.render(xmlStream, cell);
             }
         }
 
@@ -155,10 +159,14 @@ class RowXform extends BaseXform<RowModel<ParsedCellModel> | RowModel> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // the row was opened before its cells; a cell model is set by its start tag
-                const { cells } = this.model!;
-                cells.push(this.map.c.model!);
-                if (this.maxItems && cells.length > this.maxItems) {
-                    throw new Error(`Max column count (${this.maxItems}) exceeded`);
+                const row = this.model;
+                const cell = this.map.c.model;
+                if (row && cell) {
+                    const { cells } = row;
+                    cells.push(cell);
+                    if (this.maxItems && cells.length > this.maxItems) {
+                        throw new Error(`Max column count (${this.maxItems}) exceeded`);
+                    }
                 }
                 this.parser = undefined;
             }
@@ -180,8 +188,10 @@ class RowXform extends BaseXform<RowModel<ParsedCellModel> | RowModel> {
         const cellXform = this.map.c;
         const { cells } = model;
         for (let i = 0; i < cells.length; i++) {
-            if (i in cells) {
-                cellXform.reconcile(cells[i]!, options);
+            // a hole of a sparse array is undefined
+            const cell = cells[i];
+            if (cell !== undefined) {
+                cellXform.reconcile(cell, options);
             }
         }
     }

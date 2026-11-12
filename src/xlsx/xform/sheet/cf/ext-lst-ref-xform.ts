@@ -69,7 +69,9 @@ class ExtXform extends CompositeXform<ExtLstRefModel> {
 
     override onParserClose(): void {
         // the element was opened before its child (createNewModel)
-        this.model!.x14Id = this.idXform.model ?? undefined;
+        if (this.model) {
+            this.model.x14Id = this.idXform.model ?? undefined;
+        }
     }
 }
 
@@ -103,7 +105,10 @@ class ExtLstRefXform extends CompositeXform<ExtLstRefModel> {
 
     override onParserClose(): void {
         // the element was opened before its child (createNewModel)
-        Object.assign(this.model!, this.map.ext.model);
+        const ext = this.map.ext.model;
+        if (this.model && ext && ext.x14Id !== undefined) {
+            this.model.x14Id = ext.x14Id;
+        }
     }
 }
 

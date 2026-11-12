@@ -7,8 +7,8 @@ import type {
     CellPrepareOptions,
     CellReconcileOptions,
     FormulaCellModel,
+    HyperlinkCellModel,
     ParsedCellModel,
-    RichTextRun,
     RichTextValue,
     SharedStringValue,
 } from "../../../types";
@@ -21,7 +21,9 @@ import { ValueType } from "../../../doc/enums";
 import RichTextXform from "../strings/rich-text-xform";
 
 /**
- * The type of a value (of a formula result): Null for null / undefined.
+ * The type of a value (of a formula result), told as Cell tells it (src/doc/cell.ts): Null for null / undefined; the
+ * markers of an object value by their presence and type (an empty text, formula or error code, a shared string 0 are
+ * values).
  *
  * @throws Error for a value of no known type
  */
@@ -41,22 +43,24 @@ function getValueType(v: unknown): ValueType {
     if (v instanceof Date) {
         return ValueType.Date;
     }
-    // reading a property of any other value (an object, a function, a symbol, a bigint) is safe
-    const value = v as { readonly text?: unknown; readonly hyperlink?: unknown; readonly formula?: unknown; readonly error?: unknown };
-    if (value.text && value.hyperlink) {
-        return ValueType.Hyperlink;
-    }
-    if (value.formula) {
-        return ValueType.Formula;
-    }
-    if (value.error) {
-        return ValueType.Error;
+    if (typeof v === "object") {
+        if ("hyperlink" in v && typeof v.hyperlink === "string" && "text" in v && v.text !== undefined && v.text !== null) {
+            return ValueType.Hyperlink;
+        }
+        if (("formula" in v && typeof v.formula === "string") || ("sharedFormula" in v && typeof v.sharedFormula === "string")) {
+            return ValueType.Formula;
+        }
+        if ("richText" in v && Array.isArray(v.richText)) {
+            return ValueType.RichText;
+        }
+        if ("sharedString" in v && typeof v.sharedString === "number") {
+            return ValueType.SharedString;
+        }
+        if ("error" in v && typeof v.error === "string") {
+            return ValueType.Error;
+        }
     }
     throw new Error("I could not understand type of value");
-}
-
-function isScalarText(text: unknown): text is number | boolean {
-    return typeof text === "number" || typeof text === "boolean";
 }
 
 /** The type of a cell for its number format: the type of the result of a formula. */
@@ -65,7 +69,26 @@ function getEffectiveCellType(cell: CellModel): ValueType {
 }
 
 function isRichText(value: unknown): value is RichTextValue {
-    return typeof value === "object" && value !== null && !!(value as Partial<RichTextValue>).richText;
+    return typeof value === "object" && value !== null && "richText" in value && !!value.richText;
+}
+
+/** An error value (`{ error }`: told by the presence and type of `error`). */
+function isErrorValue(value: unknown): value is CellErrorValue {
+    return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string";
+}
+
+/**
+ * The shared string of the text of a hyperlink: a string or a rich text; a Date (read from a file) is written as its
+ * text, as it always was. `undefined` for a number, boolean or error text, written with its own type.
+ */
+function sharedStringText(text: HyperlinkCellModel["text"] | null | undefined): SharedStringValue | undefined {
+    if (typeof text === "string" || isRichText(text)) {
+        return text;
+    }
+    if (text instanceof Date) {
+        return String(text);
+    }
+    return undefined;
 }
 
 /** A value converted to text as XmlStream and the string functions do (`toString()`): any value but null / undefined. */
@@ -149,10 +172,12 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                 break;
 
             case ValueType.Hyperlink:
-                // a link on a number or boolean cell (as read from a file) keeps its value type
-                if (options.sharedStrings && model.text !== undefined && model.text !== null && !isScalarText(model.text)) {
-                    // a Date or error text (read from a file) is added as is
-                    model.ssId = options.sharedStrings.add(model.text as SharedStringValue);
+                // a link on a number, boolean or error cell (as read from a file) keeps its value type
+                if (options.sharedStrings) {
+                    const text = sharedStringText(model.text);
+                    if (text !== undefined) {
+                        model.ssId = options.sharedStrings.add(text);
+                    }
                 }
                 options.hyperlinks.push({
                     address: model.address,
@@ -204,12 +229,17 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
     }
 
     /**
-     * Writes the `<f>` and `<v>` of a formula cell, and the `t` attribute of its result.
+     * Writes the `<f>` and `<v>` of a formula cell, and the `t` attribute of its result. A cell without formula text but a
+     * clone of a shared formula (an orphan clone read from a file, an empty formula) is written as its cached value: an
+     * empty `<f>` (CT_CellFormula) is the formula of a shared formula clone only.
      *
-     * @throws Error for a result of no known type, or a shared formula master without `ref` (or clones)
+     * @throws Error for a result that is not a string, number, boolean, Date or error value, or a shared formula master
+     *   without `ref` (or clones)
      */
     renderFormula(xmlStream: XmlStream, model: FormulaCellModel): void {
         let attrs: XmlAttributes | undefined;
+        // a clone of a shared formula has no formula text of its own
+        let clone = false;
         switch (model.shareType) {
             case "shared": {
                 const ref = model.ref || (model.range && model.range.range);
@@ -234,6 +264,7 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
             case undefined:
             default:
                 if (model.si !== undefined) {
+                    clone = true;
                     attrs = {
                         t: "shared",
                         si: model.si,
@@ -243,30 +274,39 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
         }
 
         const { result } = model;
+        // the type (t attribute) and text of the cached value
+        let type: "str" | "b" | "e" | undefined;
+        let value: XmlValue | undefined;
         if (result === null || result === undefined) {
-            xmlStream.leafNode("f", attrs, model.formula);
+            value = undefined;
         } else if (result instanceof String || typeof result === "string") {
             // oddly, formula results don't ever use shared strings
-            xmlStream.addAttribute("t", "str");
-            xmlStream.leafNode("f", attrs, model.formula);
-            xmlStream.leafNode("v", undefined, result.toString());
+            type = "str";
+            value = result.toString();
         } else if (typeof result === "number") {
-            xmlStream.leafNode("f", attrs, model.formula);
-            xmlStream.leafNode("v", undefined, result);
+            value = result;
         } else if (typeof result === "boolean") {
-            xmlStream.addAttribute("t", "b");
-            xmlStream.leafNode("f", attrs, model.formula);
-            xmlStream.leafNode("v", undefined, result ? 1 : 0);
+            type = "b";
+            value = result ? 1 : 0;
         } else if (result instanceof Date) {
-            xmlStream.leafNode("f", attrs, model.formula);
-            xmlStream.leafNode("v", undefined, utils.dateToExcel(result, model.date1904));
+            value = utils.dateToExcel(result, model.date1904);
         } else if (getValueType(result) === ValueType.Error) {
-            // getValueType throws for a result of no known type, and a hyperlink or a formula is not a result
-            xmlStream.addAttribute("t", "e");
-            xmlStream.leafNode("f", attrs, model.formula);
-            xmlStream.leafNode("v", undefined, result.error);
+            // getValueType throws for a value of no known type
+            type = "e";
+            value = result.error;
         } else {
-            throw new Error("I could not understand type of value");
+            // a hyperlink, formula, rich text or shared string value
+            throw new Error(`Cell ${model.address}: the result of a formula must be a string, number, boolean, Date or error value`);
+        }
+
+        if (type !== undefined) {
+            xmlStream.addAttribute("t", type);
+        }
+        if (clone || (model.formula !== undefined && model.formula !== "")) {
+            xmlStream.leafNode("f", attrs, model.formula);
+        }
+        if (value !== undefined) {
+            xmlStream.leafNode("v", undefined, value);
         }
     }
 
@@ -332,6 +372,9 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                 } else if (typeof model.text === "boolean") {
                     xmlStream.addAttribute("t", "b");
                     xmlStream.leafNode("v", undefined, model.text ? "1" : "0");
+                } else if (isErrorValue(model.text)) {
+                    xmlStream.addAttribute("t", "e");
+                    xmlStream.leafNode("v", undefined, model.text.error);
                 } else if (model.ssId !== undefined) {
                     xmlStream.addAttribute("t", "s");
                     xmlStream.leafNode("v", undefined, model.ssId);
@@ -365,12 +408,13 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
         }
         switch (node.name) {
             case "c": {
-                // const address = colCache.decodeAddress(node.attributes.r);
-                // `type` is set by the end tag. NB: through this.model, not a local alias of the new object: measured
-                // 20% faster to parse and reconcile (V8 builds faster objects), see the micro-benchmark of the sheet xforms
+                // `type` is set by the end tag (Null until then). NB: through this.model, not a local alias of the new
+                // object: measured 20% faster to parse and reconcile (V8 builds faster objects), see the micro-benchmark
+                // of the sheet xforms
                 this.model = {
                     address: node.attributes.r,
-                } as ParsedCellModel;
+                    type: ValueType.Null,
+                };
                 this.t = node.attributes.t;
                 this.hasValueNode = false;
                 if (node.attributes.s) {
@@ -381,11 +425,13 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
 
             case "f": {
                 // <f> is read inside <c>, which created the model
-                const model = this.model!;
+                const { model } = this;
                 this.currentNode = "f";
-                model.si = node.attributes.si;
-                model.shareType = node.attributes.t;
-                model.ref = node.attributes.ref;
+                if (model) {
+                    model.si = node.attributes.si;
+                    model.shareType = node.attributes.t;
+                    model.ref = node.attributes.ref;
+                }
                 return true;
             }
 
@@ -414,7 +460,10 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
             return;
         }
         // the text elements are read inside <c>, which created the model
-        const model = this.model!;
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (this.currentNode) {
             case "f":
                 model.formula = model.formula ? model.formula + text : text;
@@ -437,7 +486,10 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
         switch (name) {
             case "c": {
                 // the end tag of the element that created the model
-                const model = this.model!;
+                const { model } = this;
+                if (!model) {
+                    return false;
+                }
                 const { t } = this;
 
                 // first guess on cell type
@@ -454,11 +506,11 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                         } else if (t === "b") {
                             model.result = parseInt(rawText(value), 10) !== 0;
                         } else if (t === "e") {
-                            // unvalidated ST_Xstring
-                            model.result = { error: value as CellErrorValue["error"] };
+                            // the error code of the file (ST_Xstring)
+                            model.result = { error: rawText(value) };
                         } else if (t === "d") {
-                            // the text (or, in a malformed cell, its runs), when it is not a date
-                            model.result = parseIsoDate(value) || (value as string);
+                            // the text, when it is not a date
+                            model.result = parseIsoDate(value) || rawText(value);
                         } else {
                             model.result = parseFloat(rawText(value));
                         }
@@ -484,8 +536,8 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                             break;
                         case "e":
                             model.type = ValueType.Error;
-                            // unvalidated ST_Xstring
-                            model.value = { error: value as CellErrorValue["error"] };
+                            // the error code of the file (ST_Xstring)
+                            model.value = { error: rawText(value) };
                             break;
                         case "d": {
                             const date = parseIsoDate(value);
@@ -526,8 +578,14 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                 return true;
 
             case "r": {
-                // <r> is read inside <c>, which created the model
-                const model = this.model!;
+                // <r> is read inside <c>, which created the model; the run xform has its model once its element is closed
+                const { model } = this;
+                const run = this.richTextXForm.model;
+                this.parser = undefined;
+                this.currentNode = undefined;
+                if (!model || !run) {
+                    return true;
+                }
                 let { value } = model;
                 if (typeof value === "string") {
                     // <is> is <t>?<r>*: a leading <t> is an unformatted first run
@@ -536,10 +594,7 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                     value = { richText: [] };
                 }
                 model.value = value;
-                // the run xform has its model once its element is closed
-                value.richText.push(this.richTextXForm.model as RichTextRun);
-                this.parser = undefined;
-                this.currentNode = undefined;
+                value.richText.push(run);
                 return true;
             }
 

@@ -1,6 +1,7 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { OutlinePropertiesModel } from "../../../types";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /**
@@ -29,8 +30,8 @@ class OutlinePropertiesXform extends BaseXform<OutlinePropertiesModel> {
         if (node.name === this.tag) {
             const { summaryBelow, summaryRight } = node.attributes;
             this.model = {
-                summaryBelow: summaryBelow !== undefined ? Boolean(Number(summaryBelow)) : undefined,
-                summaryRight: summaryRight !== undefined ? Boolean(Number(summaryRight)) : undefined,
+                summaryBelow: summaryBelow !== undefined ? parseBoolean(summaryBelow) : undefined,
+                summaryRight: summaryRight !== undefined ? parseBoolean(summaryRight) : undefined,
             };
             return true;
         }

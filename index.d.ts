@@ -473,8 +473,11 @@ export interface DifferentialStyle {
 export type DataValidationOperator =
     "between" | "notBetween" | "equal" | "notEqual" | "greaterThan" | "lessThan" | "greaterThanOrEqual" | "lessThanOrEqual";
 
-/** The kind of a data validation; `"any"` (any value: an input message only) is the default when reading a file. */
-export type DataValidationType = "any" | "list" | "whole" | "decimal" | "date" | "textLength" | "custom";
+/**
+ * The kind of a data validation; `"any"` (any value: an input message only) is the default when reading a file (also for
+ * an unknown kind). A `"time"` rule compares with times of day (serial times, e.g. `0.5` for noon; read as text).
+ */
+export type DataValidationType = "any" | "list" | "whole" | "decimal" | "date" | "time" | "textLength" | "custom";
 
 /**
  * The data validations of a worksheet (`worksheet.dataValidations`).
@@ -506,14 +509,15 @@ export interface DataValidation {
     /**
      * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`, `["$B$1"]`, `["TODAY()"]`); absent for
      * `"any"`. A string is written as is (a formula), a number as is, a Date as its serial date; for `date`, a number is
-     * read as milliseconds since 1970 (`new Date(number)`). Writing an invalid Date or a number that is not finite
-     * throws. Read from a file: a number literal is a number for `whole`, `decimal` and `textLength` and a Date for
-     * `date`; any other formula (a reference, a function...) is its text.
+     * read as milliseconds since 1970 (`new Date(number)`). The serial dates are of the date system of the workbook
+     * (`workbook.properties.date1904`). Writing an invalid Date or a number that is not finite throws. Read from a file:
+     * a number literal is a number for `whole`, `decimal` and `textLength` and a Date for `date`; any other formula (a
+     * reference, a function...) is its text.
      */
     formulae?: (string | number | Date)[];
     /** Whether an empty cell is valid. */
     allowBlank?: boolean;
-    /** The comparison (not written for `list` nor for the default `"between"`). */
+    /** The comparison (not written for `list` nor for the default `"between"`; read as `"between"` when unknown). */
     operator?: DataValidationOperator;
     /** The text of the error message. */
     error?: string;
@@ -542,7 +546,11 @@ export declare enum ErrorValue {
 }
 
 export interface CellErrorValue {
-    error: "#N/A" | "#REF!" | "#NAME?" | "#DIV/0!" | "#NULL!" | "#VALUE!" | "#NUM!";
+    /**
+     * The error code: one of {@link ErrorValue}; a cell read from a file may hold another code that the file gives (the
+     * codes of the recent versions of Excel, such as `#SPILL!`, `#CALC!` or `#GETTING_DATA`, are kept as written).
+     */
+    error: "#N/A" | "#REF!" | "#NAME?" | "#DIV/0!" | "#NULL!" | "#VALUE!" | "#NUM!" | (string & {});
 }
 
 /**
@@ -1077,11 +1085,12 @@ export interface PageSetup {
     margins: Margins | null;
 
     /**
-     * Orientation of the page - i.e. taller (`'portrait'`) or wider (`'landscape'`).
+     * Orientation of the page - i.e. taller (`'portrait'`) or wider (`'landscape'`); a file may also give `'default'`
+     * (the default orientation of the printer).
      *
-     * `'portrait'` by default
+     * `'portrait'` by default (also for a file that gives no orientation, or an invalid one)
      */
-    orientation: "portrait" | "landscape";
+    orientation: "portrait" | "landscape" | "default";
 
     /**
      * Horizontal Dots per Inch. Default value is 4294967295
