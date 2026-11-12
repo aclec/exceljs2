@@ -156,4 +156,39 @@ describe('WorkbookWriter (stream)', () => {
     await wb2.xlsx.load(buffer);
     expect(wb2.getWorksheet('Sheet').getRow(2).values.slice(1)).to.deep.equal(['p', 'c', 'n']);
   });
+
+  it('gives comment VML shapes workbook-unique ids on every worksheet', async () => {
+    const buffer = await writeBuffer(wb => {
+      [1, 2, 3].forEach(n => {
+        const ws = wb.addWorksheet(`Sheet${n}`);
+        ws.getCell('A1').value = n;
+        ws.getCell('A1').note = `note ${n}a`;
+        ws.getCell('B2').value = n;
+        ws.getCell('B2').note = `note ${n}b`;
+        ws.commit();
+      });
+    });
+    const blocks = [];
+    const shapeIds = [];
+    for (const n of [1, 2, 3]) {
+      // eslint-disable-next-line no-await-in-loop
+      const vml = await readPart(buffer, `xl/drawings/vmlDrawing${n}.vml`);
+      blocks.push(/<o:idmap [^>]*data="(\d+)"/.exec(vml)[1]);
+      shapeIds.push(...[...vml.matchAll(/<v:shape [^>]*id="([^"]+)"/g)].map(match => match[1]));
+    }
+    // as the document writer (and Excel): block n = sheet id, ids n*1024+1 ..
+    expect(blocks).to.deep.equal(['1', '2', '3']);
+    expect(shapeIds).to.deep.equal([
+      '_x0000_s1025',
+      '_x0000_s1026',
+      '_x0000_s2049',
+      '_x0000_s2050',
+      '_x0000_s3073',
+      '_x0000_s3074',
+    ]);
+
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(buffer);
+    expect(wb2.getWorksheet('Sheet3').getCell('B2').note).to.equal('note 3b');
+  });
 });
