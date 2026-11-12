@@ -4,4 +4,4 @@
  * or https://github.com/exceljs/exceljs/blob/master/LICENSE
  */
 
-module.exports = require('./lib/exceljs.nodejs.js');
+module.exports = require("./lib/exceljs.nodejs.js");

@@ -1,11 +1,11 @@
 {
-  "compilerOptions": {
-    "target": "es2022",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "strict": true,
-    "noEmit": true,
-    "types": ["node", "mocha"]
-  },
-  "include": ["index.d.ts", "spec/typescript/**/*.ts"]
+    "compilerOptions": {
+        "target": "es2022",
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "strict": true,
+        "noEmit": true,
+        "types": ["node", "mocha"]
+    },
+    "include": ["index.d.ts", "spec/typescript/**/*.ts"]
 }

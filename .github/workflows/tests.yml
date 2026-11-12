@@ -1,190 +1,190 @@
 name: Tests
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: ['**']
+    push:
+        branches: [master]
+    pull_request:
+        branches: ["**"]
 
 permissions:
-  contents: read
+    contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
 
 env:
-  # do not install the husky git hooks on CI runners
-  HUSKY: 0
-  BUN_VERSION: 1.4.4
+    # do not install the husky git hooks on CI runners
+    HUSKY: 0
+    BUN_VERSION: 1.4.4
 
 jobs:
-  node:
-    name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        node-version: [22.x, 24.x, 26.x]
-        include:
-          - os: macos-latest
-            node-version: 24.x
-          - os: windows-latest
-            node-version: 24.x
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Set git config
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          git config --global core.autocrlf false
-          git config --global core.symlinks true
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ matrix.node-version }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-      - run: node --version
-      # bun is only the package manager / script runner here: mocha runs on Node
-      - run: bun run test
-        env:
-          CI: true
+    node:
+        name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
+        timeout-minutes: 15
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest]
+                node-version: [22.x, 24.x, 26.x]
+                include:
+                    - os: macos-latest
+                      node-version: 24.x
+                    - os: windows-latest
+                      node-version: 24.x
+        runs-on: ${{ matrix.os }}
+        steps:
+            - name: Set git config
+              if: runner.os == 'Windows'
+              shell: bash
+              run: |
+                  git config --global core.autocrlf false
+                  git config --global core.symlinks true
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: ${{ matrix.node-version }}
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun install --frozen-lockfile
+            - run: node --version
+            # bun is only the package manager / script runner here: mocha runs on Node
+            - run: bun run test
+              env:
+                  CI: true
 
-  bun:
-    name: Bun ${{ matrix.bun-version }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        bun-version: [1.4.4, latest]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ matrix.bun-version }}
-      - run: bun install --frozen-lockfile
-      - run: bun run test:bun
-        env:
-          CI: true
+    bun:
+        name: Bun ${{ matrix.bun-version }}
+        timeout-minutes: 15
+        strategy:
+            fail-fast: false
+            matrix:
+                bun-version: [1.4.4, latest]
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ matrix.bun-version }}
+            - run: bun install --frozen-lockfile
+            - run: bun run test:bun
+              env:
+                  CI: true
 
-  browser:
-    name: Browser bundle (Chrome)
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.x
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - run: bun run test:dist
-      # uses the Google Chrome preinstalled on the runner image; no browser is downloaded
-      - run: google-chrome --version
-      - run: bun run test:browser
+    browser:
+        name: Browser bundle (Chrome)
+        timeout-minutes: 15
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24.x
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun install --frozen-lockfile
+            - run: bun run build
+            - run: bun run test:dist
+            # uses the Google Chrome preinstalled on the runner image; no browser is downloaded
+            - run: google-chrome --version
+            - run: bun run test:browser
 
-  types:
-    name: TypeScript
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.x
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-      - run: bun run test:types
-      - run: bun run test:typescript
+    types:
+        name: TypeScript
+        timeout-minutes: 10
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24.x
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun install --frozen-lockfile
+            - run: bun run test:types
+            - run: bun run test:typescript
 
-  lint:
-    name: Lint
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.x
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      # TODO: drop continue-on-error once the repository-wide Prettier commit has landed
-      - run: bun run format:check
-        continue-on-error: true
+    lint:
+        name: Lint
+        timeout-minutes: 10
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24.x
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun install --frozen-lockfile
+            - run: bun run lint
+            # TODO: drop continue-on-error once the repository-wide Prettier commit has landed
+            - run: bun run format:check
+              continue-on-error: true
 
-  audit:
-    name: Dependency audit
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-      # fails on any known vulnerability, whatever its severity
-      - run: bun run audit
+    audit:
+        name: Dependency audit
+        timeout-minutes: 10
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun install --frozen-lockfile
+            # fails on any known vulnerability, whatever its severity
+            - run: bun run audit
 
-  install-scripts:
-    name: Install-scripts guard
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.x
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun run check:install-scripts
-      # no dependency lifecycle script may run, so build and tests must work without any of them
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run build
-      - run: bun run test:unit
+    install-scripts:
+        name: Install-scripts guard
+        timeout-minutes: 10
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24.x
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun run check:install-scripts
+            # no dependency lifecycle script may run, so build and tests must work without any of them
+            - run: bun install --frozen-lockfile --ignore-scripts
+            - run: bun run build
+            - run: bun run test:unit
 
-  benchmark:
-    name: Measure performance impact of changes
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.x
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun install --frozen-lockfile
-      - run: bun run benchmark
-        env:
-          CI: true
+    benchmark:
+        name: Measure performance impact of changes
+        timeout-minutes: 15
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24.x
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: ${{ env.BUN_VERSION }}
+            - run: bun install --frozen-lockfile
+            - run: bun run benchmark
+              env:
+                  CI: true

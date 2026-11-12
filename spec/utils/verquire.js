@@ -2,13 +2,13 @@
 // (it used to switch to the transpiled dist/es5 build, which was dropped in v5)
 
 const libs = {
-  exceljs: require('../../lib/exceljs.nodejs'),
+    exceljs: require("../../lib/exceljs.nodejs"),
 };
-const basePath = '../../lib/';
+const basePath = "../../lib/";
 
 module.exports = function verquire(path) {
-  if (!libs[path]) {
-    libs[path] = require(basePath + path);
-  }
-  return libs[path];
+    if (!libs[path]) {
+        libs[path] = require(basePath + path);
+    }
+    return libs[path];
 };
