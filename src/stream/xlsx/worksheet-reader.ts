@@ -3,7 +3,7 @@ import parseSax, { type SaxInput } from "../../utils/parse-sax";
 
 import { createDictionary, excelToDate, isDateFmt, parseBoolean, xmlDecode } from "../../utils/utils";
 import colCache from "../../utils/col-cache";
-import { slideFormula } from "../../utils/shared-formula";
+import { MAX_FORMULA_LENGTH, slideFormula } from "../../utils/shared-formula";
 import { parseIsoDate as parseIsoDateOrUndefined } from "../../utils/iso-date";
 import Range from "../../doc/range";
 
@@ -682,17 +682,21 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
 
 /**
  * The formula of a `<c>`: its own text, or for a clone of a shared formula the formula of its master translated to the
- * cell (as `cell.formula` gives it after `workbook.xlsx.load`). A master (an `<f t="shared">` with a `ref`) is kept by
- * its si for its clones, which follow it in the worksheet; a clone whose master was not seen (or was dropped, see
- * MAX_SHARED_FORMULA_MASTERS) keeps its own text: none.
- * @throws Error when a translated reference is out of the grid, or the formula of the master is longer than the Excel
- * limit (as `cell.formula` of the clone after a load)
+ * cell (as `cell.formula` gives it after `workbook.xlsx.load`; a reference slid off the grid is `#REF!`). A master (an
+ * `<f t="shared">` with a `ref`) is kept by its si for its clones, which follow it in the worksheet; a clone whose master
+ * was not seen (or was dropped, see MAX_SHARED_FORMULA_MASTERS), or whose master is longer than the Excel limit (a
+ * malformed file), keeps its own text: none.
  */
 function sharedFormula(address: string, f: FormulaBeingParsed, masters: Map<string, SharedFormulaMaster>): string {
     if (f.si === undefined) {
         return f.text;
     }
     if (f.ref) {
+        if (f.text.length > MAX_FORMULA_LENGTH) {
+            // not translated for its clones (the document reader throws when cell.formula of a clone is read)
+            masters.delete(f.si);
+            return f.text;
+        }
         if (!masters.has(f.si) && masters.size >= MAX_SHARED_FORMULA_MASTERS) {
             // the oldest one (Map keeps the insertion order)
             for (const si of masters.keys()) {

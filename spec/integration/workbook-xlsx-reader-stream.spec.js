@@ -1009,6 +1009,43 @@ describe("WorkbookReader (stream)", () => {
         ]);
     });
 
+    it("gives #REF! for a clone reference slid off the grid, and no formula to the clones of a master too long, as xlsx.load does", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("XFC1").value = { formula: "XFD1*2", result: 1, shareType: "shared", ref: "XFC1:XFD1" };
+            ws.getCell("XFD1").value = { sharedFormula: "XFC1", result: 2 };
+        });
+        const streamed = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+            for await (const row of worksheet) {
+                streamed.push(row.getCell("XFD").formula);
+            }
+        }
+        const loaded = new ExcelJS.Workbook();
+        await loaded.xlsx.load(buffer);
+        expect(streamed).to.deep.equal(["#REF!*2"]);
+        expect(loaded.getWorksheet("Sheet1").getCell("XFD1").formula).to.equal("#REF!*2");
+
+        // a master longer than the Excel limit (malformed file): the read goes on, its clones have no formula
+        const long = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("B1").value = { formula: "A1&1", result: "x", shareType: "shared", ref: "B1:B2" };
+            ws.getCell("B2").value = { sharedFormula: "B1", result: "y" };
+        });
+        const tampered = await tamper(long, {
+            "xl/worksheets/sheet1.xml": (xml) =>
+                xml.replace(
+                    '<f t="shared" ref="B1:B2" si="0">A1&amp;1</f>',
+                    `<f t="shared" ref="B1:B2" si="0">A1&amp;${"1".repeat(9000)}</f>`
+                ),
+        });
+        const clones = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(tampered))) {
+            for await (const row of worksheet) {
+                clones.push(row.number === 2 ? row.getCell(2).formula : "master");
+            }
+        }
+        expect(clones).to.deep.equal(["master", undefined]);
+    });
+
     it("gives the shared formula clones the cell.formula that workbook.xlsx.load gives", async () => {
         const buffer = await baseWorkbookBuffer((wb, ws) => {
             ws.getCell("B1").value = { formula: "A1&1", result: "hello1", shareType: "shared", ref: "B1:B3" };

@@ -49,10 +49,11 @@ const rowOf = (decoded: CellAddress | DecodedRange): number => ("row" in decoded
 
 /**
  * Translates the relative references of a formula written for cell fromCell to cell toCell, as Excel does for the
- * clones of a shared formula: `slideFormula("A1+$B$1", "C1", "C2")` → `"A2+$B$1"`. Linear in the formula length.
+ * clones of a shared formula: `slideFormula("A1+$B$1", "C1", "C2")` → `"A2+$B$1"`; a reference slid off the grid is
+ * `#REF!`, as in Excel. Linear in the formula length.
  * @param fromCell - The address of the cell the formula is written for (the master of a shared formula), e.g. "C1".
  * @param toCell - The address of the target cell, e.g. "C2".
- * @throws Error when the formula is longer than {@link MAX_FORMULA_LENGTH}, or a translated reference is out of bounds.
+ * @throws Error when the formula is longer than {@link MAX_FORMULA_LENGTH}.
  */
 function slideFormula(formula: string, fromCell: string, toCell: string): string {
     checkFormulaLength(formula);
@@ -80,6 +81,10 @@ function slideFormula(formula: string, fromCell: string, toCell: string): string
         }
         if (!rowDollar) {
             row += rowOf(to) - rowOf(offset);
+        }
+        if (col < 1 || col > colCache.MAX_COLS || row < 1 || row > colCache.MAX_ROWS) {
+            // slid off the grid: Excel writes #REF! for such a reference
+            return "#REF!";
         }
         return (colDollar || "") + colCache.n2l(col) + (rowDollar || "") + row;
     };
