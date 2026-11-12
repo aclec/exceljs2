@@ -44,12 +44,37 @@ function errorsToXml(model: string | undefined): "dash" | "blank" | "NA" | undef
 function pageSizeToModel(value: string | undefined): number | undefined {
     return value !== undefined ? parseInt(value, 10) : undefined;
 }
+/** An xsd:boolean attribute that is true. */
+function isTrue(value: string | undefined): boolean {
+    return value === "1" || value === "true";
+}
+/**
+ * `useFirstPageNumber`, written when the pages are numbered from a first page number: when one is set and the model
+ * does not say that it is not used (a file read with `firstPageNumber` but without `useFirstPageNumber`), or when the
+ * model says so (from 1, the CT_PageSetup default).
+ */
+function useFirstPageNumberToXml(model: PageSetupModel): "1" | undefined {
+    const { firstPageNumber, useFirstPageNumber } = model;
+    return useFirstPageNumber === true || (firstPageNumber !== undefined && useFirstPageNumber !== false) ? "1" : undefined;
+}
+/**
+ * The first page number of a `<pageSetup>`: absent when the pages are numbered automatically and the file gives no
+ * number; else the number (CT_PageSetup default 1) and whether it is used.
+ */
+function firstPageNumberToModel(attributes: SaxTag["attributes"]): Pick<PageSetupModel, "firstPageNumber" | "useFirstPageNumber"> {
+    const used = isTrue(attributes.useFirstPageNumber);
+    if (attributes.firstPageNumber === undefined && !used) {
+        return {};
+    }
+    return { firstPageNumber: parseInt(attributes.firstPageNumber ?? "1", 10), useFirstPageNumber: used };
+}
 
 /**
  * `<pageSetup>`: the print settings of a worksheet (part of the page setup model, which also holds the margins and the
  * print options). Rendered when a setting is set (values other than the defaults for the enumerations); parsing gives
- * every setting, with Excel's defaults for the absent ones. Parsed literal unions hold the attribute strings of the file,
- * unvalidated.
+ * every setting, with Excel's defaults for the absent ones, but `firstPageNumber` and `useFirstPageNumber`: absent for
+ * automatic page numbering without a first page number (see firstPageNumberToModel). Parsed literal unions hold the
+ * attribute strings of the file, unvalidated.
  */
 class PageSetupXform extends BaseXform<PageSetupModel> {
     get tag(): string {
@@ -72,7 +97,7 @@ class PageSetupXform extends BaseXform<PageSetupModel> {
                 fitToWidth: model.fitToWidth,
                 fitToHeight: model.fitToHeight,
                 firstPageNumber: model.firstPageNumber,
-                useFirstPageNumber: booleanToXml(model.firstPageNumber),
+                useFirstPageNumber: useFirstPageNumberToXml(model),
                 usePrinterDefaults: booleanToXml(model.usePrinterDefaults),
                 copies: model.copies,
             };
@@ -101,8 +126,7 @@ class PageSetupXform extends BaseXform<PageSetupModel> {
                     scale: parseInt(attributes.scale || "100", 10),
                     fitToWidth: parseInt(attributes.fitToWidth || "1", 10),
                     fitToHeight: parseInt(attributes.fitToHeight || "1", 10),
-                    firstPageNumber: parseInt(attributes.firstPageNumber || "1", 10),
-                    useFirstPageNumber: attributes.useFirstPageNumber === "1",
+                    ...firstPageNumberToModel(attributes),
                     usePrinterDefaults: attributes.usePrinterDefaults === "1",
                     copies: parseInt(attributes.copies || "1", 10),
                 };
