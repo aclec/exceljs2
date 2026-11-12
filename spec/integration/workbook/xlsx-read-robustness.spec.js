@@ -179,15 +179,16 @@ describe("xlsx read robustness", function () {
         // what Excel writes: an anchor in an external target, and an internal link without r:id
         const excelStyle = (xml) =>
             xml
-                .replace('<hyperlink ref="D1" r:id="rId3"/>', '<hyperlink ref="D1" r:id="rId3" location="part2"/>')
-                .replace('<hyperlink ref="E1" r:id="rId4"/>', '<hyperlink ref="E1" location="Sheet2!B3" display="x"/>');
+                .replace('<hyperlink ref="D1" r:id="rId2"/>', '<hyperlink ref="D1" r:id="rId2" location="part2"/>')
+                .replace('<hyperlink ref="E1" r:id="rId3"/>', '<hyperlink ref="E1" location="Sheet2!B3" display="x"/>');
         const expectLinks = (ws) => {
             expect(ws.getCell("B1").hyperlink).to.equal("#'Sheet2'!A1");
             expect(ws.getCell("C1").hyperlink).to.equal("https://example.com/page");
             expect(ws.getCell("D1").hyperlink).to.equal("https://example.com/doc#part2");
             expect(ws.getCell("E1").hyperlink).to.equal("#Sheet2!B3");
             expect(ws.getCell("E1").text).to.equal("location only");
-            expect(ws.getCell("F1").hyperlink).to.equal("Sheet2!D3");
+            // an unprefixed Sheet2!D3 is written as an internal link: it reads back with a '#'
+            expect(ws.getCell("F1").hyperlink).to.equal("#Sheet2!D3");
         };
 
         it("reads the location of internal and external links", async () => {
