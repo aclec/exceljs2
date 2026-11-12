@@ -132,6 +132,8 @@ upstream PR code was merged) and has a regression test.
   rows instead of the net offset, and slaves could point at a replaced master. Merges now move as rectangles: they shrink when some of their
   rows / columns are removed, widen when rows / columns are inserted inside them (as in Excel), disappear when reduced to one cell, and
   `duplicateRow` copies the single-row merges of the duplicated row.
+- Notes (comments) were dropped from the rows that `spliceRows` / `insertRow(s)` moved; they move with their cells, as `spliceColumns`
+  already did.
 
 ### Documentation
 

@@ -106,6 +106,25 @@ describe("Worksheet splice", () => {
                 expect(ws.rowCount).to.equal(expected.length);
             });
         });
+
+        it("moves notes with their rows", () => {
+            const ws = new Excel.Workbook().addWorksheet("s");
+            ws.getCell("A3").value = "v3";
+            ws.getCell("A3").note = "n3";
+            ws.getCell("B4").note = "n4"; // a note on a cell without a value
+            ws.getCell("A6").note = "n6";
+
+            ws.insertRows(2, [["x"], ["y"]]);
+            expect(ws.getCell("A5").note).to.equal("n3");
+            expect(ws.getCell("B6").note).to.equal("n4");
+            expect(ws.getCell("A8").note).to.equal("n6");
+            ["A3", "B4", "A6"].forEach((address) => expect(ws.getCell(address).note, address).to.equal(undefined));
+
+            ws.spliceRows(1, 5, ["z"]);
+            expect(ws.getCell("B2").note).to.equal("n4");
+            expect(ws.getCell("A4").note).to.equal("n6");
+            ["A5", "B6", "A8"].forEach((address) => expect(ws.getCell(address).note, address).to.equal(undefined));
+        });
     });
 
     describe("spliceColumns", () => {
