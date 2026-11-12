@@ -29,6 +29,29 @@ describe("DefinedNames", () => {
         expect(dn.getNames("blort!A1")).to.deep.equal(["bar"]);
     });
 
+    describe("adding a range (addEx)", () => {
+        it("adds a range given by its bounds", () => {
+            const dn = new DefinedNames();
+            dn.addEx({ sheetName: "s", top: 1, left: 1, bottom: 2, right: 2 }, "a");
+            expect(dn.model).to.deep.equal([{ name: "a", ranges: ["s!$A$1:$B$2"] }]);
+        });
+
+        it("throws for a range whose bounds are not rows and columns of the grid, and adds nothing", () => {
+            const dn = new DefinedNames();
+            for (const bounds of [
+                { top: 0, left: 1, bottom: 2, right: 2 },
+                { top: 2, left: 1, bottom: 1, right: 2 },
+                { top: 1, left: 1.5, bottom: 2, right: 2 },
+                { top: 1, left: 1, bottom: 2, right: 16385 },
+                { top: 1, left: 1, bottom: 1048577, right: 2 },
+            ]) {
+                expect(() => dn.addEx({ sheetName: "s", ...bounds }, "a")).to.throw(Error, /Invalid range/);
+            }
+            expect(dn.model).to.deep.equal([]);
+            expect(dn.getNames("s!$A$1")).to.deep.equal([]);
+        });
+    });
+
     describe("removing a range", () => {
         it("removes the cells of a range reference", () => {
             const dn = new DefinedNames();
@@ -109,7 +132,7 @@ describe("DefinedNames", () => {
             expect(dn.getNames("s!$B$2")).to.deep.equal([]);
             expect(dn.getNames("s!$C$3")).to.deep.equal([]);
             expect(dn.getNames("s!$D$3")).to.deep.equal(["everything"]);
-            expect(dn.matrixMap.everything).to.equal(undefined);
+            expect(dn.matrixMap.get("everything")).to.equal(undefined);
         });
 
         it("removes a rectangle covered by the range, and keeps one of another sheet", () => {

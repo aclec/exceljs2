@@ -58,14 +58,17 @@ class Note {
     /**
      * Sets the note from a model: a single text run without font becomes a string note, anything else the comment
      * itself (by reference).
-     * @throws TypeError when the comment has no `texts`
+     * @throws Error when the comment has no `texts`
      */
     set model(value: NoteModel) {
         const { note } = value;
-        // a comment without texts throws, as it always did
-        const texts = note.texts!;
-        if (texts.length === 1 && Object.keys(texts[0]!).length === 1) {
-            this.note = texts[0]!.text;
+        const { texts } = note;
+        if (!texts) {
+            throw new Error("The model of a note needs the texts of its comment");
+        }
+        const [first] = texts;
+        if (texts.length === 1 && first && Object.keys(first).length === 1) {
+            this.note = first.text;
         } else {
             this.note = note;
         }

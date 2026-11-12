@@ -18,6 +18,11 @@ import type { ColorModel, MediaModel, WorkbookModel, WorkbookViewModel } from ".
 /** The options of `addWorksheet` (index.d.ts `AddWorksheetOptions`). */
 export type AddWorksheetOptions = Partial<Omit<WorksheetOptions, "workbook" | "id" | "name" | "orderNo">>;
 
+/** Whether the options of `addWorksheet` are a color (deprecated: the tab color), told by its `argb`, `theme` or `indexed`. */
+function isTabColor(options: AddWorksheetOptions | ColorModel): options is ColorModel {
+    return ("argb" in options && !!options.argb) || ("theme" in options && !!options.theme) || ("indexed" in options && !!options.indexed);
+}
+
 /** The model of a Workbook (its `model` getter): a {@link WorkbookModel} whose worksheet models come from Worksheet. */
 export type DocumentWorkbookModel = Omit<WorkbookModel, "worksheets"> & { worksheets: DocumentWorksheetModel[] };
 
@@ -142,7 +147,6 @@ class Workbook {
         // if options is a color, call it tabColor (and signal deprecated message)
         let worksheetOptions: AddWorksheetOptions | undefined;
         if (options) {
-            const color = options as ColorModel;
             if (typeof options === "string") {
                 // eslint-disable-next-line no-console -- a deprecation notice with its stack trace, as it always was
                 console.trace(
@@ -153,18 +157,18 @@ class Workbook {
                         tabColor: { argb: options },
                     },
                 };
-            } else if (color.argb || color.theme || color.indexed) {
+            } else if (isTabColor(options)) {
                 // eslint-disable-next-line no-console -- a deprecation notice with its stack trace, as it always was
                 console.trace(
                     "tabColor argument is now deprecated. Please use workbook.addWorksheet(name, {properties: { tabColor: { ... } }"
                 );
                 worksheetOptions = {
                     properties: {
-                        tabColor: color,
+                        tabColor: options,
                     },
                 };
             } else {
-                worksheetOptions = options as AddWorksheetOptions;
+                worksheetOptions = options;
             }
         }
 
@@ -223,9 +227,9 @@ class Workbook {
         return (
             this._worksheets
                 .slice(1)
-                // sort never passes the empty entries to the comparator (they go last); an undefined orderNo gives NaN
-                .sort((a, b) => Number((a as Worksheet).orderNo) - Number((b as Worksheet).orderNo))
                 .filter((worksheet): worksheet is Worksheet => !!worksheet)
+                // an undefined orderNo gives NaN
+                .sort((a, b) => Number(a.orderNo) - Number(b.orderNo))
         );
     }
 

@@ -210,9 +210,9 @@ class Column {
 
     /** Sets the key, and registers it in the worksheet (replacing the previous key of this column). */
     set key(value: string | undefined) {
-        const column = this._key && this._worksheet.getColumnKey(this._key);
-        if (column === this) {
-            this._worksheet.deleteColumnKey(this._key!);
+        const previous = this._key;
+        if (previous && this._worksheet.getColumnKey(previous) === this) {
+            this._worksheet.deleteColumnKey(previous);
         }
 
         this._key = value;
@@ -301,13 +301,17 @@ class Column {
     eachCell(iteratee: (cell: Cell, rowNumber: number) => void): void;
     eachCell(options: { readonly includeEmpty?: boolean } | null | undefined, iteratee: (cell: Cell, rowNumber: number) => void): void;
     eachCell(
-        options: { readonly includeEmpty?: boolean } | null | undefined | ((cell: Cell, rowNumber: number) => void),
+        optionsOrIteratee: { readonly includeEmpty?: boolean } | null | undefined | ((cell: Cell, rowNumber: number) => void),
         iteratee?: (cell: Cell, rowNumber: number) => void
     ): void {
         const colNumber = this.number;
         // eachCell(iteratee) or eachCell(options, iteratee)
-        const callback = iteratee || (options as (cell: Cell, rowNumber: number) => void);
-        this._worksheet.eachRow(iteratee ? (options as { readonly includeEmpty?: boolean } | null | undefined) : null, (row, rowNumber) => {
+        const options = typeof optionsOrIteratee === "function" ? undefined : optionsOrIteratee;
+        const callback = typeof optionsOrIteratee === "function" ? optionsOrIteratee : iteratee;
+        if (typeof callback !== "function") {
+            throw new Error("eachCell needs an iteratee function");
+        }
+        this._worksheet.eachRow(options, (row, rowNumber) => {
             callback(row.getCell(colNumber), rowNumber);
         });
     }
@@ -417,7 +421,9 @@ class Column {
         const segments: ColumnSegment[] = [];
         if (columns) {
             columns.forEach((column, index) => {
-                segments.push({ min: index + 1, max: index + 1, column: column! });
+                if (column) {
+                    segments.push({ min: index + 1, max: index + 1, column });
+                }
             });
         }
         return Column.segmentsToModel(segments);
@@ -486,7 +492,11 @@ class Column {
         let hi = ranges.length - 1;
         while (lo <= hi) {
             const mid = (lo + hi) >> 1;
-            const range = ranges[mid]!;
+            const range = ranges[mid];
+            if (!range) {
+                // lo <= mid <= hi are indexes of ranges
+                break;
+            }
             if (n < range.min) {
                 hi = mid - 1;
             } else if (n > range.max) {
@@ -507,7 +517,6 @@ class Column {
         cols = cols || [];
         const columns: Column[] = [];
         let count = 1;
-        let index = 0;
         /**
          * sort cols by min
          * If it is not sorted, the subsequent column configuration will be overwritten
@@ -515,8 +524,7 @@ class Column {
         cols = cols.sort(function (pre, next) {
             return pre.min - next.min;
         });
-        while (index < cols.length) {
-            const col = cols[index++]!;
+        for (const col of cols) {
             while (count < col.min) {
                 columns.push(new Column(worksheet, count++));
             }

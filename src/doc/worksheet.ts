@@ -10,7 +10,7 @@
 import type { WorksheetProtection, WorksheetState } from "../../index";
 import colCache from "../utils/col-cache";
 import Range from "./range";
-import { findCellAddress, isRowNumber, resolveCellAddress, resolveRange, type SheetRangeArgs } from "./sheet-reference";
+import { findCellAddress, isColumnNumber, isRowNumber, resolveCellAddress, resolveRange, type SheetRangeArgs } from "./sheet-reference";
 import Row, { type RowValues } from "./row";
 import Column, { type ColumnDefn, type ColumnRanges, type ColumnSegment } from "./column";
 import { ValueType } from "./enums";
@@ -129,17 +129,31 @@ function checkInsertedValue(value: CellValue | undefined, row: number, col: numb
     }
 }
 
+/** Whether row values are an array of values (else values by column key). */
+function isValueArray(values: RowValues): values is readonly (CellValue | undefined)[] {
+    return Array.isArray(values);
+}
+
+/** Whether the columns array has no hole (once the columns getter filled them). */
+function isDense(columns: (Column | undefined)[]): columns is Column[] {
+    for (let i = 0; i < columns.length; i++) {
+        if (columns[i] === undefined) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // the values that row.values = values puts in the columns (see Row#values): a function of the column number
 function insertedRowValues(worksheet: Worksheet, values: RowValues | null | undefined): (col: number) => CellValue | undefined {
     if (!values) {
         return () => undefined;
     }
-    if (Array.isArray(values)) {
-        const array = values as readonly (CellValue | undefined)[];
-        const offset = Object.hasOwn(array, "0") ? 1 : 0;
-        return (col) => array[col - offset];
+    if (isValueArray(values)) {
+        const offset = Object.hasOwn(values, "0") ? 1 : 0;
+        return (col) => values[col - offset];
     }
-    const byKey = values as { readonly [key: string]: CellValue | undefined };
+    const byKey = values;
     // the column keys of the worksheet, as Row#values resolves them
     const byColumn = new Map<number, CellValue | undefined>();
     worksheet.eachColumnKey((column, key) => {
@@ -177,8 +191,8 @@ class Worksheet {
     _colRanges: ColumnRanges | null;
     /** True when `_columns` may have holes or `_colRanges` columns not yet created. */
     _columnsSparse: boolean;
-    /** Column keys (addRow convenience): key → column. No prototype: keys come from data (e.g. CSV headers). */
-    _keys: Record<string, Column>;
+    /** Column keys (addRow convenience): key → column (a Map: keys come from data, e.g. CSV headers). */
+    _keys: Map<string, Column>;
     /** The merges, by the address of their master (top-left) cell. */
     _merges: Record<string, Range>;
     /** The number of merged cells (the area of the merges). */
@@ -214,8 +228,6 @@ class Worksheet {
      * @throws Error for an invalid name (see the name setter)
      */
     constructor(options: WorksheetOptions) {
-        // without options, the name setter throws (no workbook), as it always did
-        options = options || ({} as WorksheetOptions);
         this._workbook = options.workbook;
 
         // in a workbook, each sheet will have a number
@@ -241,9 +253,9 @@ class Worksheet {
         // true when this._columns may have holes or this._colRanges columns not yet created
         this._columnsSparse = false;
 
-        // column keys (addRow convenience): key ==> this._collumns index
-        // no prototype: keys come from data (e.g. CSV headers) and may be '__proto__' or 'constructor'
-        this._keys = Object.create(null) as Record<string, Column>;
+        // column keys (addRow convenience): key ==> column; a Map: keys come from data (e.g. CSV headers) and may be
+        // '__proto__' or 'constructor'
+        this._keys = new Map();
 
         // keep record of all merges
         this._merges = {};
@@ -413,8 +425,15 @@ class Worksheet {
             this._colRanges = null;
             this._columnsSparse = false;
         }
+        const columns = this._columns;
+        if (!columns) {
+            return null;
+        }
         // not sparse: no holes
-        return this._columns as Column[] | null;
+        if (!isDense(columns)) {
+            throw new Error("The columns of the worksheet have holes");
+        }
+        return columns;
     }
 
     /** The number of columns, created or defined by the loaded ranges. */
@@ -432,8 +451,11 @@ class Worksheet {
         if (!this._columnsSparse) {
             return Column.toModel(this._columns);
         }
-        const columns = this._columns || [];
-        const created = Object.keys(columns).map((key) => Number(key) + 1);
+        // the created columns, in order, with their numbers
+        const created: [number, Column][] = [];
+        eachEntry(this._columns || [], (column, index) => {
+            created.push([index + 1, column]);
+        });
         const ranges = this._colRanges ? this._colRanges.ranges : [];
         const length = this._columnsLength();
         const segments: ColumnSegment[] = [];
@@ -442,18 +464,18 @@ class Worksheet {
         let r = 0;
         let n = 1;
         while (n <= length) {
-            if (created[i] === n) {
-                // created[i] is the index of an entry of columns
-                segments.push({ min: n, max: n, column: columns[n - 1]! });
+            const next = created[i];
+            if (next && next[0] === n) {
+                segments.push({ min: n, max: n, column: next[1] });
                 i++;
                 n++;
             } else {
                 // columns n.. up to the next created column stand for the same range, or are plain columns
-                const nextCreated = i < created.length ? created[i]! : length + 1;
-                while (r < ranges.length && ranges[r]!.max < n) {
-                    r++;
+                const nextCreated = next ? next[0] : length + 1;
+                let range = ranges[r];
+                while (range && range.max < n) {
+                    range = ranges[++r];
                 }
-                const range = ranges[r];
                 let max;
                 let column;
                 if (range && range.min <= n) {
@@ -495,24 +517,23 @@ class Worksheet {
 
     /** The column of a key, if any. */
     getColumnKey(key: string): Column | undefined {
-        return this._keys[key];
+        return this._keys.get(key);
     }
 
     /** Registers `value` as the column of `key` (`column.key = …` calls it). */
     setColumnKey(key: string, value: Column): void {
-        this._keys[key] = value;
+        this._keys.set(key, value);
     }
 
     /** Unregisters the column of `key`. */
     deleteColumnKey(key: string): void {
-        delete this._keys[key];
+        this._keys.delete(key);
     }
 
     /** Calls `f` with each keyed column and its key. */
     eachColumnKey(f: (column: Column, key: string) => void): void {
-        const keys = this._keys;
-        for (const key of Object.keys(keys)) {
-            f(keys[key]!, key);
+        for (const [key, column] of this._keys) {
+            f(column, key);
         }
     }
 
@@ -524,7 +545,7 @@ class Worksheet {
     getColumn(c: number | string): Column | undefined {
         if (typeof c === "string") {
             // if it matches a key'd column, return that
-            const col = this._keys[c];
+            const col = this._keys.get(c);
             if (col) return col;
 
             // otherwise, assume letter
@@ -562,11 +583,30 @@ class Worksheet {
     }
 
     /**
+     * Column n, created if needed (see {@link getColumn}).
+     * @throws Error for a number that is not an integer >= 1
+     */
+    _getColumnEx(n: number): Column {
+        const column = this.getColumn(n);
+        if (!column) {
+            throw new Error(`Invalid column number: ${n} (the columns are numbered from 1)`);
+        }
+        return column;
+    }
+
+    /**
      * Removes `count` columns from column `start` (1-based) and inserts columns with the `inserts` values (each an array
      * of the values of the column, indexed by row - 1). The cells, column definitions, merges and defined names move.
-     * @throws Error when a value would be inserted inside a merge, or the merges would exceed the cap
+     * @throws Error for a start that is not a column number or a count that is not an integer >= 0 (nothing changes),
+     *   when a value would be inserted inside a merge, or the merges would exceed the cap
      */
     spliceColumns(start: number, count: number, ...inserts: readonly (CellValue | undefined)[][]): void {
+        if (!isColumnNumber(start)) {
+            throw new Error(`Invalid column number: ${String(start)} (the columns are numbered from 1 to ${colCache.MAX_COLS})`);
+        }
+        if (!Number.isInteger(count) || count < 0) {
+            throw new Error(`Invalid count of columns: ${count}`);
+        }
         const merges = this._planMerges(
             (merge) => merge.right >= start,
             (merge) => {
@@ -614,20 +654,21 @@ class Worksheet {
         // splice column definitions
         const nExpand = inserts.length - count;
         const nKeep = start + count;
-        // the columns are null when none was ever created (no row): throws, as it always did
-        const nEnd = (this.columns as Column[]).length;
-        // the column numbers below are integers >= 1: getColumn gives a column
+        // no columns when none was ever created (no cell)
+        const { columns } = this;
+        const nEnd = columns ? columns.length : 0;
+        // the column numbers below are integers >= 1 (start is a column number, count an integer >= 0)
         if (nExpand < 0) {
             for (let i = start + inserts.length; i <= nEnd; i++) {
-                this.getColumn(i)!.defn = this.getColumn(i - nExpand)!.defn;
+                this._getColumnEx(i).defn = this._getColumnEx(i - nExpand).defn;
             }
         } else if (nExpand > 0) {
             for (let i = nEnd; i >= nKeep; i--) {
-                this.getColumn(i + nExpand)!.defn = this.getColumn(i)!.defn;
+                this._getColumnEx(i + nExpand).defn = this._getColumnEx(i).defn;
             }
         }
         for (let i = start; i < start + inserts.length; i++) {
-            this.getColumn(i)!.defn = null;
+            this._getColumnEx(i).defn = null;
         }
 
         this._attachMerges(merges.moved);
@@ -836,7 +877,7 @@ class Worksheet {
         // now copy styles...
         for (let i = 0; i < count; i++) {
             // the splice created the rows of the copies
-            const rDst = this._rows[rowNum + i]!;
+            const rDst = this.getRow(rowNum + i + 1);
             rDst.style = rSrc.style;
             rDst.height = rSrc.height;
 
@@ -979,8 +1020,11 @@ class Worksheet {
     eachRow(options: EachRowOptions | null | undefined, iteratee: RowIteratee): void;
     eachRow(optionsOrIteratee: EachRowOptions | RowIteratee | null | undefined, iteratee?: RowIteratee): void {
         // eachRow(iteratee) or eachRow(options, iteratee)
-        const callback = iteratee || (optionsOrIteratee as RowIteratee);
-        const options = iteratee ? (optionsOrIteratee as EachRowOptions | null | undefined) : undefined;
+        const options = typeof optionsOrIteratee === "function" ? undefined : optionsOrIteratee;
+        const callback = typeof optionsOrIteratee === "function" ? optionsOrIteratee : iteratee;
+        if (typeof callback !== "function") {
+            throw new Error("eachRow needs an iteratee function");
+        }
         if (options && options.includeEmpty) {
             const n = this._rows.length;
             for (let i = 1; i <= n; i++) {
@@ -1454,8 +1498,7 @@ class Worksheet {
         eachEntry(this._rows, (row) => {
             const rowModel = row.model;
             if (rowModel) {
-                // a row model has min and max
-                dimensions.expand(rowModel.number, rowModel.min!, rowModel.number, rowModel.max!);
+                dimensions.expand(rowModel.number, rowModel.min, rowModel.number, rowModel.max);
                 rows.push(rowModel);
             }
         });
@@ -1527,7 +1570,7 @@ class Worksheet {
         this._media = value.media.map((medium) => new Image(this, medium));
         this.sheetProtection = value.sheetProtection;
         this.tables = value.tables.reduce<Record<string, Table>>((tables, table) => {
-            const t = new Table();
+            const t = new Table(this);
             t.model = table;
             setTable(tables, table.name, t);
             return tables;

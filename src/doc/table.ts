@@ -6,9 +6,14 @@ import type { TableColumnModel, TableModel } from "../types";
 import type Cell from "./cell";
 import type { DxfModel, StyleModel } from "../types";
 
-/** What a {@link Table} reads of its worksheet: its rows, to write the table in their cells. */
+/**
+ * What a {@link Table} reads of its worksheet: its rows, to write the table in their cells, and its cells, to read the data
+ * rows of a table read from a file.
+ */
 export interface TableWorksheet {
     getRow(row: number): { getCell(col: number): Cell };
+    /** The cell at (row, col), if it exists. */
+    findCell(row: number, col: number): Cell | undefined;
 }
 
 /** A data row of a table: the values of its cells, by column (`undefined` for a missing one). */
@@ -20,7 +25,10 @@ interface TablePosition {
     col: number;
 }
 
-/** What a table created by `addTable` has, and a table read from a file has not: its worksheet, data rows and position. */
+/**
+ * What the table API edits: the worksheet, the data rows and the position of the table (a table read from a file gets its
+ * data rows and position from its cells and range when it is first edited).
+ */
 interface EditableTable {
     worksheet: TableWorksheet;
     rows: TableRow[];
@@ -173,11 +181,12 @@ class Column {
 
 /**
  * A table of a worksheet. Created from index.d.ts `TableProperties` (validated and completed with the defaults, then
- * written in the cells), or from a loaded model (without data rows nor `ref`).
+ * written in the cells), or from a loaded model (without data rows nor `ref`: they are read from the cells of its range
+ * when the table is first edited).
  */
 class Table {
-    /** The worksheet (none for a table set from a loaded model). */
-    worksheet: TableWorksheet | undefined;
+    /** The worksheet. */
+    worksheet: TableWorksheet;
     /** The model (by reference: `validate` completes it in place). */
     declare table: TableModel;
     /** The state before the first change since the last commit. */
@@ -188,7 +197,7 @@ class Table {
      *   table set from a model next
      * @throws Error for invalid table properties (see validate)
      */
-    constructor(worksheet?: TableWorksheet, table?: TableModel) {
+    constructor(worksheet: TableWorksheet, table?: TableModel) {
         this.worksheet = worksheet;
         if (table) {
             this.table = table;
@@ -316,7 +325,7 @@ class Table {
 
     /**
      * Writes the table in the cells of the worksheet: headers, data (with the column styles), totals row.
-     * @throws Error for a table read from a file (see {@link commit})
+     * @throws Error for a table read from a file without range
      */
     store(): void {
         const { worksheet, rows, tl } = this._editable();
@@ -325,7 +334,7 @@ class Table {
 
     /**
      * Writes the headers, data and totals of the table in the cells of a worksheet (without styles; unused).
-     * @throws Error for a table read from a file (see {@link commit})
+     * @throws Error for a table read from a file without range
      */
     load(worksheet: TableWorksheet): void {
         const { rows, tl } = this._editable();
@@ -386,16 +395,37 @@ class Table {
     }
 
     /**
-     * The worksheet, data rows and position of a table created by `addTable`.
-     * @throws Error for a table read from a file: it has none of them (its rows are the cells of its worksheet)
+     * The worksheet, data rows and position of the table. A table read from a file gets them on its first edit: its
+     * position (`ref`, `tl`) from its range (`tableRef`), its data rows from the values of the cells of the range (between
+     * the header and totals rows).
+     * @throws Error for a table read from a file without range
      */
     _editable(): EditableTable {
-        const { worksheet } = this;
-        const { rows, tl } = this.table;
-        if (!worksheet || !rows || !tl) {
-            throw new Error(`Table "${this.table.name}" was read from a file: change the cells of its worksheet`);
+        const { worksheet, table } = this;
+        const { rows, tl } = table;
+        if (rows && tl) {
+            return { worksheet, rows, tl };
         }
-        return { worksheet, rows, tl };
+        if (!table.tableRef) {
+            throw new Error(`Table "${table.name}" has no range (ref)`);
+        }
+        const range = colCache.decode(table.tableRef);
+        const position = "top" in range ? { row: range.top, col: range.left } : { row: range.row, col: range.col };
+        const first = position.row + (table.headerRow ? 1 : 0);
+        const { width } = this;
+        const loaded: TableRow[] = [];
+        for (let i = 0; i < this.height; i++) {
+            const values: TableRow = [];
+            for (let j = 0; j < width; j++) {
+                const cell = worksheet.findCell(first + i, position.col + j);
+                values.push(cell ? cell.value : null);
+            }
+            loaded.push(values);
+        }
+        table.ref = colCache.encodeAddress(position.row, position.col);
+        table.tl = position;
+        table.rows = loaded;
+        return { worksheet, rows: loaded, tl: position };
     }
 
     /** The style of the model, created (empty) for a table without style (one read from a file without table style). */
@@ -417,11 +447,11 @@ class Table {
     }
 
     // ================================================================
-    // Mutating methods: a table read from a file has no data rows (they are the cells of its worksheet), they throw
+    // Mutating methods (a table read from a file reads its data rows from its cells first: see _editable)
 
     /**
      * Saves the position and size of the table before a change (once until the next commit).
-     * @throws Error for a table read from a file
+     * @throws Error for a table read from a file without range
      */
     cacheState(): void {
         const { tl } = this._editable();
@@ -436,7 +466,7 @@ class Table {
 
     /**
      * Applies the changes made since the last commit: validates the table, clears the cells it no longer covers, and
-     * writes it again. Does nothing without a change (a table read from a file cannot be changed).
+     * writes it again. Does nothing without a change.
      * @throws Error for invalid table properties (see validate): nothing is changed then
      */
     commit(): void {
@@ -488,7 +518,7 @@ class Table {
     /**
      * Adds a row of data, inserted at `rowNumber` (0-based) or appended (needs `commit()`).
      * @throws Error for values that are not an array, or more values than the table has columns (nothing is changed);
-     *   for a table read from a file
+     *   for a table read from a file without range
      */
     addRow(values: TableRow, rowNumber?: number): void {
         const { rows } = this._editable();
@@ -500,7 +530,7 @@ class Table {
 
     /**
      * Removes `count` rows of data from `rowIndex` (0-based; needs `commit()`).
-     * @throws Error for a table read from a file
+     * @throws Error for a table read from a file without range
      */
     removeRows(rowIndex: number, count = 1): void {
         const { rows } = this._editable();
@@ -523,7 +553,8 @@ class Table {
 
     /**
      * Adds a column with its values (one per data row), inserted at `colIndex` (0-based) or appended (needs `commit()`).
-     * @throws Error for more values than the table has rows (nothing is changed); for a table read from a file
+     * @throws Error for more values than the table has rows (nothing is changed); for a table read from a file without
+     *   range
      */
     addColumn(column: TableColumnModel, values: TableRow, colIndex?: number): void {
         const { rows } = this._editable();
@@ -548,7 +579,7 @@ class Table {
 
     /**
      * Removes `count` columns from `colIndex` (0-based) with their data (needs `commit()`).
-     * @throws Error for a table read from a file
+     * @throws Error for a table read from a file without range
      */
     removeColumns(colIndex: number, count = 1): void {
         const { rows } = this._editable();
