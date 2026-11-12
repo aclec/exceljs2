@@ -71,7 +71,8 @@ export interface MediaModel {
     type: "image";
     name?: string;
     extension: string;
-    buffer?: Uint8Array | ArrayBuffer;
+    /** read: `null` for an empty media part */
+    buffer?: Uint8Array | ArrayBuffer | null;
     base64?: string;
     filename?: string;
     index?: number;
@@ -130,6 +131,18 @@ export interface WorkbookViewModel {
     firstSheet?: number;
 }
 
+/**
+ * `xl/workbook.xml` as WorkbookXform parses it (read by xlsx.ts and the stream WorkbookReader). `sheets` / `views` are
+ * `undefined` when their element is absent; `calcProperties` is always `{}` (not parsed).
+ */
+export interface WorkbookPartModel {
+    sheets?: SheetDefModel[];
+    properties: Partial<WorkbookProperties>;
+    views?: WorkbookViewModel[];
+    calcProperties: Partial<CalculationProperties>;
+    definedNames?: DefinedNameModel[];
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Workbook
 
@@ -182,8 +195,8 @@ export interface WorkbookReadModel extends CoreModel {
     worksheets: ParsedWorksheetModel[];
     /** part name (`xl/worksheets/sheet1.xml`) → worksheet */
     worksheetHash: Record<string, ParsedWorksheetModel>;
-    /** indexed by sheet number (from the part name) */
-    worksheetRels: RelationshipModel[][];
+    /** by the number of the worksheet part, as written (`sheet3.xml.rels` → "3") */
+    worksheetRels: Record<string, RelationshipModel[]>;
     /** theme name → XML */
     themes: Record<string, string>;
     media: MediaModel[];

@@ -47,7 +47,8 @@ class StringBuf {
     toBuffer(): Buffer {
         // return the current data as a single enclosing buffer
         if (!this._buffer) {
-            this._buffer = Buffer.alloc(this.length);
+            // not zero-filled: the copy overwrites every byte (2 to 3 times faster than Buffer.alloc)
+            this._buffer = Buffer.allocUnsafe(this.length);
             this._buf.copy(this._buffer, 0, 0, this.length);
         }
         return this._buffer;
