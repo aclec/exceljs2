@@ -562,9 +562,9 @@ describe("WorkbookWriter", () => {
             const [cf2] = ws2.conditionalFormattings;
 
             // verify that rules from generated file contain styles with valid numFmt:
-            // like cell styles, a dxf numFmt is the format code string (NumFmtXform drops `\` escapes)
+            // like cell styles, a dxf numFmt is the format code string, escapes included
             cf2.rules.forEach((rule, index) => {
-                expect(rule.style.numFmt).to.equal(cf1.rules[index].style.numFmt.replace(/\\(.)/g, "$1"));
+                expect(rule.style.numFmt).to.equal(cf1.rules[index].style.numFmt);
             });
         });
     });

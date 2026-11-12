@@ -23,6 +23,16 @@ const expectations = [
         },
         tests: ["render", "renderIn", "parse"],
     },
+    {
+        title: "escaped characters",
+        create: () => new NumFmtXform(),
+        preparedModel: { id: 166, formatCode: '#,##0.00\\ "€";[Red]\\-#,##0.00\\ "€"' },
+        xml: '<numFmt numFmtId="166" formatCode="#,##0.00\\ &quot;€&quot;;[Red]\\-#,##0.00\\ &quot;€&quot;"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
 ];
 
 describe("NumFmtXform", () => {
