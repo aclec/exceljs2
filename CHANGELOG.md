@@ -12,7 +12,8 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
 ### Breaking changes
 
 - Requires Node.js >= 22.12. Bun >= 1.4 is supported.
-- The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles target ES2020 and need no polyfills.
+- The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles use ES2020 syntax and ES2022 built-ins (`Object.hasOwn`) and need no
+  polyfills on Chrome / Edge 93, Firefox 92, Safari 15.4 or later.
 - Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet (1,048,576)
   and per workbook (`maxMergedCells`, 1,048,576 by default, the same when building, streaming and loading a workbook), large data-validation
   and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
@@ -245,6 +246,8 @@ Found while porting to TypeScript (each with a regression test that fails on the
 - `worksheet.addPivotTable()` threw on a loaded workbook (`pivotTables` was undefined).
 - `pageSetup.cellComments: "asDisplayed"` (the documented value) was not written.
 - The internal `StreamBuf` is a real `Duplex`: `on('data')`, `pause()`, `destroy()` behave as in Node.
+- Malformed files: a part without `<workbook>` / `<worksheet>`, a conditional formatting rule without range, an unknown shared string index,
+  an invalid data-validation range or a colorScale / iconSet without `cfvo` throw an explicit `Error` instead of a `TypeError`.
 
 ### Performance
 

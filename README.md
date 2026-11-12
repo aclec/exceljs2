@@ -20,7 +20,7 @@ Reverse engineered from Excel spreadsheet files as a project.
 > - **Bug fixes:** about 90 fixes for files Excel reports as corrupt, data lost on read or write, and streaming issues — many of
 >   them reported in upstream issues and pull requests. Every fix was re-implemented here with a regression test; no upstream
 >   pull-request code was merged.
-> - **Runtimes:** browsers (ES2020 bundle), Node.js ≥ 22.12 and Bun ≥ 1.4, tested in CI on all three.
+> - **Runtimes:** browsers (Chrome / Edge 93, Firefox 92, Safari 15.4 or later), Node.js ≥ 22.12 and Bun ≥ 1.4, tested in CI on all three.
 >
 > See [CHANGELOG.md](CHANGELOG.md) for the full list and [UPGRADE-5.0.md](UPGRADE-5.0.md) for the breaking changes.
 
@@ -70,8 +70,8 @@ Upgrading from 4.x? Read [UPGRADE-5.0.md](UPGRADE-5.0.md) and the [CHANGELOG](CH
 | ----------- | ------------------ |
 | Node.js     | 22.12 or later |
 | Bun         | 1.4 or later |
-| Browsers    | Modern browsers with ES2020 support, through the prebuilt bundles in `dist/` |
-| TypeScript  | The typings are tested with TypeScript 5.9, 6.0 and 7.0 |
+| Browsers    | Chrome / Edge 93, Firefox 92, Safari 15.4 or later (ES2020 syntax, ES2022 built-ins such as `Object.hasOwn`), through the prebuilt bundles in `dist/` |
+| TypeScript  | The library is written in TypeScript; its typings are checked in CI with TypeScript 6.0 |
 
 Version 5 no longer ships an ES5 build: `exceljs/dist/es5` has been removed, and neither the
  package nor the browser bundles need polyfills. Applications that must run on older runtimes
@@ -2626,7 +2626,8 @@ For example code using ExcelJS in the browser take a look at the <a href="https:
 ## Prebundled[⬆](#contents)<!-- Link generated with jump2header -->
 
 The following files are pre-bundled and included inside the dist folder.
- They target ES2020 and need no polyfills.
+ They use ES2020 syntax and ES2022 built-ins (`Object.hasOwn`), and need no polyfills on Chrome / Edge 93, Firefox 92, Safari 15.4
+ or later.
 
 * exceljs.js
 * exceljs.min.js

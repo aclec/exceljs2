@@ -15,11 +15,11 @@ npm install exceljs@npm:@aclec/exceljs2
 
 ## Runtime requirements
 
-|          | ExcelJS 4.x                               | ExcelJS 5.0                       |
-| -------- | ----------------------------------------- | --------------------------------- |
-| Node.js  | >= 8.3 (ES5 build for older versions)     | **>= 22.12**                      |
-| Bun      | not supported                             | **>= 1.4**                        |
-| Browsers | ES5 bundles with core-js polyfills, IE 11 | **ES2020** (all current browsers) |
+|          | ExcelJS 4.x                               | ExcelJS 5.0                                                                     |
+| -------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
+| Node.js  | >= 8.3 (ES5 build for older versions)     | **>= 22.12**                                                                    |
+| Bun      | not supported                             | **>= 1.4**                                                                      |
+| Browsers | ES5 bundles with core-js polyfills, IE 11 | **ES2020 syntax, ES2022 built-ins** (Chrome / Edge 93, Firefox 92, Safari 15.4) |
 
 Applications that must run on an older Node.js or on Internet Explorer should stay on 4.x.
 
@@ -44,8 +44,10 @@ Applications that must run on an older Node.js or on Internet Explorer should st
 - **Internal modules are compiled from TypeScript.** The library is written in TypeScript (`src/`) and `lib/` holds the compiled CommonJS
   output with its `.d.ts` files. The package entry point is unchanged (`require('exceljs')` returns the same object), but a deep import of
   an internal module that used to be `module.exports = X` now exposes `X` as its default export: use
-  `require('exceljs/lib/doc/workbook').default` (or `import Workbook from 'exceljs/lib/doc/workbook'` in ES modules / TypeScript). Internal
-  modules are not part of the public API and may change in any release.
+  `require('exceljs/lib/doc/workbook').default`. TypeScript compiled to CommonJS can write
+  `import Workbook from 'exceljs/lib/doc/workbook'`; in native ES modules the default import is the CommonJS exports object, so the class is
+  `(await import('exceljs/lib/doc/workbook')).default.default`. Internal modules are not part of the public API and may change in any
+  release.
 - **The `browser` condition** resolves the package to the browser bundle `dist/exceljs.min.js` (bundlers targeting browsers did so through
   the `browser` field already). The bundle has no `stream` namespace and no file APIs. Test runners that apply the `browser` condition in
   Node now load the bundle too: **Jest with the jsdom environment** does by default (`customExportConditions: ['browser']`). To test with
