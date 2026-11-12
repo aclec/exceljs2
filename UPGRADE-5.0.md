@@ -143,6 +143,15 @@ need small changes:
 | `stream.xlsx.WorksheetReader` `dimensions`, `columns` | methods | getters; `columns` may be `null` |
 | `csv.createInputStream()` | declared | removed (it has thrown since 4.0: use `csv.read(stream)`) |
 
+`editAs` is now checked: an object literal stored in a variable before the call widens
+`editAs` to `string` and no longer compiles. Annotate it instead:
+
+```ts
+const position = {tl: {col: 0, row: 0}, ext: {width: 100, height: 50}, editAs: 'oneCell' as const};
+// or: const editAs: ExcelJS.ImageEditAs = 'oneCell';
+worksheet.addImage(imageId, position);
+```
+
 New or widened types: `DataValidationType`, `ImageEditAs`, all `cellIs` operators
 (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`, `notBetween`), optional conditional-formatting
 `priority`, data bar colours, optional `worksheet.protect()` arguments, optional `WorkbookReader`
@@ -152,4 +161,9 @@ Buffers, with TypeScript 5.7+ typed arrays.
 
 `index.d.ts` now starts with `/// <reference types="node" />`, so that it works with TypeScript 6
 and 7, which no longer load `@types/*` packages automatically. Install `@types/node` as a dev
-dependency (also in browser projects), or enable `skipLibCheck`.
+dependency (also in browser projects), or enable `skipLibCheck`. As a consequence, Node's globals
+(`process`, `setTimeout` returning `NodeJS.Timeout`, ...) are visible in projects that compile
+`index.d.ts`, including browser projects that set `"types": []`.
+
+The typings use `get`/`set` accessor declarations in interfaces, which require TypeScript 4.3 or
+later; they are tested with TypeScript 5.9, 6.0 and 7.0.
