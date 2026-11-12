@@ -1,5 +1,6 @@
 const testXformHelper = require('../../test-xform-helper');
 
+const XmlStream = verquire('utils/xml-stream');
 const DatabarExtXform = verquire('xlsx/xform/sheet/cf-ext/databar-ext-xform');
 
 const expectations = [
@@ -82,4 +83,21 @@ const expectations = [
 
 describe('DatabarExtXform', () => {
   testXformHelper(expectations);
+
+  // chai-xml ignores sibling order, so check the CT_DataBar sequence on the raw string
+  it('renders colours in CT_DataBar order', () => {
+    const xmlStream = new XmlStream();
+    new DatabarExtXform().render(xmlStream, {
+      cfvo: [{type: 'autoMin'}, {type: 'autoMax'}],
+      axisColor: {argb: 'FF000004'},
+      negativeBorderColor: {argb: 'FF000003'},
+      negativeFillColor: {argb: 'FF000002'},
+      borderColor: {argb: 'FF000001'},
+    });
+    const order = ['borderColor', 'negativeFillColor', 'negativeBorderColor', 'axisColor'].map(
+      name => xmlStream.xml.indexOf(`<x14:${name} `)
+    );
+    order.forEach(index => expect(index).to.be.above(0));
+    expect(order).to.deep.equal([...order].sort((a, b) => a - b));
+  });
 });
