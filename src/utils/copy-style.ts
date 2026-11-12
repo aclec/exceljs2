@@ -1,23 +1,11 @@
-import type { GradientStop, Style } from "../../index";
+import type { Color, Style } from "../../index";
 
-/** A style object seen as a map of its properties (styles are plain objects). */
-type StyleObject = Record<string, unknown>;
-
-// a shallow copy of obj, and of its nestKeys properties that are set
-const oneDepthCopy = <T extends object>(obj: T, nestKeys: readonly string[]): T => {
-    const source = obj as StyleObject;
-    const memo: StyleObject = {};
-    for (const key of nestKeys) {
-        if (source[key]) memo[key] = { ...source[key] };
-    }
-    return { ...obj, ...memo };
-};
-
-// dst[key] = a one-depth copy of src[key], when it is set
-const setIfExists = (src: object, dst: object, key: string, nestKeys: readonly string[] = []): void => {
-    const value = (src as StyleObject)[key];
-    if (value) (dst as StyleObject)[key] = oneDepthCopy(value, nestKeys);
-};
+/** A shallow copy of value, with a shallow copy of its color when it is set. */
+function withColorCopy<V extends { color?: Partial<Color> | undefined }>(value: V): V {
+    const copy = { ...value };
+    if (value.color) copy.color = { ...value.color };
+    return copy;
+}
 
 const isEmptyObj = (obj: object): boolean => Object.keys(obj).length === 0;
 
@@ -34,28 +22,29 @@ function copyStyle(style: Partial<Style> | null | undefined): Partial<Style> | n
 
     const copied = { ...style };
 
-    setIfExists(style, copied, "font", ["color"]);
-    setIfExists(style, copied, "alignment");
-    setIfExists(style, copied, "protection");
-    if (style.border) {
-        setIfExists(style, copied, "border");
-        // set just above, from style.border
-        const border = copied.border!;
-        setIfExists(style.border, border, "top", ["color"]);
-        setIfExists(style.border, border, "left", ["color"]);
-        setIfExists(style.border, border, "bottom", ["color"]);
-        setIfExists(style.border, border, "right", ["color"]);
-        setIfExists(style.border, border, "diagonal", ["color"]);
+    if (style.font) copied.font = withColorCopy(style.font);
+    if (style.alignment) copied.alignment = { ...style.alignment };
+    if (style.protection) copied.protection = { ...style.protection };
+    const { border } = style;
+    if (border) {
+        const borderCopy = { ...border };
+        if (border.top) borderCopy.top = withColorCopy(border.top);
+        if (border.left) borderCopy.left = withColorCopy(border.left);
+        if (border.bottom) borderCopy.bottom = withColorCopy(border.bottom);
+        if (border.right) borderCopy.right = withColorCopy(border.right);
+        if (border.diagonal) borderCopy.diagonal = withColorCopy(border.diagonal);
+        copied.border = borderCopy;
     }
 
     if (style.fill) {
-        setIfExists(style, copied, "fill", ["fgColor", "bgColor", "center"]);
-        // gradient fills only
-        const { stops } = style.fill as { stops?: readonly GradientStop[] };
-        if (stops) {
-            // set just above, from style.fill
-            (copied.fill as { stops?: GradientStop[] }).stops = stops.map((s) => oneDepthCopy(s, ["color"]));
-        }
+        const fill = { ...style.fill };
+        // pattern fills
+        if ("fgColor" in fill && fill.fgColor) fill.fgColor = { ...fill.fgColor };
+        if ("bgColor" in fill && fill.bgColor) fill.bgColor = { ...fill.bgColor };
+        // gradient fills
+        if ("center" in fill && fill.center) fill.center = { ...fill.center };
+        if ("stops" in fill && fill.stops) fill.stops = fill.stops.map(withColorCopy);
+        copied.fill = fill;
     }
 
     return copied;

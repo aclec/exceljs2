@@ -1,7 +1,11 @@
 // Conversions between A1-style addresses and row / column numbers, with caches for the column letters and the
 // addresses of the top-left 100x100 cells.
 
+import { createDictionary } from "./utils";
+
 const addressRegex = /^[A-Z]+\d+$/;
+/** `[sheetName!]reference`: the quoted sheet name (`''` for a quote), the unquoted one, the reference. */
+const sheetReferenceRegex = /(?:(?:(?:'((?:[^']|'')*)')|([^'^ !]*))!)?(.*)/;
 
 // Grid size of an xlsx worksheet (ECMA-376 / Excel limits)
 const MAX_ROWS = 1048576;
@@ -88,12 +92,11 @@ const letter = (i: number): string => String.fromCharCode(65 + i);
 function getAddress(row: number, col: number): CellAddress;
 function getAddress(address: string): CellAddress;
 function getAddress(r: number | string, c?: number): CellAddress {
-    if (c) {
-        const address = colCache.n2l(c) + r;
-        return colCache.decodeAddress(address);
+    if (typeof r === "string") {
+        return colCache.decodeAddress(r);
     }
-    // the (address) form; a row number with a column 0 is decoded as a string, as it always was
-    return colCache.decodeAddress(r as string);
+    // the (row, col) form: n2l throws for a column out of bounds (0 included)
+    return colCache.decodeAddress(colCache.n2l(c ?? 0) + r);
 }
 
 /**
@@ -130,7 +133,7 @@ const colCache = {
     /** The number of letters (1 to 3) of the columns filled in `_l2n` / `_n2l` so far. */
     _l2nFill: 0,
     /** Column letters → number. No prototype: l2n('constructor') must throw. */
-    _l2n: Object.create(null) as Record<string, number>,
+    _l2n: createDictionary<number>(),
     /** Column number → letters (index 0 unused). */
     _n2l: [] as string[],
     /** The number of letters of column n. */
@@ -213,14 +216,17 @@ const colCache = {
         if (!this._n2l[n]) {
             this._fill(this._level(n));
         }
-        // filled above for an integer n in bounds (a fractional or NaN n reads undefined, as it always did)
+        // filled above for an integer n in bounds. A fractional or NaN n reads undefined, as it always did: a whole-row
+        // or whole-column reference such as `Sheet1!$1:$1` (print titles) decodes to NaN bounds, and must not throw
+        // (the defined-name parser keeps the references that decodeEx accepts)
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- documented above: string for every integer in bounds
         return this._n2l[n] as string;
     },
 
     // =========================================================================
     // Address processing
     /** The decoded addresses of the top-left 100x100 cells, by address and absolute address (`$A$1`). */
-    _hash: Object.create(null) as Record<string, CellAddress>,
+    _hash: createDictionary<CellAddress>(),
 
     /**
      * Checks that value looks like a cell address: upper-case column letters then row digits, e.g. `"B3"` (no `$`).
@@ -288,8 +294,10 @@ const colCache = {
 
         const address = {
             address: value,
-            // undefined without column letters / row digits (see CellAddress)
+            // undefined without column letters / row digits (see CellAddress: a whole-row or whole-column reference)
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the documented exception of CellAddress.col
             col: colNumber as number,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the documented exception of CellAddress.row
             row: rowNumber as number,
             $col$row: `$${col}$${row}`,
         };
@@ -310,10 +318,11 @@ const colCache = {
      * @throws Error when a column or a row is out of bounds.
      */
     decode(value: string): CellAddress | DecodedRange {
-        const parts = value.split(":");
-        if (parts.length === 2) {
-            const tl = this.decodeAddress(parts[0]!);
-            const br = this.decodeAddress(parts[1]!);
+        // exactly one colon: a range
+        const colon = value.indexOf(":");
+        if (colon !== -1 && value.indexOf(":", colon + 1) === -1) {
+            const tl = this.decodeAddress(value.slice(0, colon));
+            const br = this.decodeAddress(value.slice(colon + 1));
             const top = Math.min(tl.row, br.row);
             const left = Math.min(tl.col, br.col);
             const bottom = Math.max(tl.row, br.row);
@@ -332,16 +341,18 @@ const colCache = {
      * @throws Error when a column or a row is out of bounds.
      */
     decodeEx(value: string): DecodedEx {
-        // matches every string: all of its groups are optional
-        const groups = value.match(/(?:(?:(?:'((?:[^']|'')*)')|([^'^ !]*))!)?(.*)/)!;
+        // matches every string (all of its groups are optional): without a match, the whole value is the reference
+        const groups = sheetReferenceRegex.exec(value);
 
-        const sheetName = groups[1] || groups[2]; // Qouted and unqouted groups
-        const reference = groups[3] ?? ""; // Remaining address
+        const sheetName = groups ? groups[1] || groups[2] : undefined; // Qouted and unqouted groups
+        const reference = groups ? (groups[3] ?? "") : value; // Remaining address
 
-        const parts = reference.split(":");
-        if (parts.length > 1) {
-            const tl = this.decodeAddress(parts[0]!);
-            const br = this.decodeAddress(parts[1]!);
+        // a range: the text up to the first colon, and from there to the next one (or the end)
+        const colon = reference.indexOf(":");
+        if (colon !== -1) {
+            const end = reference.indexOf(":", colon + 1);
+            const tl = this.decodeAddress(reference.slice(0, colon));
+            const br = this.decodeAddress(reference.slice(colon + 1, end === -1 ? undefined : end));
             const top = Math.min(tl.row, br.row);
             const left = Math.min(tl.col, br.col);
             const bottom = Math.max(tl.row, br.row);

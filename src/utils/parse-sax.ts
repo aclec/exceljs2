@@ -33,10 +33,12 @@ interface LegacyReadable {
  */
 export type SaxInput = AsyncIterable<SaxChunk> | Iterable<SaxChunk> | LegacyReadable;
 
-// property reads rather than `in`, which throws on a string (a string is an Iterable<string>)
+// a string (an Iterable<string>) is not: `in` throws on it
 function isLegacyReadable(input: SaxInput): input is LegacyReadable {
-    const candidate = input as Partial<LegacyReadable & AsyncIterable<SaxChunk>>;
-    return Boolean(candidate.pipe) && !candidate[Symbol.asyncIterator];
+    if (typeof input !== "object") {
+        return false;
+    }
+    return "pipe" in input && typeof input.pipe === "function" && !(Symbol.asyncIterator in input && input[Symbol.asyncIterator]);
 }
 
 /**

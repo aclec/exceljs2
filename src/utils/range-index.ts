@@ -20,6 +20,9 @@ export interface IndexedRange {
     sizeClass?: readonly [number, number];
 }
 
+/** A rectangle once added: its order and size class are set. */
+type Added<R extends IndexedRange> = R & { order: number; sizeClass: readonly [number, number] };
+
 interface SizeClass {
     kr: number;
     kc: number;
@@ -38,7 +41,7 @@ const blockKey = (kr: number, kc: number, rowBlock: number, colBlock: number): n
  * @typeParam R - The rectangles: add() sets their `order` and `sizeClass`.
  */
 class RangeIndex<R extends IndexedRange = IndexedRange> {
-    private _blocks: Map<number, R[]>; // blockKey => [range]
+    private _blocks: Map<number, Added<R>[]>; // blockKey => [range]
     private _classes: Map<number, SizeClass>; // kr * 32 + kc => {kr, kc, count}
 
     constructor() {
@@ -51,16 +54,16 @@ class RangeIndex<R extends IndexedRange = IndexedRange> {
      * @param order - The lowest wins between overlapping rectangles.
      */
     add(range: R, order: number): void {
-        range.order = order;
         const kr = sizeClass(range.bottom - range.top + 1);
         const kc = sizeClass(range.right - range.left + 1);
-        range.sizeClass = [kr, kc];
-        this._eachBlock(range, (key) => {
+        // sets the properties on the range itself
+        const added: Added<R> = Object.assign(range, { order, sizeClass: [kr, kc] as const });
+        this._eachBlock(added, (key) => {
             const block = this._blocks.get(key);
             if (block) {
-                block.push(range);
+                block.push(added);
             } else {
-                this._blocks.set(key, [range]);
+                this._blocks.set(key, [added]);
             }
         });
         const classKey = kr * 32 + kc;
@@ -74,17 +77,26 @@ class RangeIndex<R extends IndexedRange = IndexedRange> {
 
     /**
      * Removes a rectangle added before, once: removing it again removes other rectangles of its blocks.
-     * @throws TypeError when it was never added.
+     * @throws TypeError when it was never added to this index.
      */
     remove(range: R): void {
         this._eachBlock(range, (key) => {
             // an emptied block is kept: deleting and adding again the keys of a large Map is slow in V8
-            const block = this._blocks.get(key)!;
-            block.splice(block.indexOf(range), 1);
+            const block = this._blocks.get(key);
+            if (!block) {
+                throw new TypeError("RangeIndex: this range was not added");
+            }
+            block.splice(
+                block.findIndex((added) => added === range),
+                1
+            );
         });
         const [kr, kc] = classOf(range);
         const classKey = kr * 32 + kc;
-        const sizes = this._classes.get(classKey)!;
+        const sizes = this._classes.get(classKey);
+        if (!sizes) {
+            throw new TypeError("RangeIndex: this range was not added");
+        }
         if (--sizes.count === 0) {
             this._classes.delete(classKey);
         }
@@ -92,19 +104,19 @@ class RangeIndex<R extends IndexedRange = IndexedRange> {
 
     /** The rectangle that contains the cell, the one with the lowest order when several do; undefined when none does. */
     find(row: number, col: number): R | undefined {
-        let found: R | undefined;
+        let found: Added<R> | undefined;
         for (const { kr, kc } of this._classes.values()) {
             const block = this._blocks.get(blockKey(kr, kc, row >> kr, col >> kc));
             if (block) {
                 for (let i = 0; i < block.length; i++) {
-                    const range = block[i]!;
+                    const range = block[i];
                     if (
+                        range &&
                         row >= range.top &&
                         row <= range.bottom &&
                         col >= range.left &&
                         col <= range.right &&
-                        // order is set by add()
-                        (!found || range.order! < found.order!)
+                        (!found || range.order < found.order)
                     ) {
                         found = range;
                     }

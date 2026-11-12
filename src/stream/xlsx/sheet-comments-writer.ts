@@ -161,11 +161,10 @@ class SheetCommentsWriter {
                 this.startedData = true;
             }
 
-            const refComments = comments.map((item): CommentRefModel => {
-                const comment = item as CommentRefModel;
-                comment.refAddress = colCache.decodeAddress(item.ref);
-                return comment;
-            });
+            // the notes themselves, with their refAddress (as worksheet-xform prepare does)
+            const refComments = comments.map((item): CommentRefModel =>
+                Object.assign(item, { refAddress: colCache.decodeAddress(item.ref) })
+            );
 
             for (const comment of refComments) {
                 this._writeComment(comment);

@@ -1,6 +1,7 @@
 import RelType from "../../xlsx/rel-type";
 
 import colCache from "../../utils/col-cache";
+import { createDictionary } from "../../utils/utils";
 import Encryptor from "../../utils/encryptor";
 import { checkMergedCells } from "../../utils/merge-limits";
 import { eachEntry, someEntry } from "../../utils/sparse-array";
@@ -202,7 +203,7 @@ class WorksheetWriter {
 
         this._columns = null;
 
-        this._keys = Object.create(null) as Record<string, Column>;
+        this._keys = createDictionary();
 
         // keep a record of all merges
         this._merges = Object.assign([] as Range[], {
@@ -227,7 +228,7 @@ class WorksheetWriter {
         this.dataValidations = new DataValidations();
 
         // for sharing formulae; keyed by cell addresses (no prototype: a sharedFormula "constructor" finds no master)
-        this._formulae = Object.create(null) as Record<string, FormulaCellModel>;
+        this._formulae = createDictionary();
         this._siFormulae = 0;
 
         // keep a record of conditionalFormattings
@@ -442,8 +443,8 @@ class WorksheetWriter {
 
     /** Calls `f` for each keyed column. */
     eachColumnKey(f: (column: Column, key: string) => void): void {
-        for (const key of Object.keys(this._keys)) {
-            f(this._keys[key]!, key);
+        for (const [key, column] of Object.entries(this._keys)) {
+            f(column, key);
         }
     }
 
@@ -499,11 +500,14 @@ class WorksheetWriter {
         options: { includeEmpty?: boolean } | ((row: Row, rowNumber: number) => void) | undefined,
         iteratee?: (row: Row, rowNumber: number) => void
     ): void {
-        if (!iteratee) {
-            iteratee = options as (row: Row, rowNumber: number) => void;
+        if (typeof options === "function") {
+            iteratee = options;
             options = undefined;
         }
-        if (options && typeof options === "object" && options.includeEmpty) {
+        if (!iteratee) {
+            throw new TypeError("eachRow: the iteratee must be a function");
+        }
+        if (options && options.includeEmpty) {
             const n = this._nextRow;
             for (let i = this._rowZero; i < n; i++) {
                 iteratee(this.getRow(i), i);
@@ -838,9 +842,9 @@ class WorksheetWriter {
         }
 
         // a row of empty cells is still written for the notes of its cells
-        if (row.hasValues || row.height || someEntry(row._cells, (cell) => cell._comment)) {
-            // not null: the row has a height, or cells (a cell always has a model)
-            const model = row.model!;
+        // not null for such a row: it has a height, or cells (a cell always has a model)
+        const model = row.hasValues || row.height || someEntry(row._cells, (cell) => cell._comment) ? row.model : null;
+        if (model) {
             const options: CellPrepareOptions = {
                 styles: this._workbook.styles,
                 sharedStrings: this.useSharedStrings ? this._workbook.sharedStrings : undefined,

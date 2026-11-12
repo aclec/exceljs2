@@ -1,11 +1,10 @@
 import * as fs from "fs";
 import { PassThrough, type Stream } from "stream";
 import { ZipWriter, type ZipOutput, type ZipWriterOptions } from "../utils/zip-stream";
-import { readZip, type ZipInput, type ZipReadOptions } from "../utils/zip-reader";
-import StreamBuf from "../utils/stream-buf";
+import { readZip, ZIP_INPUT_ERROR, type ZipInput, type ZipReadOptions } from "../utils/zip-reader";
 import RelType from "./rel-type";
 
-import { exists } from "../utils/utils";
+import { createDictionary, exists } from "../utils/utils";
 import XmlStream from "../utils/xml-stream";
 import { bufferToString } from "../utils/browser-buffer-decode";
 import { checkMaxMergedCells } from "../utils/merge-limits";
@@ -120,10 +119,22 @@ function fsReadFileAsync(filename: string): Promise<Buffer> {
     });
 }
 
-// a relationships part: RelationshipsXform fails on a part without a <Relationships> root, so its model is an array
-async function parseRelationships(stream: SaxInput): Promise<RelationshipModel[]> {
+// a relationships part: RelationshipsXform throws on another root element; a part without any element (empty) gives
+// undefined
+async function parseRelationships(stream: SaxInput): Promise<RelationshipModel[] | undefined> {
     const xform = new RelationshipsXform();
-    return (await xform.parseStream(stream))!;
+    return (await xform.parseStream(stream)) ?? undefined;
+}
+
+// the first group of a part name pattern (they all have one, not optional), or undefined when the name does not match
+function firstGroup(pattern: RegExp, name: string): string | undefined {
+    const match = pattern.exec(name);
+    return match ? match[1] : undefined;
+}
+
+// a stream that has an async iterator (a Node.js Readable, an async generator...)
+function isAsyncIterable(stream: object): stream is AsyncIterable<unknown> {
+    return Symbol.asyncIterator in stream && typeof stream[Symbol.asyncIterator] === "function";
 }
 
 // image file extensions: alphanumeric only (no path separators, no XML)
@@ -182,7 +193,7 @@ function isReadPart(name: string): boolean {
 }
 
 // the browser bundle defines process.browser (scripts/browser-shims)
-const isBrowser = Boolean((process as { browser?: boolean }).browser);
+const isBrowser = "browser" in process && Boolean(process.browser);
 
 /**
  * Reads and writes the xlsx file of a workbook (`workbook.xlsx`): the zip parts and their XML, through the xforms.
@@ -269,18 +280,14 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             media: model.media,
             mediaIndex: model.mediaIndex,
         };
-        for (const name of Object.keys(model.drawings)) {
-            const drawing = model.drawings[name]!;
+        for (const [name, drawing] of Object.entries(model.drawings)) {
             // part names and relationship ids come from the file: ignore inherited members
             const drawingRel = Object.hasOwn(model.drawingRels, name) ? model.drawingRels[name] : undefined;
             if (drawingRel) {
-                const rels = (drawingOptions.rels = drawingRel.reduce<Record<string, RelationshipModel>>(
-                    (o, rel) => {
-                        o[rel.Id] = rel;
-                        return o;
-                    },
-                    Object.create(null) as Record<string, RelationshipModel>
-                ));
+                const rels = (drawingOptions.rels = drawingRel.reduce<Record<string, RelationshipModel>>((o, rel) => {
+                    o[rel.Id] = rel;
+                    return o;
+                }, createDictionary()));
                 for (const anchor of drawing.anchors || []) {
                     const hyperlinks = anchor.picture && anchor.picture.hyperlinks;
                     // String(): a picture without r:id looks up "undefined", as it always did
@@ -373,34 +380,27 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
 
     async _processWorksheetRelsEntry(stream: SaxInput, model: XlsxReadModel, sheetNo: string): Promise<void> {
         const relationships = await parseRelationships(stream);
-        model.worksheetRels[sheetNo] = relationships;
+        // an empty part: no entry (a lookup gives undefined, as the stored undefined did)
+        if (relationships) model.worksheetRels[sheetNo] = relationships;
     }
 
-    async _processMediaEntry(entry: NodeJS.ReadableStream, model: XlsxReadModel, filename: string): Promise<void> {
+    /** Adds a media part (its bytes, a fresh Buffer) to the media of the model. */
+    _processMediaEntry(bytes: Buffer, model: XlsxReadModel, filename: string): void {
         const lastDot = filename.lastIndexOf(".");
         // if we can't determine extension, ignore it
         if (lastDot >= 1) {
             const extension = filename.substring(lastDot + 1);
             const name = filename.substring(0, lastDot);
-            await new Promise<void>((resolve, reject) => {
-                const streamBuf = new StreamBuf();
-                streamBuf.on("finish", () => {
-                    model.mediaIndex[filename] = model.media.length;
-                    model.mediaIndex[name] = model.media.length;
-                    const medium: MediaModel = {
-                        type: "image",
-                        name,
-                        extension,
-                        buffer: streamBuf.toBuffer(),
-                    };
-                    model.media.push(medium);
-                    resolve();
-                });
-                entry.on("error", (error: Error) => {
-                    reject(error);
-                });
-                entry.pipe(streamBuf);
-            });
+            model.mediaIndex[filename] = model.media.length;
+            model.mediaIndex[name] = model.media.length;
+            const medium: MediaModel = {
+                type: "image",
+                name,
+                extension,
+                // null for an empty part, as the stream of its bytes gave
+                buffer: bytes.length ? bytes : null,
+            };
+            model.media.push(medium);
         }
     }
 
@@ -414,7 +414,9 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
     }
 
     async _processDrawingRelsEntry(entry: SaxInput, model: XlsxReadModel, name: string): Promise<void> {
-        model.drawingRels[name] = await parseRelationships(entry);
+        const relationships = await parseRelationships(entry);
+        // an empty part: no entry (a lookup gives undefined, as the stored undefined did)
+        if (relationships) model.drawingRels[name] = relationships;
     }
 
     async _processVmlDrawingEntry(entry: SaxInput, model: XlsxReadModel, entryName: string): Promise<void> {
@@ -424,18 +426,9 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         if (notes) model.vmlDrawings[entryName] = notes;
     }
 
-    async _processThemeEntry(entry: NodeJS.ReadableStream, model: XlsxReadModel, name: string): Promise<void> {
-        await new Promise<void>((resolve, reject) => {
-            // TODO: stream entry into buffer and store the xml in the model.themes[]
-            const stream = new StreamBuf();
-            entry.on("error", reject);
-            stream.on("error", reject);
-            stream.on("finish", () => {
-                model.themes[name] = stream.read().toString();
-                resolve();
-            });
-            entry.pipe(stream);
-        });
+    /** Keeps the XML of a theme part (its bytes), as is. */
+    _processThemeEntry(bytes: Buffer, model: XlsxReadModel, name: string): void {
+        model.themes[name] = bytes.toString();
     }
 
     /**
@@ -454,14 +447,14 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
      * @throws (rejects) on an error of the stream, or as {@link load}
      */
     async read(stream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream | Stream, options?: XlsxLoadOptions): Promise<TWorkbook> {
-        // TODO: Remove once node v8 is deprecated
-        // Detect and upgrade old streams
-        let input = stream as Partial<AsyncIterable<Uint8Array>> & Partial<NodeJS.ReadableStream>;
-        if (!input[Symbol.asyncIterator] && input.pipe) {
-            input = input.pipe(new PassThrough());
-        }
+        // an old-style stream (without async iterator) is read through a PassThrough
+        const input = isAsyncIterable(stream) ? stream : stream.pipe(new PassThrough());
         const chunks: Uint8Array[] = [];
-        for await (const chunk of input as AsyncIterable<Uint8Array>) {
+        for await (const chunk of input) {
+            if (!(chunk instanceof Uint8Array)) {
+                // e.g. a stream with an encoding, which gives strings
+                throw new TypeError("Can't read the zip file: the stream must give bytes (Buffers or Uint8Arrays)");
+            }
             chunks.push(chunk);
         }
         return this.load(Buffer.concat(chunks), options);
@@ -488,16 +481,16 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         // keyed by the names of the parts (zip entry names): no prototype (CLAUDE.md invariant)
         const model: XlsxReadModel = {
             worksheets: [],
-            worksheetHash: Object.create(null) as XlsxReadModel["worksheetHash"],
-            worksheetRels: Object.create(null) as XlsxReadModel["worksheetRels"],
-            themes: Object.create(null) as XlsxReadModel["themes"],
+            worksheetHash: createDictionary(),
+            worksheetRels: createDictionary(),
+            themes: createDictionary(),
             media: [],
-            mediaIndex: Object.create(null) as XlsxReadModel["mediaIndex"],
-            drawings: Object.create(null) as XlsxReadModel["drawings"],
-            drawingRels: Object.create(null) as XlsxReadModel["drawingRels"],
-            comments: Object.create(null) as XlsxReadModel["comments"],
-            tables: Object.create(null) as XlsxReadModel["tables"],
-            vmlDrawings: Object.create(null) as XlsxReadModel["vmlDrawings"],
+            mediaIndex: createDictionary(),
+            drawings: createDictionary(),
+            drawingRels: createDictionary(),
+            comments: createDictionary(),
+            tables: createDictionary(),
+            vmlDrawings: createDictionary(),
             // replaced by those of xl/workbook.xml
             views: [],
         };
@@ -508,12 +501,18 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
 
         const pacer = new Pacer();
 
-        // like JSZip did, accept a Blob (e.g. a File from an <input type="file">)
+        let zipBytes: ZipInput;
         if (typeof Blob !== "undefined" && buffer instanceof Blob) {
-            buffer = new Uint8Array(await buffer.arrayBuffer());
+            // like JSZip did, accept a Blob (e.g. a File from an <input type="file">)
+            zipBytes = new Uint8Array(await buffer.arrayBuffer());
+        } else if (typeof buffer !== "string" && (ArrayBuffer.isView(buffer) || buffer instanceof ArrayBuffer || Array.isArray(buffer))) {
+            zipBytes = buffer;
+        } else {
+            // a string without the base64 option, or anything else from a JavaScript caller (as readZip rejects it)
+            throw new TypeError(ZIP_INPUT_ERROR);
         }
-        // the limits (maxEntrySize...) are checked while inflating; readZip rejects anything but bytes
-        for (const entry of readZip(buffer as ZipInput, options)) {
+        // the limits (maxEntrySize...) are checked while inflating
+        for (const entry of readZip(zipBytes, options)) {
             const pause = pacer.pause();
             if (pause) {
                 await pause;
@@ -528,17 +527,18 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                 }
                 const entryData = await entry.data();
                 const bytes = Buffer.from(entryData.buffer, entryData.byteOffset, entryData.byteLength);
-                // media and themes are piped as bytes; the XML parts are parsed as text, chunk by chunk
-                let byteStream: PassThrough | undefined;
+                // media and themes are read as bytes (the stream of their bytes is parsed as XML only when their name also
+                // matches an XML part pattern tested before theirs); the XML parts are parsed as text, chunk by chunk
                 let stream: SaxInput;
                 if (
                     entryName.includes("xl/media/") ||
                     // themes are not parsed as stream
                     THEME_PART.test(entryName)
                 ) {
-                    stream = byteStream = new PassThrough();
+                    const byteStream = new PassThrough();
                     byteStream.write(bytes);
                     byteStream.end();
+                    stream = byteStream;
                 } else {
                     // https://www.npmjs.com/package/process: running in browser, use TextDecoder if possible
                     const content = isBrowser ? bufferToString(entryData) : bytes.toString("utf8");
@@ -592,7 +592,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                     }
 
                     default:
-                        await this._processPatternEntry(entryName, stream, byteStream, model, options);
+                        await this._processPatternEntry(entryName, stream, bytes, model, options);
                         break;
                 }
             }
@@ -610,54 +610,49 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
     private async _processPatternEntry(
         entryName: string,
         stream: SaxInput,
-        byteStream: PassThrough | undefined,
+        bytes: Buffer,
         model: XlsxReadModel,
         options: XlsxLoadOptions | undefined
     ): Promise<void> {
-        let match = WORKSHEET_PART.exec(entryName);
-        if (match) {
-            await this._processWorksheetEntry(stream, model, match[1]!, options, entryName);
+        let name = firstGroup(WORKSHEET_PART, entryName);
+        if (name !== undefined) {
+            await this._processWorksheetEntry(stream, model, name, options, entryName);
             return;
         }
-        match = WORKSHEET_RELS_PART.exec(entryName);
-        if (match) {
-            await this._processWorksheetRelsEntry(stream, model, match[1]!);
+        name = firstGroup(WORKSHEET_RELS_PART, entryName);
+        if (name !== undefined) {
+            await this._processWorksheetRelsEntry(stream, model, name);
             return;
         }
-        match = THEME_PART.exec(entryName);
-        if (match) {
-            // a theme part is piped as bytes (see load)
-            await this._processThemeEntry(byteStream!, model, match[1]!);
+        name = firstGroup(THEME_PART, entryName);
+        if (name !== undefined) {
+            this._processThemeEntry(bytes, model, name);
             return;
         }
-        match = MEDIA_PART.exec(entryName);
-        if (match) {
-            // a media part is piped as bytes (see load)
-            await this._processMediaEntry(byteStream!, model, match[1]!);
+        name = firstGroup(MEDIA_PART, entryName);
+        if (name !== undefined) {
+            this._processMediaEntry(bytes, model, name);
             return;
         }
-        match = DRAWING_PART.exec(entryName);
-        if (match) {
-            await this._processDrawingEntry(stream, model, match[1]!);
+        name = firstGroup(DRAWING_PART, entryName);
+        if (name !== undefined) {
+            await this._processDrawingEntry(stream, model, name);
             return;
         }
-        match = COMMENTS_PART.exec(entryName);
-        if (match) {
+        if (COMMENTS_PART.test(entryName)) {
             await this._processCommentEntry(stream, model, entryName);
             return;
         }
-        match = TABLE_PART.exec(entryName);
-        if (match) {
+        if (TABLE_PART.test(entryName)) {
             await this._processTableEntry(stream, model, entryName);
             return;
         }
-        match = DRAWING_RELS_PART.exec(entryName);
-        if (match) {
-            await this._processDrawingRelsEntry(stream, model, match[1]!);
+        name = firstGroup(DRAWING_RELS_PART, entryName);
+        if (name !== undefined) {
+            await this._processDrawingRelsEntry(stream, model, name);
             return;
         }
-        match = VML_DRAWING_PART.exec(entryName);
-        if (match) {
+        if (VML_DRAWING_PART.test(entryName)) {
             await this._processVmlDrawingEntry(stream, model, entryName);
         }
     }
@@ -706,7 +701,10 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                 zip.append(xml, { name: `xl/drawings/${drawing.name}.xml` });
 
                 // worksheet-xform prepare gives the drawing its relationships
-                xml = relsXform.toXml(drawing.rels!);
+                if (!drawing.rels) {
+                    throw new Error(`addDrawings: the drawing ${drawing.name} has no relationships (prepareModel was not run)`);
+                }
+                xml = relsXform.toXml(drawing.rels);
                 zip.append(xml, { name: `xl/drawings/_rels/${drawing.name}.xml.rels` });
             }
         }
@@ -819,8 +817,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         // workbook rels and content types always reference theme1.xml, so it must be written
         // even when the workbook was read from a file without a theme
         const themes: Record<string, string> = { theme1: theme1Xml, ...model.themes };
-        for (const name of Object.keys(themes)) {
-            const xml = themes[name]!;
+        for (const [name, xml] of Object.entries(themes)) {
             const path = `xl/theme/${name}.xml`;
             zip.append(xml, { name: path });
         }
@@ -851,8 +848,8 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                 Target: "sharedStrings.xml",
             });
         }
-        if ((model.pivotTables || []).length) {
-            const pivotTable = model.pivotTables[0]!; // length checked above
+        const [pivotTable] = model.pivotTables || [];
+        if (pivotTable) {
             const rId = (pivotTable.rId = `rId${count++}`);
             relationships.push({
                 Id: rId,
@@ -921,7 +918,10 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             }
 
             // worksheet-xform prepare collects the notes
-            const comments = worksheet.comments!;
+            const { comments } = worksheet;
+            if (!comments) {
+                throw new Error(`addWorksheets: the worksheet ${worksheet.name} has no notes list (prepareModel was not run)`);
+            }
             if (comments.length > 0) {
                 xmlStream = new XmlStream();
                 commentsXform.render(xmlStream, { comments });
@@ -947,25 +947,35 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         runSteps(this._prepareModelSteps(model, options));
     }
 
-    // prepareModel() worksheet row by worksheet row: the caller may pause between rows
-    *_prepareModelSteps(documentModel: WorkbookModel, options: XlsxWriteOptions): Generator<unknown, void, undefined> {
-        // the write state is added below (mutation)
-        const model = documentModel as XlsxWriteModel;
+    // prepareModel() worksheet row by worksheet row: the caller may pause between rows. Returns the document model, with
+    // the write state added (mutation)
+    *_prepareModelSteps(documentModel: WorkbookModel, options: XlsxWriteOptions): Generator<unknown, XlsxWriteModel, undefined> {
+        const useStyles = options.useStyles !== undefined ? options.useStyles : true;
+        const drawings: DrawingModel[] = [];
+        const commentRefs: XlsxWriteModel["commentRefs"] = [];
+        const tables: TableModel[] = [];
+        const model: XlsxWriteModel = Object.assign(documentModel, {
+            // ensure following properties have sane values
+            creator: documentModel.creator || "ExcelJS",
+            lastModifiedBy: documentModel.lastModifiedBy || "ExcelJS",
+            created: documentModel.created || new Date(),
+            modified: documentModel.modified || new Date(),
 
-        // ensure following properties have sane values
-        model.creator = model.creator || "ExcelJS";
-        model.lastModifiedBy = model.lastModifiedBy || "ExcelJS";
-        model.created = model.created || new Date();
-        model.modified = model.modified || new Date();
+            useSharedStrings: options.useSharedStrings !== undefined ? options.useSharedStrings : true,
+            useStyles,
 
-        model.useSharedStrings = options.useSharedStrings !== undefined ? options.useSharedStrings : true;
-        model.useStyles = options.useStyles !== undefined ? options.useStyles : true;
+            // Manage the shared strings
+            sharedStrings: new SharedStringsXform(),
 
-        // Manage the shared strings
-        model.sharedStrings = new SharedStringsXform();
+            // add a style manager to handle cell formats, fonts, etc.
+            styles: useStyles ? new StylesXform(true) : new StylesXform.Mock(),
 
-        // add a style manager to handle cell formats, fonts, etc.
-        model.styles = model.useStyles ? new StylesXform(true) : new StylesXform.Mock();
+            // set again by WorkbookXform.prepare
+            sheets: documentModel.worksheets,
+            drawings,
+            commentRefs,
+            tables,
+        });
 
         // prepare all of the things before the render
         const workbookXform = new WorkbookXform();
@@ -973,8 +983,6 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
 
         workbookXform.prepare(model);
 
-        const drawings: DrawingModel[] = (model.drawings = []);
-        const commentRefs: XlsxWriteModel["commentRefs"] = (model.commentRefs = []);
         const worksheetOptions: WorkbookPrepareOptions = {
             sharedStrings: model.sharedStrings,
             styles: model.styles,
@@ -985,7 +993,6 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             commentRefs,
         };
         let tableCount = 0;
-        const tables: TableModel[] = (model.tables = []);
         for (const worksheet of model.worksheets) {
             // assign unique filenames to tables
             for (const table of worksheet.tables) {
@@ -999,6 +1006,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         }
 
         // TODO: workbook drawing list
+        return model;
     }
 
     /**
@@ -1020,9 +1028,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         zip.pipe(stream);
 
         const pacer = new Pacer();
-        await pacer.run(this._prepareModelSteps(documentModel, options));
-        // prepared (see _prepareModelSteps)
-        const model = documentModel as XlsxWriteModel;
+        const model = await pacer.run(this._prepareModelSteps(documentModel, options));
 
         // render
         await this.addContentTypes(zip, model);

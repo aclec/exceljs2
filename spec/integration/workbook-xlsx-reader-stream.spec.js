@@ -980,25 +980,125 @@ describe("WorkbookReader (stream)", () => {
         ]);
     });
 
-    it("gives a shared formula clone a formula value (without formula) and its result", async () => {
+    it("gives a shared formula clone the formula of its master translated to its cell, and its result", async () => {
         const buffer = await baseWorkbookBuffer((wb, ws) => {
             ws.getCell("B1").value = { formula: "A1&1", result: "hello1", shareType: "shared", ref: "B1:B2" };
             ws.getCell("B2").value = { sharedFormula: "B1", result: 0 };
         });
         const [sheet] = await readAll(chunkedStream(buffer));
         const clone = sheet.rows[1].values[2];
-        expect(clone).to.deep.equal({ formula: "", result: 0 });
+        expect(clone).to.deep.equal({ formula: "A2&1", result: 0 });
         const cells = [];
         for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
             for await (const row of worksheet) {
                 const cell = row.getCell(2);
-                cells.push([cell.type, cell.formulaType, cell.result, cell.text]);
+                cells.push([cell.type, cell.formula, cell.result, cell.text]);
             }
         }
         expect(cells).to.deep.equal([
-            [ExcelJS.ValueType.Formula, ExcelJS.FormulaType.Master, "hello1", "hello1"],
-            [ExcelJS.ValueType.Formula, ExcelJS.FormulaType.None, 0, "0"],
+            [ExcelJS.ValueType.Formula, "A1&1", "hello1", "hello1"],
+            [ExcelJS.ValueType.Formula, "A2&1", 0, "0"],
         ]);
+    });
+
+    it("gives the shared formula clones the cell.formula that workbook.xlsx.load gives", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("B1").value = { formula: "A1&1", result: "hello1", shareType: "shared", ref: "B1:B3" };
+            ws.getCell("B2").value = { sharedFormula: "B1", result: "x" };
+            ws.getCell("B3").value = { sharedFormula: "B1", result: "y" };
+            ws.getCell("C2").value = { formula: "$A$1+A2+Sheet1!B$1", shareType: "shared", ref: "C2:E2", result: 1 };
+            ws.getCell("D2").value = { sharedFormula: "C2", result: 2 };
+            ws.getCell("E2").value = { sharedFormula: "C2", result: 3 };
+        });
+        const formulas = (row, cells) =>
+            row.eachCell((cell) => {
+                if (cell.type === ExcelJS.ValueType.Formula) cells.push([cell.address, cell.formula, cell.result]);
+            });
+        const loaded = new ExcelJS.Workbook();
+        await loaded.xlsx.load(buffer);
+        const expected = [];
+        loaded.getWorksheet("Sheet1").eachRow((row) => formulas(row, expected));
+        const streamed = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+            for await (const row of worksheet) {
+                formulas(row, streamed);
+            }
+        }
+        expect(streamed).to.deep.equal(expected);
+        expect(streamed).to.deep.include.members([
+            ["B3", "A3&1", "y"],
+            ["E2", "$A$1+C2+Sheet1!D$1", 3],
+        ]);
+    });
+
+    it("gives a worksheet with an unknown state in xl/workbook.xml no state", async () => {
+        const buffer = await tamper(
+            await baseWorkbookBuffer((wb) => {
+                wb.addWorksheet("Hidden", { state: "hidden" });
+            }),
+            {
+                "xl/workbook.xml": (xml) => xml.replace('state="hidden"', 'state="bogus"'),
+            }
+        );
+        const states = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+            states.push([worksheet.name, worksheet.state]);
+            for await (const row of worksheet) row.getCell(1);
+        }
+        expect(states).to.deep.equal([
+            ["Sheet1", "visible"],
+            ["Hidden", undefined],
+        ]);
+    });
+
+    it("reads an old-style stream (pipe and events only), and forwards its errors", async () => {
+        const { Stream } = require("stream");
+        const buffer = await baseWorkbookBuffer();
+        const legacy = (chunks, error) => {
+            const stream = new Stream();
+            stream.pipe = function (destination) {
+                setImmediate(() => {
+                    for (const chunk of chunks) destination.write(chunk);
+                    if (error) this.emit("error", error);
+                    else destination.end();
+                });
+                return destination;
+            };
+            return stream;
+        };
+        const [sheet] = await readAll(legacy([buffer.subarray(0, 100), buffer.subarray(100)]));
+        expect(sheet.rows[0].values[1]).to.equal("hello");
+        let caught;
+        await readAll(legacy([buffer.subarray(0, 100)], new Error("legacy failure"))).catch((e) => {
+            caught = e;
+        });
+        expect(caught && caught.message).to.equal("legacy failure");
+    });
+
+    it("keeps no formula for a shared formula clone whose master was not seen", async () => {
+        const buffer = await tamper(
+            await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B1").value = { formula: "A1&1", result: "hello1", shareType: "shared", ref: "B1:B2" };
+                ws.getCell("B2").value = { sharedFormula: "B1", result: 0 };
+            }),
+            { "xl/worksheets/sheet1.xml": (xml) => xml.replace(/<f t="shared" si="0"\/>/, '<f t="shared" si="7"/>') }
+        );
+        const [sheet] = await readAll(chunkedStream(buffer));
+        expect(sheet.rows[1].values[2]).to.deep.equal({ formula: "", result: 0 });
+    });
+
+    it("throws a clear Error when a read row is changed or committed", async () => {
+        const buffer = await baseWorkbookBuffer();
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+            for await (const row of worksheet) {
+                const cell = row.getCell(1);
+                expect(() => row.commit()).to.throw(/^Invalid Operation: commit/);
+                expect(() => row.addPageBreak()).to.throw(/^Invalid Operation: rowBreaks/);
+                expect(() => cell.dataValidation).to.throw(/^Invalid Operation: dataValidations/);
+                expect(() => cell.names).to.throw(/^Invalid Operation: definedNames/);
+                expect(() => worksheet.getColumn(1).eachCell(() => {})).to.throw(/^Invalid Operation: eachRow/);
+            }
+        }
     });
 
     it("emits shared strings in sharedStrings: emit mode", async () => {

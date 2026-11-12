@@ -193,6 +193,21 @@ describe("colCache", () => {
         expect(colCache.getAddress(4, 5)).to.equal(addr);
     });
 
+    it("throws for a column 0 given by number (it decoded the row number as an address)", () => {
+        expect(() => colCache.getAddress(5, 0)).to.throw("0 is out of bounds");
+    });
+
+    it("decodes a whole-row or whole-column reference without throwing (print titles)", () => {
+        const rows = colCache.decodeEx("Sheet1!$1:$2");
+        expect(rows).to.include({ sheetName: "Sheet1", top: 1, bottom: 2 });
+        expect(rows.left).to.be.NaN();
+        const columns = colCache.decodeEx("'My Sheet'!$A:$B");
+        expect(columns).to.include({ sheetName: "My Sheet", left: 1, right: 2 });
+        expect(columns.top).to.be.NaN();
+        expect(colCache.decode("A1:B2:C3")).to.include({ address: "A1" });
+        expect(colCache.decodeEx("A1:B2:C3")).to.include({ dimensions: "A1:B2" });
+    });
+
     it("decodes addresses and ranges", () => {
         // address
         expect(colCache.decode("A1")).to.deep.equal({

@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import parseSax, { type SaxInput } from "../../utils/parse-sax";
+import { createDictionary } from "../../utils/utils";
 
 import { RelationshipType } from "../../doc/enums";
 import RelType from "../../xlsx/rel-type";
@@ -75,7 +76,7 @@ export async function* readHyperlinkRelationships(iterator: SaxInput): AsyncGene
  */
 export async function cacheHyperlinkRelationships(iterator: SaxInput): Promise<HyperlinkRelationships> {
     // keyed by relationship ids from the file
-    const relationships = Object.create(null) as HyperlinkRelationships;
+    const relationships: HyperlinkRelationships = createDictionary();
     for await (const relationship of readHyperlinkRelationships(iterator)) {
         // String(): the key of a relationship without Id is "undefined", as before
         relationships[String(relationship.rId)] = relationship;

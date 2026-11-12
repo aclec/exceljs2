@@ -28,9 +28,9 @@ function inherits(
     }
 
     if (statics) {
-        const descriptors = Object.getOwnPropertyDescriptors(statics);
-        for (const key of Object.keys(statics)) {
-            Object.defineProperty(cls, key, descriptors[key]!);
+        // the own enumerable string keys, as Object.keys(statics)
+        for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(statics))) {
+            if (descriptor.enumerable) Object.defineProperty(cls, key, descriptor);
         }
     }
 
@@ -43,9 +43,8 @@ function inherits(
         },
     };
     if (prototype) {
-        const descriptors = Object.getOwnPropertyDescriptors(prototype);
-        for (const key of Object.keys(prototype)) {
-            properties[key] = descriptors[key]!;
+        for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(prototype))) {
+            if (descriptor.enumerable) properties[key] = descriptor;
         }
     }
 
@@ -266,12 +265,12 @@ function exists(path: string): Promise<boolean> {
 const fs = { exists };
 
 /**
- * Kept as written upstream: Date has no toIsoString (it is toISOString), so this always throws a TypeError. Unused.
+ * The date part of the ISO 8601 form of dt, in UTC: `"2024-01-31"`. (Upstream called `toIsoString().subsstr()`,
+ * which do not exist, so it always threw a TypeError.)
  * @deprecated Use `date.toISOString().substring(0, 10)`.
  */
 function toIsoDateString(dt: Date): string {
-    const upstream = dt as Date & { toIsoString(): { subsstr(start: number, length: number): string } };
-    return upstream.toIsoString().subsstr(0, 10);
+    return dt.toISOString().substring(0, 10);
 }
 
 /**
@@ -316,13 +315,29 @@ function toSortedArray<T>(values: Iterable<T> | ArrayLike<T>): T[] {
  */
 function objectFromProps<V = null>(props: readonly string[], value: V | null = null): Record<string, V | null> {
     // reduce, not for...of: holes of a sparse props array are skipped
-    return props.reduce<Record<string, V | null>>(
-        (result, property) => {
-            result[property] = value;
-            return result;
-        },
-        Object.create(null) as Record<string, V | null>
-    );
+    return props.reduce<Record<string, V | null>>((result, property) => {
+        result[property] = value;
+        return result;
+    }, createDictionary<V | null>());
+}
+
+/**
+ * A type guard for a union of string literals: `isOneOf(["a", "b"] as const)(x)` is true when x is `"a"` or `"b"`
+ * (e.g. an attribute value read from a file).
+ */
+function isOneOf<T extends string>(values: readonly T[]): (value: unknown) => value is T {
+    const set = new Set<unknown>(values);
+    return (value: unknown): value is T => set.has(value);
+}
+
+/**
+ * A new empty object without prototype, for keys that come from data (`"__proto__"`, `"constructor"`...), which a
+ * plain `{}` would resolve on Object.prototype.
+ */
+function createDictionary<V>(): Record<string, V> {
+    const dictionary: Record<string, V> = {};
+    Object.setPrototypeOf(dictionary, null);
+    return dictionary;
 }
 
 const utils = {
@@ -343,6 +358,8 @@ const utils = {
     range,
     toSortedArray,
     objectFromProps,
+    createDictionary,
+    isOneOf,
 };
 
 export {
@@ -364,6 +381,8 @@ export {
     range,
     toSortedArray,
     objectFromProps,
+    createDictionary,
+    isOneOf,
 };
 
 export default utils;

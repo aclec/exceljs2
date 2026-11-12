@@ -379,6 +379,9 @@ function entryData(data: Uint8Array, entry: CentralEntry): Uint8Array {
 /** An in-memory archive: a Buffer, any typed array or DataView, an ArrayBuffer, or an array of byte values. */
 export type ZipInput = ArrayBufferView | ArrayBuffer | number[];
 
+/** The message of the TypeError for data that is not a {@link ZipInput} (nor a Blob, which the readers accept too). */
+export const ZIP_INPUT_ERROR = "Can't read the zip file: expected a Buffer, a Uint8Array, an ArrayBuffer or a Blob";
+
 /** An entry of an in-memory archive ({@link readZip}). */
 export interface ZipFileEntry {
     /** path in the archive, as recorded (decoded as UTF-8) */
@@ -409,7 +412,7 @@ export interface ZipFileEntry {
 function readZip(buffer: ZipInput, options?: ZipReadOptions): ZipFileEntry[] {
     // checked for JavaScript callers
     if (!(ArrayBuffer.isView(buffer) || buffer instanceof ArrayBuffer || Array.isArray(buffer))) {
-        throw new TypeError("Can't read the zip file: expected a Buffer, a Uint8Array, an ArrayBuffer or a Blob");
+        throw new TypeError(ZIP_INPUT_ERROR);
     }
     const data = Array.isArray(buffer) ? new Uint8Array(buffer) : toBytes(buffer);
     const limits = new ZipLimits(options, DOCUMENT_LIMITS);

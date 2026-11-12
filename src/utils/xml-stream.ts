@@ -24,9 +24,7 @@ interface Rollback {
 // attribute keeps the final join() cheap. Own enumerable keys only, in insertion order (as Object.keys).
 function renderAttributes(attributes: XmlAttributes): string {
     let xml = "";
-    const names = Object.keys(attributes);
-    for (let i = 0; i < names.length; i++) {
-        const name = names[i]!;
+    for (const name of Object.keys(attributes)) {
         const value = attributes[name];
         if (value !== undefined) {
             xml += ` ${name}="${xmlEncode(value.toString())}"`;
@@ -229,7 +227,10 @@ class XmlStream {
      * @throws TypeError if there is no rollback point
      */
     rollback(): void {
-        const r = this._rollbacks.pop()!;
+        const r = this._rollbacks.pop();
+        if (!r) {
+            throw new TypeError("XmlStream.rollback: there is no rollback point");
+        }
         if (this._xml.length > r.xml) {
             this._xml.splice(r.xml, this._xml.length - r.xml);
         }
