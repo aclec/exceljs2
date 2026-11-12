@@ -156,6 +156,10 @@ upstream PR code was merged) and has a regression test.
 - Streaming reader: the temp file of a worksheet spooled before the shared strings stayed open for the life of the process when the consumer
   skipped that worksheet (or with `worksheets: 'ignore'`); it is closed once its reader is garbage collected. Removing the temp dir no
   longer waits forever for a spooled file that was closed before it opened.
+- `xlsx.load` / `read` / `readFile` and `xlsx.write` / `writeBuffer` / `writeFile` never gave the event loop a turn (2 s and 4 s for a
+  200,000-row sheet, during which a server answered nothing). They now pause about every 25 ms while parsing, reconciling, preparing and
+  rendering worksheets, at no measurable cost. Building the workbook from the parsed model and compressing one part are still done at once
+  (about 0.5 s and 1.5 s for that sheet).
 
 ### Documentation
 
