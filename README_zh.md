@@ -1,5 +1,9 @@
 # ExcelJS
 
+> **这是 [exceljs/exceljs](https://github.com/exceljs/exceljs) 的维护分支（fork）。** 原项目已停止维护（最后版本 4.4.0 发布于 2023 年 10 月）。
+> 本分支用于**保持依赖库为最新版本**并**修复安全问题和长期存在的缺陷**，同时保持 ExcelJS 的 API。
+> 详见 [CHANGELOG.md](CHANGELOG.md)、[UPGRADE-5.0.md](UPGRADE-5.0.md) 和 [SECURITY.md](SECURITY.md)（英文）。
+
 [![Build status](https://github.com/exceljs/exceljs/workflows/ExcelJS/badge.svg)](https://github.com/exceljs/exceljs/actions?query=workflow%3AExcelJS)
 [![Code Quality: Javascript](https://img.shields.io/lgtm/grade/javascript/g/exceljs/exceljs.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/exceljs/exceljs/context:javascript)
 [![Total Alerts](https://img.shields.io/lgtm/alerts/g/exceljs/exceljs.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/exceljs/exceljs/alerts)

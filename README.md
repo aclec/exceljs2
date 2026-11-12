@@ -1,10 +1,28 @@
-# ExcelJS
+# ExcelJS — maintained fork
 
-[![Build Status](https://github.com/exceljs/exceljs/actions/workflows/tests.yml/badge.svg?branch=master&event=push)](https://github.com/exceljs/exceljs/actions/workflows/tests.yml)
+[![Tests](https://github.com/aclec/exceljs2/actions/workflows/tests.yml/badge.svg)](https://github.com/aclec/exceljs2/actions/workflows/tests.yml)
 
 Read, manipulate and write spreadsheet data and styles to XLSX and JSON.
 
 Reverse engineered from Excel spreadsheet files as a project.
+
+> **This is a maintained fork of [exceljs/exceljs](https://github.com/exceljs/exceljs).** The original project is no longer
+> maintained (last release 4.4.0 in October 2023, last commit in January 2024, 160+ open pull requests). This fork exists to
+> **keep the dependencies up to date** and to **fix security issues and long-standing bugs**, while keeping the ExcelJS API.
+>
+> What 5.0 brings compared to 4.4.0:
+>
+> - **Security:** parsing untrusted `.xlsx` / `.csv` files is hardened against memory and CPU amplification, prototype pollution,
+>   ReDoS, zip bombs and XML injection (see [Security & limits](#security--limits) and [SECURITY.md](SECURITY.md)).
+> - **Dependencies:** 4 runtime dependencies (`dayjs`, `fast-csv`, `fflate`, `saxes`) instead of 9, no known vulnerability
+>   (`bun audit`), no install scripts; `uuid`, `tmp`, `readable-stream`, `archiver`, `unzipper` and `jszip` were replaced by
+>   platform APIs or a single zip layer.
+> - **Bug fixes:** about 90 fixes for files Excel reports as corrupt, data lost on read or write, and streaming issues — many of
+>   them reported in upstream issues and pull requests. Every fix was re-implemented here with a regression test; no upstream
+>   pull-request code was merged.
+> - **Runtimes:** browsers (ES2020 bundle), Node.js ≥ 22.12 and Bun ≥ 1.4, tested in CI on all three.
+>
+> See [CHANGELOG.md](CHANGELOG.md) for the full list and [UPGRADE-5.0.md](UPGRADE-5.0.md) for the breaking changes.
 
 # Translations
 
