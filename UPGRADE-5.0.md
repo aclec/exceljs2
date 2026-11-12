@@ -33,6 +33,28 @@ Applications that must run on an older Node.js or on Internet Explorer should st
 | `require('core-js/...')`, `require('regenerator-runtime/runtime')` before ExcelJS | not needed                      |
 | `<script src="polyfill.js">` + `<script src="exceljs.js">`                        | `<script src="exceljs.min.js">` |
 
+## Package exports
+
+`package.json` now has an `exports` map. Two consequences:
+
+- **Deep imports** are limited to `exceljs/lib/...` (with or without `.js`; `.json` and `.xml` files with their extension),
+  `exceljs/dist/...`, `exceljs/excel(.js)` and `exceljs/package.json`. Other paths (`exceljs/index.d.ts`, `exceljs/lib/doc/data/theme1`
+  without `.json`, ...) no longer resolve. The internal modules `lib/csv/stream-converter.js`, `lib/utils/auto-drain`,
+  `browser-buffer-encode`, `iterate-stream`, `stream-base64`, `string-builder`, `stuttered-pipe` and `typed-stack` were removed.
+- **The `browser` condition** resolves the package to the browser bundle `dist/exceljs.min.js` (bundlers targeting browsers did so through
+  the `browser` field already). The bundle has no `stream` namespace and no file APIs. Test runners that apply the `browser` condition in
+  Node now load the bundle too: **Jest with the jsdom environment** does by default (`customExportConditions: ['browser']`). To test with
+  the Node build, either change the conditions or map the package to its Node entry point:
+
+```javascript
+// jest.config.js
+module.exports = {
+    testEnvironment: "jsdom",
+    testEnvironmentOptions: { customExportConditions: ["node", "node-addons"] },
+    // or: moduleNameMapper: { "^exceljs$": "<rootDir>/node_modules/exceljs/excel.js" },
+};
+```
+
 ## Dependencies
 
 Runtime dependencies were upgraded, three were removed and the three zip libraries were replaced by one. They are internal to ExcelJS, but
@@ -183,6 +205,24 @@ Set the property on each cell that must change. Merged cells still share the sty
 restyling many cells: about twice as slow per setter, and about 26 MB of heap for restyling 200,000 loaded cells.
 
 ## Other behaviour changes
+
+- **Number formats keep their `\` escapes.** 4.x removed every backslash of the number formats it read (cells, columns, rows and the
+  differential formats of conditional formatting), so formats were written back changed, `\#0` became a digit placeholder and `0.0\ \m` was
+  taken for a date format. Excel writes escaped formats routinely; code that compares `cell.numFmt` with a string may need the escaped form:
+
+    | Format in the file | `cell.numFmt` in 4.x | `cell.numFmt` in 5.0 |
+    | ------------------ | -------------------- | -------------------- |
+    | `yyyy\-mm\-dd;@`   | `yyyy-mm-dd;@`       | `yyyy\-mm\-dd;@`     |
+    | `d\ mmmm\ yyyy`    | `d mmmm yyyy`        | `d\ mmmm\ yyyy`      |
+    | `#,##0.00\ "€"`    | `#,##0.00 "€"`       | `#,##0.00\ "€"`      |
+
+- **Conditional formatting read model.** Rules read from files now match what ExcelJS writes:
+    - the `numFmt` of a rule `style` is the format code string (`'0.00%'`), like any style (4.x: `{id, formatCode}`);
+    - `beginsWith`, `endsWith` and `notContainsText` rules are read as `{type: 'containsText', operator: 'beginsWith', text: 'x'}` (4.x:
+      `type: 'beginsWith'` without `text`, and they were dropped on write); `text` is read for all text rules;
+    - x14 data bars without explicit attributes get the schema defaults: `direction: 'context'`, `negativeBarColorSameAsPositive: false`,
+      `minLength: 10`, `maxLength: 90` (4.x: `'leftToRight'`, `true`, `0`, `100`). New data bars are still written with Excel's 0 / 100;
+    - threshold values (`cfvo.value`) that are formulas or cell references are kept as strings (4.x: `NaN` or a partial number).
 
 - **Merged cells follow splices.** `spliceRows`, `insertRow(s)`, `duplicateRow` and `spliceColumns` move, shrink or widen the merges with
   the cells (4.x left the merges at their old place, see the [README](README.md#merged-cells)). As in Excel, rows or columns inserted inside

@@ -121,6 +121,23 @@ upstream PR code was merged) and has a regression test.
   support (#2080), keeping the values of columns with empty or repeated header names; `read()` rejects instead of crashing or hanging when a
   listener throws (e.g. a header row wider than 16,384 columns) or the input stream fails.
 
+- Conditional formatting:
+    - `beginsWith`, `endsWith` and `notContainsText` rules were read as unknown types and dropped on write; they are read as `containsText`
+      rules with that `operator`, their `text` is read and written, and they get Excel's formula when none is given (656fd9bd);
+    - rules that Excel stores only in the x14 extension (cross-sheet `expression` / `cellIs` / text / time period rules, x14-only rules)
+      were written back as main rules, which Excel may repair; they are written in the extension again (d32353ee, f3eb6d94);
+    - data bars use the schema defaults of `CT_DataBar` (`direction: 'context'`, `negativeBarColorSameAsPositive: false`, `minLength` 10,
+      `maxLength` 90 when absent), `showValue` is read and written, and data bars read from a file keep their x14 settings (negative
+      colours, axis, border, lengths, `autoMin` / `autoMax` thresholds) on write (1ffd02ba, 503c07cf);
+    - rules without `priority` were numbered from the highest given priority instead of the next one, so two rules shared it (9c3245b4);
+    - formula and cell-reference threshold values (`<cfvo val="$A$1">`, `xm:f`) were read with `parseFloat` (`NaN` or a partial number);
+      they are kept as written (8da19e03);
+    - a differential format with both a border and a protection was written in the wrong element order (c897f516);
+    - the streaming writer without `useStyles` threw on any rule with a style (ddeacb2b).
+- Number formats read from files keep their `\` escapes (`yyyy\-mm\-dd`, `#,##0.00\ "€"`): 4.x removed every backslash, so formats were read
+  and written back changed (`\#0` even turned a literal `#` into a digit placeholder) and `0.0\ \m` was taken for a date format. Escaped,
+  padding and fill characters are ignored when detecting date formats, quoted texts included (d30edbd0, 5347e2f3).
+- Streaming writer: `<sst count>` is the number of references to the shared strings, not the number of strings (ddb85b85).
 - Streaming reader: worksheets and shared strings were silently dropped when the zip stream ended before all entries had been read (#2790,
   #2915, #3095).
 - TypeScript typings:
@@ -190,6 +207,9 @@ upstream PR code was merged) and has a regression test.
   file) and, by the streaming writer, in the relationship XML (relationship injection). Both writers now require 1 to 5 letters or digits,
   and the streaming writer XML-encodes relationship targets.
 - Removed the internal modules that no longer had a user (`lib/utils/auto-drain`, `browser-buffer-encode`, `iterate-stream`,
-  `stream-base64`, `string-builder`, `stuttered-pipe`, `typed-stack`); they were only reachable through deep imports (`exceljs/lib/...`).
+  `stream-base64`, `string-builder`, `stuttered-pipe`, `typed-stack`, and `lib/csv/stream-converter`); they were only reachable through deep
+  imports (`exceljs/lib/...`).
+- `package.json` has an `exports` map: deep imports are limited to `lib/`, `dist/`, `excel(.js)` and `package.json`, and the `browser`
+  condition resolves the package to the browser bundle (see [UPGRADE-5.0.md](UPGRADE-5.0.md#package-exports)).
 - The streaming `WorkbookReader` accepts any stream with a `pipe` method (e.g. `readable-stream`), web `ReadableStream`s and async
   iterables, not only `stream.Readable` instances.
