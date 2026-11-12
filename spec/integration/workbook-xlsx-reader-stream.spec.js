@@ -561,6 +561,28 @@ describe("WorkbookReader (stream)", () => {
             expect(sheet.worksheet.getColumn(16384).width).to.equal(5);
         });
 
+        it("returns every column up to the last one read or used", async () => {
+            const buffer = await baseWorkbookBuffer((wb, ws) => {
+                ws.getColumn(2).width = 12;
+                ws.getColumn(3).width = 12;
+                ws.getCell("F1").value = "f";
+            });
+            const [{ worksheet, rows }] = await readAll(chunkedStream(buffer));
+            expect(rows[0].values).to.deep.equal([undefined, "hello", undefined, undefined, undefined, undefined, "f"]);
+            expect(worksheet.getColumn(4).width).to.equal(undefined);
+            const { columns } = worksheet;
+            expect(columns.map((column) => [column.number, column.width])).to.deep.equal([
+                [1, undefined],
+                [2, 12],
+                [3, 12],
+                [4, undefined],
+                [5, undefined],
+                [6, undefined],
+            ]);
+            expect(columns[3]).to.equal(worksheet.getColumn(4));
+            expect(worksheet.getColumn(0)).to.equal(undefined);
+        });
+
         it("reads hidden rows", async () => {
             const buffer = await baseWorkbookBuffer((wb, ws) => {
                 ws.getCell("A2").value = "hidden";
