@@ -24,7 +24,7 @@ import { checkMergedCells } from "../utils/merge-limits";
 import { defaultHeaderFooter } from "../xlsx/xform/sheet/header-footer-xform";
 import { eachEntry, entryIndices, lastEntryIndex, shiftSteps } from "../utils/sparse-array";
 import type Cell from "./cell";
-import type { CellValue, FormulaValueObject } from "./cell";
+import { isFormulaResult, type CellValue, type FormulaValueObject } from "./cell";
 import type Workbook from "./workbook";
 import type {
     AutoFilterModel,
@@ -1283,25 +1283,32 @@ class Worksheet {
         } else {
             getResult = () => undefined;
         }
-        let first = true;
+        // every result is read (once) and checked before any cell is filled: an invalid one changes nothing
+        const cellResults: (FormulaResult | undefined)[] = [];
         for (let r = top; r <= bottom; r++) {
             for (let c = left; c <= right; c++) {
-                if (first) {
-                    this.getCell(r, c).value = {
-                        shareType,
-                        formula,
-                        ref,
-                        result: getResult(r, c),
-                    };
-                    first = false;
+                const result: unknown = getResult(r, c);
+                if (result === undefined || result === null) {
+                    cellResults.push(undefined);
+                } else if (isFormulaResult(result)) {
+                    cellResults.push(result);
                 } else {
-                    this.getCell(r, c).value = isShared
-                        ? ({
-                              sharedFormula: masterAddress,
-                              result: getResult(r, c),
-                          } satisfies FormulaValueObject)
-                        : getResult(r, c);
+                    throw new Error(
+                        `Cannot fill a formula: the result of ${colCache.encodeAddress(r, c)} must be a string, a number, a boolean, a Date or an error value`
+                    );
                 }
+            }
+        }
+        let index = 0;
+        for (let r = top; r <= bottom; r++) {
+            for (let c = left; c <= right; c++) {
+                const result = cellResults[index];
+                if (index === 0) {
+                    this.getCell(r, c).value = { shareType, formula, ref, result };
+                } else {
+                    this.getCell(r, c).value = isShared ? ({ sharedFormula: masterAddress, result } satisfies FormulaValueObject) : result;
+                }
+                index++;
             }
         }
     }

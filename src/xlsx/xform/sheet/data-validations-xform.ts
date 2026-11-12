@@ -61,14 +61,27 @@ function reconcileFormula(formula: DataValidationFormula, date1904: boolean): Da
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
 
 /**
+ * A date written as text in another way than ISO 8601 (`2020/01/05`, `2020-1-5`, `01.05.2020`, `January 5, 2020`,
+ * `5 Jan 2020`, the `String()` of a Date): versions before 5.0 converted it with `new Date()`, which depends on the
+ * engine; written as a formula it would be wrong (`2020/01/05` is 404). Anchored, linear.
+ */
+const OTHER_DATE_TEXT =
+    /^(?:\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d))/i;
+
+/**
  * The text of a formula of a `<dataValidation>`: a string as is (a formula, or a literal; for a `date` rule an ISO 8601
  * date string is a date), a number as a number (for a `date` rule, as milliseconds since 1970 like `new Date(number)`:
  * its serial date), a Date as its serial date.
  *
- * @throws Error for an invalid Date (or a number or ISO date string that is not one, for a `date` rule), or a number
- * that is not finite
+ * @throws Error for an invalid Date (or a number or ISO date string that is not one, for a `date` rule), a date written
+ * as text in another way than ISO 8601 for a `date` rule (see {@link OTHER_DATE_TEXT}), or a number that is not finite
  */
 function formulaText(type: DataValidationModel["type"], formula: DataValidationFormula, date1904: boolean): string {
+    if (typeof formula === "string" && type === "date" && !ISO_DATE.test(formula) && OTHER_DATE_TEXT.test(formula)) {
+        throw new Error(
+            `The formula ${JSON.stringify(formula.slice(0, 64))} of a date validation is a date, but not an ISO 8601 date: give a Date, or the date as YYYY-MM-DD`
+        );
+    }
     if (typeof formula === "string" && !(type === "date" && ISO_DATE.test(formula))) {
         return formula;
     }

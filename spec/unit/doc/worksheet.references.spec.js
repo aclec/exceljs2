@@ -73,6 +73,24 @@ describe("Worksheet references", () => {
             }
         });
 
+        it("describes circular, long or odd arguments in its error without failing", () => {
+            const ws = sheet();
+            const circular = { top: 1 };
+            circular.self = circular;
+            const nested = [];
+            nested.push(nested);
+            const cases = [
+                [[ws.getCell("A1")], /^Cannot merge: invalid range \(an object\)/],
+                [[circular], /^Cannot merge: invalid range \(\{ top: 1 \}\)/],
+                [[nested], /^Cannot merge: invalid range \(\[\[\[\.\.\.\]\]\]\)/],
+                [["x".repeat(10000)], /^Cannot merge: invalid range \("x{64}"\)/],
+                [[Object.create(null)], /^Cannot merge: invalid range \(an object\)/],
+            ];
+            for (const [args, message] of cases) {
+                expect(() => ws.mergeCells(...args)).to.throw(Error, message);
+            }
+        });
+
         it("keeps the valid forms of a range", () => {
             const ws = sheet();
             ws.mergeCells("A1:B2");

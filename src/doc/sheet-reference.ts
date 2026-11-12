@@ -128,18 +128,57 @@ function isSheet(sheetName: string, worksheetName: string): boolean {
 }
 
 /** The arguments as they were given, for an error message. */
-function describeArgs(args: readonly unknown[]): string {
-    return args
-        .map((arg) => {
-            if (arg instanceof Range) {
-                return arg.range;
-            }
-            if (Array.isArray(arg)) {
-                return `[${describeArgs(arg)}]`;
-            }
-            return typeof arg === "string" || (typeof arg === "object" && arg !== null) ? JSON.stringify(arg) : String(arg);
-        })
-        .join(", ");
+function describeArgs(args: readonly unknown[], depth = 0): string {
+    return args.map((arg) => describeArg(arg, depth)).join(", ");
+}
+
+/** The longest text of an argument quoted in an error message. */
+const MAX_QUOTED = 64;
+
+/** The location keys of an object argument shown in an error message. */
+const LOCATION_KEYS = ["top", "left", "bottom", "right", "sheetName"] as const;
+
+/**
+ * One argument of a range as an error message shows it: never throws (a circular object or array is fine), and stays
+ * short (a long text is cut, nested arrays are shown to a depth of 2, an object by its location keys).
+ */
+function describeArg(arg: unknown, depth: number): string {
+    if (arg instanceof Range) {
+        return arg.range;
+    }
+    if (Array.isArray(arg)) {
+        return depth < 2 ? `[${describeArgs(arg, depth + 1)}]` : "[...]";
+    }
+    if (typeof arg === "string") {
+        return JSON.stringify(arg.slice(0, MAX_QUOTED));
+    }
+    if (typeof arg === "object" && arg !== null) {
+        const keys = LOCATION_KEYS.filter((key) => key in arg);
+        const fields = keys.map((key) => {
+            const value: unknown = Reflect.get(arg, key);
+            return `${key}: ${describeValue(value)}`;
+        });
+        return keys.length ? `{ ${fields.join(", ")} }` : "an object";
+    }
+    return describeValue(arg);
+}
+
+/** A value that is not an object as an error message shows it (an object as its type: its `toString` may throw). */
+function describeValue(value: unknown): string {
+    switch (typeof value) {
+        case "string":
+            return JSON.stringify(value.slice(0, MAX_QUOTED));
+        case "number":
+        case "boolean":
+        case "bigint":
+        case "undefined":
+            return String(value);
+        case "object":
+            return value === null ? "null" : "an object";
+        case "symbol":
+        case "function":
+            return `a ${typeof value}`;
+    }
 }
 
 /** A cell address of a worksheet, or why the text or the numbers are not one. */
@@ -193,15 +232,19 @@ export function findCellAddress(worksheetName: string, r: number | string, c?: n
     return lookupCell(worksheetName, r, c).address;
 }
 
+/** The deepest nesting of range arguments given as one array (`mergeCells([["A1:B2"]])`): a deeper one is no range. */
+const MAX_ARGS_NESTING = 4;
+
 /**
- * The bounds and the sheet names (`undefined` when not given) of range arguments; `undefined` when they are not a range.
+ * The bounds and the sheet names (`undefined` when not given) of range arguments; `undefined` when they are not a range
+ * (also when nested deeper than {@link MAX_ARGS_NESTING}: a circular array is no range).
  */
-function decodeRangeArgs(args: readonly unknown[]): { bounds: SheetReference; sheetNames: (string | undefined)[] } | undefined {
+function decodeRangeArgs(args: readonly unknown[], depth = 0): { bounds: SheetReference; sheetNames: (string | undefined)[] } | undefined {
     const [first, second, third, fourth, fifth] = args;
     switch (args.length) {
         case 1: {
             if (Array.isArray(first)) {
-                return decodeRangeArgs(first);
+                return depth < MAX_ARGS_NESTING ? decodeRangeArgs(first, depth + 1) : undefined;
             }
             if (typeof first === "string") {
                 const bounds = decodeReference(first);

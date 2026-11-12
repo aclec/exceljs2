@@ -281,10 +281,24 @@ describe("DataValidationsXform formulae", () => {
             [{ type: "date", formulae: [NaN] }, /Invalid date/],
             [{ type: "whole", formulae: [NaN] }, /not a finite number/],
             [{ type: "decimal", formulae: [Infinity] }, /not a finite number/],
+            // date strings that 4.x converted with new Date(): written as formulas they would be wrong (2020/01/05 is 404)
+            [{ type: "date", formulae: ["2020/01/05"] }, /not an ISO 8601 date/],
+            [{ type: "date", formulae: ["2020-1-5"] }, /not an ISO 8601 date/],
+            [{ type: "date", formulae: ["01.05.2020"] }, /not an ISO 8601 date/],
+            [{ type: "date", formulae: ["January 5, 2020"] }, /not an ISO 8601 date/],
+            [{ type: "date", formulae: ["5 Jan 2020"] }, /not an ISO 8601 date/],
+            [{ type: "date", formulae: [String(new Date(Date.UTC(2020, 0, 5)))] }, /not an ISO 8601 date/],
         ];
         for (const [dataValidation, error] of cases) {
             const xform = new DataValidationsXform();
             expect(() => xform.toXml({ A1: dataValidation }), String(dataValidation.formulae[0])).to.throw(Error, error);
+        }
+    });
+
+    it("writes the formulas of a date rule that are not dates as they are", () => {
+        for (const formula of ["TODAY()", "$B$1", "DATE(2020,1,5)", "B1+30", "Sheet1!A1", "mayday"]) {
+            const xml = new DataValidationsXform().toXml({ A1: { type: "date", operator: "greaterThan", formulae: [formula] } });
+            expect(xml, formula).to.include(`<formula1>${formula}</formula1>`);
         }
     });
 });

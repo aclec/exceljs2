@@ -511,8 +511,10 @@ export interface DataValidation {
     /**
      * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`, `["$B$1"]`, `["TODAY()"]`); absent for
      * `"any"`. A string is written as is (a formula), a number as is, a Date as its serial date; for `date`, a number is
-     * read as milliseconds since 1970 (`new Date(number)`). The serial dates are of the date system of the workbook
-     * (`workbook.properties.date1904`). Writing an invalid Date or a number that is not finite throws. Read from a file:
+     * read as milliseconds since 1970 (`new Date(number)`) and an ISO 8601 string (`"2020-01-05"`) as a date. The serial
+     * dates are of the date system of the workbook (`workbook.properties.date1904`). Writing an invalid Date, a number
+     * that is not finite, or for `date` a date written as text in another way (`"2020/01/05"`, `"Jan 5, 2020"`)
+     * throws. Read from a file:
      * a number literal is a number for `whole`, `decimal` and `textLength` and a Date for `date`; any other formula (a
      * reference, a function...) is its text.
      */

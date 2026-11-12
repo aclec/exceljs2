@@ -1061,22 +1061,6 @@ class FormulaValue implements CellValueHolder {
     }
 
     /**
-     * Throws when a value cannot be the result of a formula (unused by the library).
-     * @throws Error for a value that is not null, a string, a number or a date
-     */
-    validate(value: unknown): void {
-        const holder = valueHolder(this.cell, value);
-        if (!(
-            holder instanceof NullValue ||
-            holder instanceof StringValue ||
-            holder instanceof NumberValue ||
-            holder instanceof DateValue
-        )) {
-            throw new Error("Cannot process that type of result value");
-        }
-    }
-
-    /**
      * The ranges and cells that the formula mentions (`null` for none: also for a shared formula clone whose master is
      * missing or has no formula).
      * @throws Error for a formula longer than the Excel limit
@@ -1413,7 +1397,7 @@ function isSharedStringRef(value: object): value is SharedStringRef {
 }
 
 /** Whether a value is a formula result: a string, a number, a boolean, a Date or an error value. */
-function isFormulaResult(value: unknown): value is FormulaResult {
+export function isFormulaResult(value: unknown): value is FormulaResult {
     return (
         typeof value === "string" ||
         typeof value === "number" ||
