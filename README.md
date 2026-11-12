@@ -2553,7 +2553,7 @@ The constructor takes a required input argument and an optional options argument
 | options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.worksheets    | Specifies whether to emit worksheets (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
-| options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to temporary files, which these limits bound too. |
+| options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to a temporary file, which these limits bound too. |
 
 ```js
 const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader('./file.xlsx');
@@ -2566,9 +2566,13 @@ for await (const worksheetReader of workbookReader) {
 
 Iterating a `worksheetReader` yields one row at a time. For performance reasons (https://github.com/nodejs/node/issues/31979), `worksheetReader.parse()` yields arrays of `{eventType, value}` events instead.
 
-If worksheets come before the shared strings in the zip file, the reader spools them to temporary
- files in `os.tmpdir()` until the shared strings have been read. The temporary files are removed when
- the iteration ends, including when it is stopped early with `break` or an exception.
+If worksheets come before the shared strings in the zip file, the reader spools them to a temporary
+ file in `os.tmpdir()` until the shared strings have been read (not with `worksheets: 'ignore'`). All
+ of them share one file and one file descriptor, and a worksheet is only read back from it when it is
+ iterated. Their total size is bounded by `maxUncompressedSize`. The temporary file is removed when
+ the iteration ends, including when it is stopped early with `break` or an exception; it stays open
+ (but no longer visible) until the worksheets collected during the iteration have been read or
+ garbage collected.
 
 ###### Iterating over all events(#contents)<!-- Link generated with jump2header -->
 
