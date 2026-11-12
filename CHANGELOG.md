@@ -88,7 +88,8 @@ upstream PR code was merged) and has a regression test.
   the master style (#2055, #2781); `spliceRows` stale rows (#1600); column keys / table names / CSV headers named like `Object.prototype`
   members (#2080).
 - CSV: whitespace-only cells stay strings (#2752); integers beyond `Number.MAX_SAFE_INTEGER` stay strings (#1743); `parserOptions.headers`
-  support (#2080).
+  support (#2080), keeping the values of columns with empty or repeated header names; `read()` rejects instead of crashing or hanging when a
+  listener throws (e.g. a header row wider than 16,384 columns) or the input stream fails.
 
 - Streaming reader: worksheets and shared strings were silently dropped when the zip stream ended before all entries had been read (#2790,
   #2915, #3095).

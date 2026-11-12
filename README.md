@@ -2270,6 +2270,13 @@ const worksheet = await workbook.csv.readFile(filename, options);
 ```
 
 The CSV parser uses [fast-csv](https://www.npmjs.com/package/fast-csv) to read the CSV file.
+
+With `parserOptions.headers` (`true`, an array of names or a function), the header names become the column keys
+(`worksheet.getColumn('Name')`) **and the first row of the worksheet**: with an array of names for a file that has no header row,
+that row is inserted and the data starts at row 2. Every column keeps its values, even when header names are empty or repeated:
+the keys of repeated names are numbered (`a`, `a_2`, `a_3`...), and a column whose name in the array is `undefined` is skipped.
+A header row with more than 16,384 names (the width of a worksheet) rejects the `read()` promise.
+
 The formatterOptions in the options passed to the above write function will be passed to the @fast-csv/format module to write csv data.
  Please refer to the fast-csv README.md for details.
 
