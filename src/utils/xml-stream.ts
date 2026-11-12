@@ -1,8 +1,4 @@
-import utils from "./utils";
-
-// utils.ts is not typed yet: its xmlEncode is inferred as (any) => any. Call it directly once it is typed (eslint
-// no-unnecessary-type-assertion will flag this assertion then).
-const xmlEncode = (text: string): string => utils.xmlEncode(text) as string;
+import { xmlEncode } from "./utils";
 
 /**
  * A value written as an XML attribute or as text: converted with `toString()`, then XML-encoded (special characters escaped,
