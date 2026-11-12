@@ -51,22 +51,18 @@ class SharedStrings {
      */
     add(value: SharedStringValue): number {
         let index: number | undefined;
-        if (typeof value === "object" && value !== null && value.richText) {
+        if (typeof value === "string") {
+            index = this._hash[value];
+            if (index === undefined) {
+                index = this._hash[value] = this._values.length;
+                this._values.push(value);
+            }
+        } else {
             const key = JSON.stringify(value.richText);
             index = this._richTextHash.get(key);
             if (index === undefined) {
                 index = this._values.length;
                 this._richTextHash.set(key, index);
-                this._values.push(value);
-            }
-        } else {
-            // a string. Any other value is keyed by its string form, the property key it always gave: the cell xform also
-            // adds the Date or error text of a hyperlink read from a file (an error text gives "[object Object]")
-            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- documented above
-            const key = typeof value === "string" ? value : String(value);
-            index = this._hash[key];
-            if (index === undefined) {
-                index = this._hash[key] = this._values.length;
                 this._values.push(value);
             }
         }

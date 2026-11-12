@@ -94,6 +94,32 @@ describe("stream I/O regressions", () => {
             expect(worksheet.hyperlinks.A2).to.include({ ref: "A2", rId: "rId1" });
         });
 
+        it("reads the numeric result of a formula in a date-formatted cell as a Date, as xlsx.load does", async () => {
+            const date = new Date(Date.UTC(2023, 2, 15, 6));
+            for (const date1904 of [false, true]) {
+                const buffer = await baseWorkbookBuffer((wb, ws) => {
+                    wb.properties.date1904 = date1904;
+                    ws.getCell("B1").value = { formula: "A2", result: date };
+                    ws.getCell("B1").numFmt = "yyyy-mm-dd";
+                    ws.getCell("C1").value = { formula: "A3", result: 45000 };
+                });
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(buffer);
+                const loaded = wb.getWorksheet("Sheet1").getRow(1);
+                const values = [];
+                for await (const ws of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), { styles: "cache" })) {
+                    for await (const row of ws) {
+                        values.push(row.getCell(2).value, row.getCell(3).value);
+                    }
+                }
+                expect(values, `date1904 ${date1904}`).to.deep.equal([loaded.getCell(2).value, loaded.getCell(3).value]);
+                expect(values, `date1904 ${date1904}`).to.deep.equal([
+                    { formula: "A2", result: date },
+                    { formula: "A3", result: 45000 },
+                ]);
+            }
+        });
+
         it("does not report a row for a <row> outside <sheetData>", async () => {
             const buffer = await tamper(await baseWorkbookBuffer(), {
                 "xl/worksheets/sheet1.xml": (xml) => xml.replace("</sheetData>", '</sheetData><x><row r="9"/></x>'),

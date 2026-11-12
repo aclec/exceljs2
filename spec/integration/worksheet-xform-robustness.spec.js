@@ -55,6 +55,16 @@ describe("worksheet xform robustness", () => {
         });
     });
 
+    describe("a workbook without a shared strings part", () => {
+        it('reads a t="s" cell as an empty cell (its string is missing)', async () => {
+            const buffer = editParts(await baseWorkbookBuffer(), (parts) => {
+                delete parts["xl/sharedStrings.xml"];
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            expect(ws.getCell("A1").model).to.deep.equal({ address: "A1", type: ExcelJS.ValueType.Null, style: {} });
+        });
+    });
+
     describe("element names of Object.prototype members", () => {
         it("ignores them in a worksheet and in a row", async () => {
             const buffer = await patchedBuffer((xml) =>

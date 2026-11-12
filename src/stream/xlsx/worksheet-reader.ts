@@ -633,7 +633,9 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                 } else if (c.t === "d") {
                     cellValue.result = parseIsoDate(c.v.text);
                 } else {
-                    cellValue.result = parseFloat(c.v.text);
+                    // a number, a serial date in a date-formatted cell (as for a value, see below)
+                    const result = parseFloat(c.v.text);
+                    cellValue.result = isDateFmt(cell.numFmt) ? excelToDate(result, date1904) : result;
                 }
             }
             value = cellValue;
