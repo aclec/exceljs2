@@ -1,6 +1,7 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { PageSetup } from "../../../../index";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /** The print options of a worksheet: part of the page setup (index.d.ts `PageSetup`). */
@@ -36,10 +37,10 @@ class PrintOptionsXform extends BaseXform<PrintOptionsModel> {
         switch (node.name) {
             case this.tag:
                 this.model = {
-                    showRowColHeaders: node.attributes.headings === "1",
-                    showGridLines: node.attributes.gridLines === "1",
-                    horizontalCentered: node.attributes.horizontalCentered === "1",
-                    verticalCentered: node.attributes.verticalCentered === "1",
+                    showRowColHeaders: parseBoolean(node.attributes.headings),
+                    showGridLines: parseBoolean(node.attributes.gridLines),
+                    horizontalCentered: parseBoolean(node.attributes.horizontalCentered),
+                    verticalCentered: parseBoolean(node.attributes.verticalCentered),
                 };
                 return true;
             default:

@@ -62,9 +62,9 @@ class ExtXform extends CompositeXform<ExtLstModel> {
     }
 
     override onParserClose(name: string): void {
-        if (name === "x14:conditionalFormattings") {
-            // the element was opened before its child (createNewModel)
-            this.model![name] = this.conditionalFormattings.model ?? undefined;
+        // the element was opened before its child (createNewModel)
+        if (name === "x14:conditionalFormattings" && this.model) {
+            this.model[name] = this.conditionalFormattings.model ?? undefined;
         }
     }
 }
@@ -117,7 +117,10 @@ class ExtLstXform extends CompositeXform<ExtLstModel> {
 
     override onParserClose(): void {
         // the element was opened before its child (createNewModel)
-        Object.assign(this.model!, this.ext.model);
+        const ext = this.ext.model;
+        if (this.model && ext && "x14:conditionalFormattings" in ext) {
+            this.model["x14:conditionalFormattings"] = ext["x14:conditionalFormattings"];
+        }
     }
 }
 

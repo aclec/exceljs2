@@ -183,7 +183,7 @@ describe("prototype-named keys in xlsx parts", function () {
         const ext =
             '<extLst><ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">' +
             '<x14:conditionalFormattings><x14:conditionalFormatting xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">' +
-            '<x14:cfRule type="attacker-type" priority="7" id="__proto__" operator="attacker-op"><xm:f>attacker-formula</xm:f></x14:cfRule>' +
+            '<x14:cfRule type="cellIs" priority="7" id="__proto__" operator="attacker-op"><xm:f>attacker-formula</xm:f></x14:cfRule>' +
             "<xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
         const buffer = await tamper(await baseWorkbookBuffer(), {
             "xl/worksheets/sheet1.xml": (xml) =>
@@ -199,9 +199,11 @@ describe("prototype-named keys in xlsx parts", function () {
         await wb.xlsx.load(buffer);
         expect(snapshotPrototypes()).to.deep.equal(before);
         expect({}.type).to.equal(undefined);
-        // the x14 rule is kept as a rule of its own
+        // the x14 rule is kept as a rule of its own (its unknown operator is not read)
         const rules = wb.getWorksheet("Sheet1").conditionalFormattings.flatMap((cf) => cf.rules);
-        expect(rules.map((rule) => rule.type)).to.deep.equal(["expression", "attacker-type"]);
+        expect(rules.map((rule) => rule.type)).to.deep.equal(["expression", "cellIs"]);
+        expect(rules[1].operator).to.equal(undefined);
+        expect(rules[1].x14Id).to.equal("__proto__");
         expect(await writeUnrelatedWorkbook()).to.equal("hello");
     });
 

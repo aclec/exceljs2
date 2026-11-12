@@ -55,7 +55,11 @@ class ConditionalFormattingsExtXform extends CompositeXform<ConditionalFormattin
 
     override onParserClose(): void {
         // model is array of conditional formatting objects; the element was opened before its children (createNewModel)
-        this.model!.push(this.cfXform.model!);
+        const list = this.model;
+        const cf = this.cfXform.model;
+        if (list && cf) {
+            list.push(cf);
+        }
     }
 }
 

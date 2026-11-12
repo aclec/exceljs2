@@ -274,10 +274,16 @@ describe("WorkbookReader (stream)", () => {
             this.timeout(10000);
             const gc = exposeGc();
             const files = trackOpenedFiles();
+            // the reader of the skipped worksheet, kept until the first check: a garbage collection during the
+            // iteration may otherwise collect it (and rightly close its file) before that check
+            let skipped = [];
             try {
                 const buffer = await bigSheetFirstBuffer();
                 for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
-                    if (worksheet.name !== "Second") continue;
+                    if (worksheet.name !== "Second") {
+                        skipped.push(worksheet);
+                        continue;
+                    }
                     // eslint-disable-next-line no-unused-vars
                     for await (const row of worksheet) {
                         // read
@@ -287,9 +293,11 @@ describe("WorkbookReader (stream)", () => {
                 files.restore();
             }
             expect(files.handles).to.have.length(1);
-            // the skipped worksheet could still be read through its reader
+            // the skipped worksheet can still be read through its reader
+            expect(skipped).to.have.length(1);
             expect(files.handles[0].fd).to.not.equal(-1);
             // it can never be read once its reader is gone: the file must not stay open for the life of the process
+            skipped = [];
             for (let i = 0; i < 50 && files.handles[0].fd !== -1; i++) {
                 gc();
                 await new Promise((resolve) => setTimeout(resolve, 20));

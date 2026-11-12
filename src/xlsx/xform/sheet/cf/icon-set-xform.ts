@@ -2,14 +2,15 @@ import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel, IconSetRuleModel } from "../../../../types";
 import BaseXform from "../../base-xform";
+import { parseOptionalBoolean } from "../attribute-values";
 import CompositeXform from "../../composite-xform";
 
 import CfvoXform from "./cfvo-xform";
-import { DEFAULT_ICON_SET, iconSetAttribute } from "./icon-sets";
+import { DEFAULT_ICON_SET, iconSetAttribute, isIconSet } from "./icon-sets";
 
 /**
- * The model of `<iconSet>` (merged into the rule). The parsed `iconSet` is the attribute (unvalidated), `"3TrafficLights1"`
- * (the default) when absent.
+ * The model of `<iconSet>` (merged into the rule). The parsed `iconSet` is `"3TrafficLights1"` (the default) when absent
+ * or unknown.
  */
 export interface IconSetModel {
     iconSet: NonNullable<IconSetRuleModel["iconSet"]>;
@@ -63,19 +64,21 @@ class IconSetXform extends CompositeXform<IconSetModel> {
     }
 
     override createNewModel({ attributes }: SaxTag): IconSetModel {
+        const { iconSet } = attributes;
         return {
-            // unvalidated ST_IconSetType
-            iconSet: BaseXform.toStringValue(attributes.iconSet, DEFAULT_ICON_SET) as IconSetModel["iconSet"],
-            reverse: BaseXform.toBoolValue(attributes.reverse),
-            showValue: BaseXform.toBoolValue(attributes.showValue),
+            iconSet: iconSet !== undefined && isIconSet(iconSet) ? iconSet : DEFAULT_ICON_SET,
+            reverse: parseOptionalBoolean(attributes.reverse),
+            showValue: parseOptionalBoolean(attributes.showValue),
             cfvo: [],
         };
     }
 
     override onParserClose(name: string): void {
-        if (name === "cfvo") {
-            // the element was opened before its children; the cfvo model is set by its start tag
-            this.model!.cfvo.push(this.cfvoXform.model!);
+        // the element was opened before its children; the cfvo model is set by its start tag
+        const { model } = this;
+        const cfvo = this.cfvoXform.model;
+        if (name === "cfvo" && model && cfvo) {
+            model.cfvo.push(cfvo);
         }
     }
 }

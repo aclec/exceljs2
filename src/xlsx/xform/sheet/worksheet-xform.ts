@@ -1,6 +1,5 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type {
-    CfvoModel,
     ColModel,
     ConditionalFormattingModel,
     CellPrepareOptions,
@@ -8,6 +7,7 @@ import type {
     ConditionalFormattingRuleModel,
     DrawingAnchorModel,
     DrawingModel,
+    FormulaCellModel,
     MediaModel,
     NoteModel,
     PageSetupModel,
@@ -62,6 +62,7 @@ import RowBreaksXform from "./row-breaks-xform";
 import HeaderFooterXform, { defaultHeaderFooter } from "./header-footer-xform";
 import ConditionalFormattingsXform from "./cf/conditional-formattings-xform";
 import CfRuleXform from "./cf/cf-rule-xform";
+import DatabarExtXform from "./cf-ext/databar-ext-xform";
 import ExtListXform from "./ext-lst-xform";
 import type { ConditionalFormattingExtModel } from "./cf-ext/conditional-formatting-ext-xform";
 
@@ -73,6 +74,16 @@ class LegacyDrawingXform extends DrawingXform {
     override get tag(): string {
         return "legacyDrawing";
     }
+}
+
+/**
+ * An empty object without prototype, for keys that come from the file (cell and part references, ids): a lookup never
+ * finds an inherited member, and a "__proto__" key is an ordinary key. Object.create(null), not setPrototypeOf on a
+ * literal: its lookups (once per cell) are faster.
+ */
+function emptyRecord<T>(): Record<string, T> {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- Object.create is typed any: an empty object (without prototype) is a Record of any value type
+    return Object.create(null) as Record<string, T>;
 }
 
 /**
@@ -181,23 +192,74 @@ function spendMergedCells(loadBudget: WorksheetLoadBudget, mergeCells: readonly 
     }
 }
 
-const mergeRule = (rule: ConditionalFormattingRuleModel, extRule: ConditionalFormattingRuleModel): void => {
-    // the rules as records (rule models have no index signature): the keys of a parsed rule are the fixed keys of the
-    // cf / cf-ext xforms (never names read from the file)
-    const target = rule as unknown as Record<string, unknown>;
-    const source = extRule as unknown as Record<string, unknown>;
-    for (const key of Object.keys(source)) {
-        const value = target[key];
-        const extValue = source[key];
-        if (value === undefined && extValue !== undefined) {
-            target[key] = extValue;
+/** Completes a rule with the settings of its x14 version (of the same type) that it lacks. */
+function fillUndefined<T extends ConditionalFormattingRuleModel>(rule: T, extRule: T, keys: readonly (keyof T)[]): void {
+    for (const key of keys) {
+        if (rule[key] === undefined && extRule[key] !== undefined) {
+            rule[key] = extRule[key];
         }
     }
-    // Excel 2010+ reads the thresholds of a data bar from its extension, where they may be of the
-    // types autoMin / autoMax, unknown to the main <cfvo> (which has min / max instead)
-    const extCfvo = (extRule as { cfvo?: CfvoModel[] }).cfvo;
-    if (rule.type === "dataBar" && extCfvo && extCfvo.length) {
-        rule.cfvo = extCfvo;
+}
+
+/** The settings of every rule that its x14 version may give. */
+const COMMON_KEYS = ["priority", "stopIfTrue", "dxfId", "x14Id", "formulae", "style"] as const;
+
+/**
+ * Merges the x14 version of a rule into the main rule: the settings that the main rule lacks (by type: those its xforms
+ * read). A version of another type (malformed) is ignored.
+ */
+const mergeRule = (rule: ConditionalFormattingRuleModel, extRule: ConditionalFormattingRuleModel): void => {
+    switch (rule.type) {
+        case "expression":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "x14"]);
+            }
+            break;
+        case "cellIs":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "operator", "x14"]);
+            }
+            break;
+        case "top10":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "rank", "percent", "bottom"]);
+            }
+            break;
+        case "aboveAverage":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "aboveAverage"]);
+            }
+            break;
+        case "colorScale":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "cfvo", "color"]);
+            }
+            break;
+        case "iconSet":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "iconSet", "reverse", "showValue", "custom", "cfvo", "icons"]);
+            }
+            break;
+        case "containsText":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "operator", "text", "x14"]);
+            }
+            break;
+        case "timePeriod":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, "timePeriod", "x14"]);
+            }
+            break;
+        case "dataBar":
+            if (extRule.type === rule.type) {
+                fillUndefined(rule, extRule, [...COMMON_KEYS, ...DatabarExtXform.X14_SETTINGS, "gradient", "showValue", "cfvo", "color"]);
+                // Excel 2010+ reads the thresholds of a data bar from its extension, where they may be of the
+                // types autoMin / autoMax, unknown to the main <cfvo> (which has min / max instead)
+                if (extRule.cfvo && extRule.cfvo.length) {
+                    rule.cfvo = extRule.cfvo;
+                }
+            }
+            break;
     }
 };
 
@@ -245,14 +307,16 @@ const mergeConditionalFormattings = (
         if (!extOnlyRules.length) {
             continue;
         }
-        const existing = cfMap.get(extCf.ref);
+        const { ref } = extCf;
+        const existing = cfMap.get(ref);
         if (existing) {
             // reuse existing cf ref
             existing.rules.push(...extOnlyRules);
-        } else {
-            // create new cf (an <x14:conditionalFormatting> without <xm:sqref> (malformed) has an undefined ref)
-            const cf: ConditionalFormattingModel = { ref: extCf.ref as string, rules: extOnlyRules };
-            cfMap.set(extCf.ref, cf);
+        } else if (ref !== undefined) {
+            // create new cf (the rules of an <x14:conditionalFormatting> without <xm:sqref> (malformed) apply to no cell:
+            // they are not read)
+            const cf: ConditionalFormattingModel = { ref, rules: extOnlyRules };
+            cfMap.set(ref, cf);
             cfs.push(cf);
         }
     }
@@ -260,10 +324,13 @@ const mergeConditionalFormattings = (
     return cfs;
 };
 
-/** An index of an array of media (`imageId`): a number, or its string (array index semantics). */
+/**
+ * An index of an array of media (`imageId`): a number, or its string (array index semantics: the canonical string of an
+ * index, `"1"`, not `"01"`).
+ */
 function mediumAt(media: readonly MediaModel[], imageId: number | string): MediaModel {
-    const medium =
-        typeof imageId === "number" ? media[imageId] : (media as unknown as Readonly<Record<string, MediaModel | undefined>>)[imageId];
+    const index = typeof imageId === "number" ? imageId : Number(imageId);
+    const medium = typeof imageId === "number" || String(index) === imageId ? media[index] : undefined;
     if (!medium) {
         throw new Error(`Unknown image ${imageId}`);
     }
@@ -423,9 +490,13 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             hyperlinks,
             comments,
             // shared formula masters by cell address (no prototype: a sharedFormula never finds an inherited member)
-            formulae: Object.create(null) as CellPrepareOptions["formulae"],
+            formulae: emptyRecord<FormulaCellModel>(),
             siFormulae: 0,
         });
+        if (options.date1904) {
+            // the serial dates of the data validations
+            model.date1904 = true;
+        }
         this.map.cols.prepare(model.cols, options);
         yield* this.map.sheetData.prepareSteps(model.rows, options);
         this.map.conditionalFormatting.prepare(model.conditionalFormattings, options);
@@ -630,7 +701,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         this.map.autoFilter.render(xmlStream, model.autoFilter);
         this.map.mergeCells.render(xmlStream, model.mergeCells);
         this.map.conditionalFormatting.render(xmlStream, model.conditionalFormattings); // Note: must be before dataValidations
-        this.map.dataValidations.render(xmlStream, model.dataValidations);
+        this.map.dataValidations.render(xmlStream, model.dataValidations, model.date1904);
 
         // For some reason hyperlinks have to be after the data validations
         this.map.hyperlinks.render(xmlStream, model.hyperlinks);
@@ -717,7 +788,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                 const extLst = map.extLst.model;
                 const conditionalFormattings = mergeConditionalFormattings(
                     // reset() set it to []
-                    map.conditionalFormatting.model!,
+                    map.conditionalFormatting.model ?? [],
                     extLst && extLst["x14:conditionalFormattings"]
                 );
                 if (this.loadBudget) {
@@ -727,6 +798,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                     dimensions: map.dimension.model,
                     cols: map.cols.model,
                     // parsed items are RowXform parse models (the list type also covers the rendered document rows)
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the items of <sheetData> are parsed by RowXform, whose parse model is RowModel<ParsedCellModel> (ListXform has one item type for render and parse)
                     rows: map.sheetData.model as RowModel<ParsedCellModel>[] | null | undefined,
                     mergeCells: map.mergeCells.model,
                     rowBreaks: map.rowBreaks.model ?? [],
@@ -779,7 +851,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         // options.merges.reconcile(model.mergeCells, model.rows);
         const relationships = model.relationships || [];
         // keyed by the relationship ids of the file
-        const rels = Object.create(null) as Record<string, RelationshipModel>;
+        const rels = emptyRecord<RelationshipModel>();
         for (const rel of relationships) {
             rels[rel.Id] = rel;
         }
@@ -819,13 +891,13 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         }
         // keyed by the cell references of the file: no prototype, so that a lookup never finds an
         // inherited member and a "__proto__" reference is an ordinary key
-        const commentsMap = Object.create(null) as Record<string, NoteModel>;
+        const commentsMap = emptyRecord<NoteModel>();
         for (const comment of model.comments || []) {
             if (comment.ref) {
                 commentsMap[comment.ref] = comment;
             }
         }
-        const hyperlinkMap = Object.create(null) as WorksheetReconcileOptions["hyperlinkMap"];
+        const hyperlinkMap: WorksheetReconcileOptions["hyperlinkMap"] = emptyRecord();
         for (const hyperlink of model.hyperlinks || []) {
             const rel = hyperlink.rId && relOf(hyperlink.rId);
             const target = getHyperlinkTarget(rel ? rel.Target : undefined, hyperlink.target);
@@ -838,7 +910,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             commentsMap,
             hyperlinkMap,
             // shared formula masters by si (from the file)
-            formulae: Object.create(null) as CellReconcileOptions["formulae"],
+            formulae: emptyRecord<string | undefined>(),
         });
 
         // compact the rows and cells
@@ -855,6 +927,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         this.map.cols.reconcile(model.cols || undefined, options);
         yield* this.map.sheetData.reconcileSteps(rows, options);
         this.map.conditionalFormatting.reconcile(model.conditionalFormattings, options);
+        this.map.dataValidations.reconcile(model.dataValidations, options);
 
         const media: NonNullable<ParsedWorksheetModel["media"]> = (model.media = []);
         if (model.drawing) {
@@ -866,11 +939,12 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             const drawing: DrawingModel | undefined = match ? claim(getOwn(options.drawings, match[1])) : undefined;
             if (drawing) {
                 for (const anchor of drawing.anchors) {
-                    if (anchor.medium) {
+                    // the index is set by WorkbookXform.reconcile for every medium of the workbook
+                    const imageId = anchor.medium && anchor.medium.index;
+                    if (imageId !== undefined) {
                         media.push({
                             type: "image",
-                            // set by WorkbookXform.reconcile for every medium of the workbook
-                            imageId: anchor.medium.index as number,
+                            imageId,
                             range: anchor.range,
                             hyperlinks: anchor.picture && anchor.picture.hyperlinks,
                         });

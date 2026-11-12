@@ -7,8 +7,8 @@ import ConditionalFormattingXform from "./conditional-formatting-xform";
 
 /**
  * The `<conditionalFormatting>` elements of a worksheet (they have no list element): the model is their array. The
- * worksheet xform delegates each `<conditionalFormatting>` to this xform, which appends it to the model; {@link reset}
- * starts a new list.
+ * worksheet xform delegates each `<conditionalFormatting>` to this xform, which appends it to the model (when it has a
+ * range and a rule read); {@link reset} starts a new list.
  */
 class ConditionalFormattingsXform extends BaseXform<ConditionalFormattingModel[]> {
     /** The xform of one `<conditionalFormatting>`. */
@@ -83,8 +83,14 @@ class ConditionalFormattingsXform extends BaseXform<ConditionalFormattingModel[]
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // reset() created the list; the model of the element is set by its start tag
-                this.model!.push(this.cfXform.model!);
+                // reset() created the list; the model of the element is set by its start tag. A <conditionalFormatting>
+                // without sqref (malformed: its rules apply to no cell) or without a rule read (see CfRuleXform) is not
+                // read
+                const list = this.model;
+                const cf = this.cfXform.model;
+                if (list && cf && cf.ref !== undefined && cf.rules.length) {
+                    list.push({ ref: cf.ref, rules: cf.rules });
+                }
                 this.parser = undefined;
                 return false;
             }

@@ -179,15 +179,18 @@ const expectations = [
         title: "a date",
         create: () => new DataValidationsXform(),
         preparedModel: { A1: { type: "date", operator: "lessThan", formulae: [new Date(Date.UTC(2016, 0, 1))] } },
-        get parsedModel() {
+        // the serial date is read as a Date by reconcile, which knows the date system of the workbook
+        parsedModel: { A1: { type: "date", operator: "lessThan", formulae: ["42370"] } },
+        get reconciledModel() {
             return this.preparedModel;
         },
+        options: {},
         xml: `
       <dataValidations count="1">
         <dataValidation type="date" operator="lessThan" sqref="A1"><formula1>42370</formula1></dataValidation>
       </dataValidations>
     `,
-        tests: ["render", "renderIn", "parse"],
+        tests: ["render", "renderIn", "parse", "reconcile"],
     },
     {
         // an ISO date string was converted to a date before 5.0: written as a formula it would be 2016 - 1 - 1
@@ -243,6 +246,33 @@ describe("DataValidationsXform formulae", () => {
         );
         expect(Date.now() - start).to.be.below(200);
         expect(model.A1.formulae).to.deep.equal([formula]);
+    });
+
+    it("ignores a formula outside of a <dataValidation>", async () => {
+        // was a TypeError (or a formula added to the previous validation)
+        const model = await parse(
+            '<dataValidations count="1"><formula1>1</formula1>' +
+                '<dataValidation type="whole" sqref="A1"><formula1>5</formula1></dataValidation><formula2>9</formula2></dataValidations>'
+        );
+        expect(model).to.deep.equal({ A1: { type: "whole", operator: "between", formulae: [5] } });
+    });
+
+    it("reads an unknown type as any, and an unknown operator as between", async () => {
+        const model = await parse(
+            '<dataValidations count="4">' +
+                '<dataValidation type="none" showInputMessage="1" prompt="p" sqref="A1"/>' +
+                '<dataValidation type="integer" showInputMessage="1" prompt="p" sqref="A2"/>' +
+                '<dataValidation type="whole" operator="greaterThanOrEquals" sqref="A3"><formula1>5</formula1></dataValidation>' +
+                '<dataValidation type="time" operator="lessThan" sqref="A4"><formula1>0.5</formula1></dataValidation>' +
+                "</dataValidations>"
+        );
+        expect(model).to.deep.equal({
+            A1: { type: "any", showInputMessage: true, prompt: "p" },
+            A2: { type: "any", showInputMessage: true, prompt: "p" },
+            A3: { type: "whole", operator: "between", formulae: [5] },
+            // ST_DataValidationType time: its serial times are kept as text
+            A4: { type: "time", operator: "lessThan", formulae: ["0.5"] },
+        });
     });
 
     it("rejects a date or a number that is not a value", () => {

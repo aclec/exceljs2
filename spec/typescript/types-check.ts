@@ -137,6 +137,8 @@ function dataValidation(): void {
     // @ts-expect-error unknown validation type
     const bad: ExcelJS.DataValidationType = "integer";
     void bad;
+    // ST_DataValidationType time (kept when read from a file)
+    worksheet.getCell("A2").dataValidation = { type: "time", operator: "lessThan", formulae: ["0.5"] };
 
     // worksheet.dataValidations (upgrade guide: read range keys from its model)
     const dataValidations: ExcelJS.DataValidations = worksheet.dataValidations;

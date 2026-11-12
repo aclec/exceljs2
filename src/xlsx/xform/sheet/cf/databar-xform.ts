@@ -3,6 +3,7 @@ import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel, ColorModel, DataBarRuleModel } from "../../../../types";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
+import { parseOptionalBoolean } from "../attribute-values";
 
 import ColorXform from "../../style/color-xform";
 import CfvoXform from "./cfvo-xform";
@@ -75,18 +76,25 @@ class DatabarXform extends CompositeXform<DatabarModel> {
     override createNewModel({ attributes }: SaxTag): DatabarModel {
         return {
             cfvo: [],
-            showValue: BaseXform.toBoolValue(attributes.showValue),
+            showValue: parseOptionalBoolean(attributes.showValue),
         };
     }
 
     override onParserClose(name: string): void {
         // the element was opened before its children (createNewModel)
-        const model = this.model!;
+        const { model } = this;
+        if (!model) {
+            return;
+        }
         switch (name) {
-            case "cfvo":
+            case "cfvo": {
                 // set by the start tag of <cfvo>
-                model.cfvo.push(this.cfvoXform.model!);
+                const cfvo = this.cfvoXform.model;
+                if (cfvo) {
+                    model.cfvo.push(cfvo);
+                }
                 break;
+            }
             case "color":
                 // undefined for a <color> without color attribute
                 model.color = this.colorXform.model ?? undefined;

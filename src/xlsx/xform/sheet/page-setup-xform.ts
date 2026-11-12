@@ -2,7 +2,9 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { PageSetup } from "../../../../index";
 import type { PageSetupModel } from "../../../types";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
+import { isLiteralOf } from "./attribute-values";
 
 function booleanToXml(model: unknown): "1" | undefined {
     return model ? "1" : undefined;
@@ -44,10 +46,11 @@ function errorsToXml(model: string | undefined): "dash" | "blank" | "NA" | undef
 function pageSizeToModel(value: string | undefined): number | undefined {
     return value !== undefined ? parseInt(value, 10) : undefined;
 }
-/** An xsd:boolean attribute that is true. */
-function isTrue(value: string | undefined): boolean {
-    return value === "1" || value === "true";
-}
+// The enumerations of CT_PageSetup: a value that is not one of them reads as the default of the document
+const isOrientation = isLiteralOf<PageSetup["orientation"]>({ default: true, portrait: true, landscape: true });
+const isPageOrder = isLiteralOf<PageSetup["pageOrder"]>({ downThenOver: true, overThenDown: true });
+const isCellComments = isLiteralOf<PageSetup["cellComments"]>({ None: true, none: true, atEnd: true, asDisplayed: true });
+const isErrors = isLiteralOf<PageSetup["errors"]>({ displayed: true, blank: true, dash: true, NA: true });
 /**
  * `useFirstPageNumber`, written when the pages are numbered from a first page number: when one is set and the model
  * does not say that it is not used (a file read with `firstPageNumber` but without `useFirstPageNumber`), or when the
@@ -62,7 +65,7 @@ function useFirstPageNumberToXml(model: PageSetupModel): "1" | undefined {
  * number; else the number (CT_PageSetup default 1) and whether it is used.
  */
 function firstPageNumberToModel(attributes: SaxTag["attributes"]): Pick<PageSetupModel, "firstPageNumber" | "useFirstPageNumber"> {
-    const used = isTrue(attributes.useFirstPageNumber);
+    const used = parseBoolean(attributes.useFirstPageNumber);
     if (attributes.firstPageNumber === undefined && !used) {
         return {};
     }
@@ -73,8 +76,8 @@ function firstPageNumberToModel(attributes: SaxTag["attributes"]): Pick<PageSetu
  * `<pageSetup>`: the print settings of a worksheet (part of the page setup model, which also holds the margins and the
  * print options). Rendered when a setting is set (values other than the defaults for the enumerations); parsing gives
  * every setting, with Excel's defaults for the absent ones, but `firstPageNumber` and `useFirstPageNumber`: absent for
- * automatic page numbering without a first page number (see firstPageNumberToModel). Parsed literal unions hold the
- * attribute strings of the file, unvalidated.
+ * automatic page numbering without a first page number (see firstPageNumberToModel). An enumeration (`orientation`,
+ * `pageOrder`, `cellComments`, `errors`) that is not one of its values reads as its default.
  */
 class PageSetupXform extends BaseXform<PageSetupModel> {
     get tag(): string {
@@ -112,22 +115,22 @@ class PageSetupXform extends BaseXform<PageSetupModel> {
         switch (node.name) {
             case this.tag: {
                 const { attributes } = node;
-                // the literal unions hold the attribute strings of the file (unvalidated)
+                const { orientation, pageOrder, cellComments, errors } = attributes;
                 this.model = {
                     paperSize: pageSizeToModel(attributes.paperSize),
-                    orientation: (attributes.orientation || "portrait") as PageSetup["orientation"],
+                    orientation: isOrientation(orientation) ? orientation : "portrait",
                     horizontalDpi: parseInt(attributes.horizontalDpi || "4294967295", 10),
                     verticalDpi: parseInt(attributes.verticalDpi || "4294967295", 10),
-                    pageOrder: (attributes.pageOrder || "downThenOver") as PageSetup["pageOrder"],
-                    blackAndWhite: attributes.blackAndWhite === "1",
-                    draft: attributes.draft === "1",
-                    cellComments: (attributes.cellComments || "None") as PageSetup["cellComments"],
-                    errors: (attributes.errors || "displayed") as PageSetup["errors"],
+                    pageOrder: isPageOrder(pageOrder) ? pageOrder : "downThenOver",
+                    blackAndWhite: parseBoolean(attributes.blackAndWhite),
+                    draft: parseBoolean(attributes.draft),
+                    cellComments: isCellComments(cellComments) ? cellComments : "None",
+                    errors: isErrors(errors) ? errors : "displayed",
                     scale: parseInt(attributes.scale || "100", 10),
                     fitToWidth: parseInt(attributes.fitToWidth || "1", 10),
                     fitToHeight: parseInt(attributes.fitToHeight || "1", 10),
                     ...firstPageNumberToModel(attributes),
-                    usePrinterDefaults: attributes.usePrinterDefaults === "1",
+                    usePrinterDefaults: parseBoolean(attributes.usePrinterDefaults),
                     copies: parseInt(attributes.copies || "1", 10),
                 };
                 return true;

@@ -126,7 +126,7 @@ export function valueTypes(cell: ExcelJS.Cell): void {
     const result: ExcelJS.CellFormulaResult | undefined = cell.result;
     cell.value = { error: ExcelJS.ErrorValue.NotApplicable };
     cell.value = { error: "#VALUE!" };
-    // @ts-expect-error -- not an error value of Excel
+    // an error code of a recent version of Excel, as read from a file (both readers keep the code of the file)
     cell.value = { error: "#SPILL!" };
     cell.value = { text: "Sheet2", hyperlink: "#'Sheet2'!A1" };
     cell.value = { sharedFormula: "A2", result: 10 };

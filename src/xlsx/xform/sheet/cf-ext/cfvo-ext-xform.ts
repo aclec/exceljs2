@@ -3,12 +3,12 @@ import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel } from "../../../../types";
 import CompositeXform from "../../composite-xform";
 
-import CfvoXform from "../cf/cfvo-xform";
+import CfvoXform, { cfvoType } from "../cf/cfvo-xform";
 import FExtXform from "./f-ext-xform";
 
 /**
  * `<x14:cfvo type="num"><xm:f>50</xm:f></x14:cfvo>`: a threshold of an x14 data bar or icon set, its value in `<xm:f>`.
- * The parsed `type` is the attribute (unvalidated); an empty `<xm:f>` is the value 0.
+ * A parsed `type` that is absent or unknown is `num`; an empty `<xm:f>` is the value 0.
  */
 class CfvoExtXform extends CompositeXform<CfvoModel> {
     /** The xform of the value. */
@@ -40,8 +40,7 @@ class CfvoExtXform extends CompositeXform<CfvoModel> {
 
     override createNewModel(node: SaxTag): CfvoModel {
         return {
-            // unvalidated ST_CfvoType
-            type: node.attributes.type as CfvoModel["type"],
+            type: cfvoType(node.attributes.type),
         };
     }
 
@@ -49,8 +48,11 @@ class CfvoExtXform extends CompositeXform<CfvoModel> {
         switch (name) {
             case "xm:f": {
                 // the element was opened before its child (createNewModel); <xm:f> holds text
+                const { model } = this;
                 const text = this.fExtXform.model;
-                this.model!.value = text ? CfvoXform.toValue(String(text)) : 0;
+                if (model) {
+                    model.value = text ? CfvoXform.toValue(String(text)) : 0;
+                }
                 break;
             }
         }

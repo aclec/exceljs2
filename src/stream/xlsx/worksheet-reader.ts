@@ -627,10 +627,9 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                 } else if (c.t === "b") {
                     cellValue.result = parseInt(c.v.text, 10) !== 0;
                 } else if (c.t === "e") {
-                    // the error code of the file, kept as is (as CellXform does): Excel writes codes that the
-                    // CellErrorValue union of index.d.ts lacks (#SPILL!, #CALC!, #GETTING_DATA...)
-                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- see above: the union is to be widened in index.d.ts, for both readers at once
-                    cellValue.result = { error: c.v.text } as CellFormulaValue["result"];
+                    // the error code of the file, kept as is (as CellXform does): Excel also writes codes newer than
+                    // the classic ones (#SPILL!, #CALC!, #GETTING_DATA...)
+                    cellValue.result = { error: c.v.text };
                 } else if (c.t === "d") {
                     cellValue.result = parseIsoDate(c.v.text);
                 } else {

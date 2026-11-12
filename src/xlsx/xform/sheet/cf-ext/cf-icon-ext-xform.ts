@@ -2,7 +2,7 @@ import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
 import type { CfIconModel } from "../../../../types";
 import BaseXform from "../../base-xform";
-import { iconIdAttribute, validIconSet } from "../cf/icon-sets";
+import { iconIdAttribute, isIconSet, validIconSet } from "../cf/icon-sets";
 
 /** `<x14:cfIcon iconSet="3Arrows" iconId="0"/>`: a custom icon of an x14 icon set. */
 class CfIconExtXform extends BaseXform<CfIconModel> {
@@ -25,13 +25,16 @@ class CfIconExtXform extends BaseXform<CfIconModel> {
         });
     }
 
-    /** Reads the attributes of the element (the parent delegates `<x14:cfIcon>` only). */
+    /**
+     * Reads the attributes of the element (the parent delegates `<x14:cfIcon>` only). An icon of an unknown (or absent)
+     * icon set is no icon (`NoIcons`, its only icon 0).
+     */
     override parseOpen({ attributes }: SaxTag): void {
-        this.model = {
-            // unvalidated ST_IconSetType
-            iconSet: attributes.iconSet as CfIconModel["iconSet"],
-            iconId: BaseXform.toIntValue(attributes.iconId),
-        };
+        const { iconSet } = attributes;
+        this.model =
+            iconSet !== undefined && isIconSet(iconSet)
+                ? { iconSet, iconId: BaseXform.toIntValue(attributes.iconId) }
+                : { iconSet: "NoIcons", iconId: 0 };
     }
 
     /** @returns `false` at the end of `<x14:cfIcon>` */

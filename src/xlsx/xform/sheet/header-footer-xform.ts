@@ -1,6 +1,7 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { HeaderFooterModel } from "../../../types";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /**
@@ -91,10 +92,10 @@ class HeaderFooterXform extends BaseXform<HeaderFooterModel> {
             case "headerFooter": {
                 const model: HeaderFooterModel = (this.model = {});
                 if (node.attributes.differentFirst) {
-                    model.differentFirst = parseInt(node.attributes.differentFirst, 0) === 1;
+                    model.differentFirst = parseBoolean(node.attributes.differentFirst);
                 }
                 if (node.attributes.differentOddEven) {
-                    model.differentOddEven = parseInt(node.attributes.differentOddEven, 0) === 1;
+                    model.differentOddEven = parseBoolean(node.attributes.differentOddEven);
                 }
                 return true;
             }
@@ -115,10 +116,10 @@ class HeaderFooterXform extends BaseXform<HeaderFooterModel> {
 
     /** Sets the text of the text element being read (the last chunk wins). */
     override parseText(text: string): void {
-        const { currentNode } = this;
-        if (currentNode !== undefined) {
-            // a text element is only read inside <headerFooter>, which created the model
-            this.model![currentNode] = text;
+        // a text element is only read inside <headerFooter>, which created the model
+        const { currentNode, model } = this;
+        if (currentNode !== undefined && model) {
+            model[currentNode] = text;
         }
     }
 
