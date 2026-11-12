@@ -12,9 +12,71 @@ Reverse engineered from Excel spreadsheet files as a project.
 
 # Installation
 
+ExcelJS is published on npm and works with any package manager:
+
 ```shell
 npm install exceljs
+# or
+bun add exceljs
+# or
+pnpm add exceljs
+yarn add exceljs
 ```
+
+Bun is only used to develop ExcelJS itself; it is not required to use the package.
+
+The TypeScript typings (`index.d.ts`) are included. They reference Node's types, so TypeScript
+ projects should have `@types/node` installed as a dev dependency, including projects that only
+ use the browser bundle (or enable `skipLibCheck`).
+
+Upgrading from 4.x? Read [UPGRADE-5.0.md](UPGRADE-5.0.md) and the [CHANGELOG](CHANGELOG.md).
+
+# Requirements
+
+| Environment | Supported versions |
+| ----------- | ------------------ |
+| Node.js     | 22.12 or later |
+| Bun         | 1.4 or later |
+| Browsers    | Modern browsers with ES2020 support, through the prebuilt bundles in `dist/` |
+| TypeScript  | The typings are tested with TypeScript 5.9, 6.0 and 7.0 |
+
+Version 5 no longer ships an ES5 build: `exceljs/dist/es5` has been removed, and neither the
+ package nor the browser bundles need polyfills. Applications that must run on older runtimes
+ (Node.js < 22.12, Internet Explorer) should stay on ExcelJS 4.x.
+
+# Security & limits
+
+ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bounds the work done
+ for a hostile workbook, and a few behaviours changed as a result
+ (see [UPGRADE-5.0.md](UPGRADE-5.0.md) and [SECURITY.md](SECURITY.md)):
+
+* **Grid bounds.** Cell references must lie within the Excel grid: rows 1 to 1,048,576 and columns
+ A to XFD (1 to 16,384). References outside it throw an error, and the `min`/`max` of `<col>`
+ definitions read from a file are clamped to the last column.
+* **Merged cells.** At most 1,048,576 cells (one full column) can be covered by merges in one
+ worksheet. `mergeCells` throws beyond that, and so does loading a file that exceeds it.
+ Checking for overlapping merges takes time proportional to the merged area, not to the number of merges.
+* **Data validations.** Validations read from a file are expanded to one entry per cell in
+ `worksheet.dataValidations.model` until 100,000 cells have been expanded for the worksheet. Ranges
+ that do not fit (for example a whole column) are kept as a single range key such as `'B1:B1048576'`.
+ `sqref` tokens that are not cell references are ignored.
+ `cell.dataValidation` resolves both forms and both are written back to the file.
+* **Defined names.** Defined-name ranges larger than 100,000 cells are kept as a single rectangle
+ instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
+ and column splices, but are not enumerated by `definedNames.forEach()`, and removing a name from any
+ cell of such a range removes the whole range.
+* **Formulas.** Formulas longer than Excel's limit of 8,192 characters are rejected with an error
+ when ExcelJS has to analyse them (translating a shared formula to another cell, `cell.dependencies`)
+ instead of being scanned with regular expressions.
+* **Not handled by ExcelJS (application responsibility):**
+  * **CSV formula injection.** `csv.write`/`csv.writeFile` output cell text as is. Values starting
+   with `=`, `+`, `-`, `@`, tab or carriage return are not neutralised; escape untrusted data
+   before exporting CSV that will be opened in a spreadsheet application.
+  * **Hyperlinks.** Hyperlink targets read from a file (for example `javascript:` or `file:` URLs)
+   are returned unchanged. Validate them before rendering them in HTML or following them.
+  * **Decompressed size.** There is no limit on the decompressed size of the parts of an xlsx
+   file (zip bombs). Limit the size of uploads and consider parsing in a worker or a separate
+   process with a memory limit.
 
 # New Features!
 
@@ -73,6 +135,9 @@ To be clear, all contributions added to this library will be included in the lib
 # Contents
 
 <ul>
+  <li><a href="#installation">Installation</a></li>
+  <li><a href="#requirements">Requirements</a></li>
+  <li><a href="#security--limits">Security &amp; limits</a></li>
   <li><a href="#importing">Importing</a></li>
   <li>
     <a href="#interface">Interface</a>
@@ -181,68 +246,16 @@ To be clear, all contributions added to this library will be included in the lib
 const ExcelJS = require('exceljs');
 ```
 
-## ES5 Imports[⬆](#contents)<!-- Link generated with jump2header -->
-
-To use the ES5 transpiled code, for example for node.js versions older than 10, use the dist/es5 path.
+ES modules and TypeScript:
 
 ```javascript
-const ExcelJS = require('exceljs/dist/es5');
+import ExcelJS from 'exceljs';
+// or, without esModuleInterop
+import * as ExcelJS from 'exceljs';
 ```
 
-**Note:** The ES5 build has an implicit dependency on a number of polyfills which are no longer
- explicitly added by exceljs.
- You will need to add "core-js" and "regenerator-runtime" to your dependencies and
- include the following requires in your code before the exceljs import:
-
-```javascript
-// polyfills required by exceljs
-require('core-js/modules/es.promise');
-require('core-js/modules/es.string.includes');
-require('core-js/modules/es.object.assign');
-require('core-js/modules/es.object.keys');
-require('core-js/modules/es.symbol');
-require('core-js/modules/es.symbol.async-iterator');
-require('regenerator-runtime/runtime');
-
-const ExcelJS = require('exceljs/dist/es5');
-```
-
-For IE 11, you'll also need a polyfill to support unicode regex patterns. For example,
-
-```js
-const rewritePattern = require('regexpu-core');
-const {generateRegexpuOptions} = require('@babel/helper-create-regexp-features-plugin/lib/util');
-
-const {RegExp} = global;
-try {
-  new RegExp('a', 'u');
-} catch (err) {
-  global.RegExp = function(pattern, flags) {
-    if (flags && flags.includes('u')) {
-      return new RegExp(rewritePattern(pattern, flags, generateRegexpuOptions({flags, pattern})));
-    }
-    return new RegExp(pattern, flags);
-  };
-  global.RegExp.prototype = RegExp.prototype;
-}
-```
-
-## Browserify[⬆](#contents)<!-- Link generated with jump2header -->
-
-ExcelJS publishes two browserified bundles inside the dist/ folder:
-
-One with implicit dependencies on core-js polyfills...
-```html
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/6.26.0/polyfill.js"></script>
-<script src="exceljs.js"></script>
-```
-
-And one without...
-```html
-<script src="--your-project's-pollyfills-here--"></script>
-<script src="exceljs.bare.js"></script>
-```
-
+The ES5 build (`exceljs/dist/es5`) and its polyfill requirements were removed in version 5.
+ See <a href="#browser">Browser</a> for the prebuilt browser bundles.
 
 # Interface[⬆](#contents)<!-- Link generated with jump2header -->
 
@@ -298,8 +311,8 @@ Use the second parameter of the addWorksheet function to specify options for the
 For Example:
 
 ```javascript
-// create a sheet with red tab colour
-const sheet = workbook.addWorksheet('My Sheet', {properties:{tabColor:{argb:'FFC0000'}}});
+// create a sheet with a red tab colour (hexadecimal alpha-red-green-blue)
+const sheet = workbook.addWorksheet('My Sheet', {properties:{tabColor:{argb:'FFCC0000'}}});
 
 // create a sheet where the grid lines are hidden
 const sheet = workbook.addWorksheet('My Sheet', {views: [{showGridLines: false}]});
@@ -879,6 +892,8 @@ const html = '<div>' + cell.html + '</div>';
 ```
 
 ## Merged Cells[⬆](#contents)<!-- Link generated with jump2header -->
+
+A worksheet can have at most 1,048,576 merged cells in total (see <a href="#security--limits">Security &amp; limits</a>).
 
 ```javascript
 // merge a range of cells
@@ -2451,10 +2466,10 @@ The constructor takes a required input argument and an optional options argument
 | --------------------- | ----------- |
 | input (required)      | Specifies the name of the file or the readable stream from which to read the XLSX workbook. |
 | options (optional)    | Specifies how to handle the event types occuring during the read parsing. |
-| options.entries       | Specifies whether to emit entries (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
+| options.entries       | Specifies whether to emit entries (`'emit'`) or not (`'ignore'`). Default is `'ignore'`. |
 | options.sharedStrings | Specifies whether to cache shared strings (`'cache'`), which inserts them into the respective cell values, or whether to emit them (`'emit'`) or ignore them (`'ignore'`), in both of which case the cell value will be a reference to the shared string's index. Default is `'cache'`. |
-| options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'cache'`. |
-| options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'cache'`. |
+| options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
+| options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.worksheets    | Specifies whether to emit worksheets (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
 
 ```js
@@ -2466,7 +2481,11 @@ for await (const worksheetReader of workbookReader) {
 }
 ```
 
-Please note that `worksheetReader` returns an array of rows rather than each row individually for performance reasons: https://github.com/nodejs/node/issues/31979
+Iterating a `worksheetReader` yields one row at a time. For performance reasons (https://github.com/nodejs/node/issues/31979), `worksheetReader.parse()` yields arrays of `{eventType, value}` events instead.
+
+If worksheets come before the shared strings in the zip file, the reader spools them to temporary
+ files in `os.tmpdir()` until the shared strings have been read. The temporary files are removed when
+ the iteration ends, including when it is stopped early with `break` or an exception.
 
 ###### Iterating over all events(#contents)<!-- Link generated with jump2header -->
 
@@ -2537,6 +2556,7 @@ For example code using ExcelJS in the browser take a look at the <a href="https:
 ## Prebundled[⬆](#contents)<!-- Link generated with jump2header -->
 
 The following files are pre-bundled and included inside the dist folder.
+ They target ES2020 and need no polyfills.
 
 * exceljs.js
 * exceljs.min.js
@@ -2629,9 +2649,11 @@ An Excel formula for calculating values on the fly.
   Note that while the cell type will be Formula, the cell may have an effectiveType value that will
   be derived from the result value.
 
-Note that ExcelJS cannot process the formula to generate a result, it must be supplied.
-
-Note that function semantic names must be in English and the separator must be a comma.
+Notes:
+* ExcelJS cannot process the formula to generate a result, it must be supplied.
+* Function semantic names must be in English and the separator must be a comma.
+* Do not include a leading `=` in the formula: use `'A1+A2'`, not `'=A1+A2'`.
+* Excel limits formulas to 8,192 characters. ExcelJS throws if it has to translate a longer shared formula.
 
 E.g.
 
@@ -2850,9 +2872,9 @@ Please note: I have tested ExcelJS with bluebird specifically (since up until re
 
 ## Dist Folder[⬆](#contents)<!-- Link generated with jump2header -->
 
-Before publishing this module, the source code is transpiled and otherwise processed
-before being placed in a dist/ folder.
-This README identifies two files - a browserified bundle and minified version.
+Before publishing this module, the source code is bundled for the browser (ES2020)
+and placed in a dist/ folder.
+This README identifies two files - a browser bundle and its minified version.
 No other contents of the dist/ folder are guaranteed in any way other than the file
 specified as "main" in the package.json
 
@@ -3007,7 +3029,7 @@ If any splice operation affects a merged cell, the merge group will not be moved
 | 3.3.0   | <ul> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/892">Fix anchor.js #892</a>. Many thanks to <a href="https://github.com/wwojtkowski">Wojciech Wojtkowski</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/896">add xml:space="preserve" for all whitespaces #896</a>. Many thanks to <a href="https://github.com/sebikeller">Sebastian Keller</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/959">Add `shrinkToFit` to document and typing #959</a>. Many thanks to <a href="https://github.com/mozisan">('3')</a> for this contribution. This fixes <a href="https://github.com/exceljs/exceljs/issues/943">shrinkToFit property not on documentation #943</a>. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/980">#951: Force formula re-calculation on file open from Excel #980</a>. Many thanks to <a href="https://github.com/zymon">zymon</a> for this contribution. This fixes <a href="https://github.com/exceljs/exceljs/issues/951">Force formula re-calculation on file open from Excel #951</a>. </li> <li> Fixed <a href="https://github.com/exceljs/exceljs/issues/989">Lib contains class syntax, not compatible with IE11 #989</a>. </li> </ul> |
 | 3.3.1   | <ul> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1000">Add headerFooter to worksheet model when importing from file #1000</a>. Many thanks to <a href="https://github.com/kigh-ota">Kaiichiro Ota</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1005">Update eslint plugins and configs #1005</a>, <a href="https://github.com/exceljs/exceljs/pull/1006">Drop grunt-lib-phantomjs #1006</a> and <a href="https://github.com/exceljs/exceljs/pull/1007">Rename .browserslintrc.txt to .browserslistrc #1007</a>. Many thanks to <a href="https://github.com/takenspc">Takeshi Kurosawa</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1012">Fix issue #988 #1012</a>. This fixes <a href="https://github.com/exceljs/exceljs/issues/988">Can not read excel file #988</a>. Many thanks to <a href="https://github.com/thambley">Todd Hambley</a> for this contribution. </li> </ul> |
 | 3.4.0   | <ul> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1016">Feature/stream writer add background images #1016</a>. Many thanks to <a href="https://github.com/brunoargolo">brunoargolo</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1019">Fix issue # 991 #1019</a>. This fixes <a href="https://github.com/exceljs/exceljs/issues/991">read csv file issue #991</a>. Many thanks to <a href="https://github.com/LibertyNJ">Nathaniel J. Liberty</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1018">Large excels - optimize performance of writing file by excelJS + optimize generated file (MS excel opens it much faster) #1018</a>. Many thanks to <a href="https://github.com/pzawadzki82">Piotr</a> for this contribution. </li> </ul> |
-| 3.5.0   | <ul> <li> <a href="#conditional-formatting">Conditional Formatting</a> A subset of Excel Conditional formatting has been implemented! Specifically the formatting rules that do not require XML to be rendered inside an &lt;extLst&gt; node, or in other words everything except databar and three icon sets (3Triangles, 3Stars, 5Boxes). These will be implemented in due course </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1030">remove core-js/ import #1030</a>. Many thanks to <a href="https://github.com/bleuscyther">jeffrey n. carre</a> for this contribution. This change is used to create a new browserified bundle artefact that does not include any polyfills. See <a href="#browserify">Browserify</a> for details. </li> </ul> |
+| 3.5.0   | <ul> <li> <a href="#conditional-formatting">Conditional Formatting</a> A subset of Excel Conditional formatting has been implemented! Specifically the formatting rules that do not require XML to be rendered inside an &lt;extLst&gt; node, or in other words everything except databar and three icon sets (3Triangles, 3Stars, 5Boxes). These will be implemented in due course </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1030">remove core-js/ import #1030</a>. Many thanks to <a href="https://github.com/bleuscyther">jeffrey n. carre</a> for this contribution. This change is used to create a new browserified bundle artefact that does not include any polyfills. See <a href="#browser">Browser</a> for details. </li> </ul> |
 | 3.6.0   | <ul> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1042">1041 multiple print areas #1042</a>. Many thanks to <a href="https://github.com/AlexanderPruss">Alexander Pruss</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1058">fix typings for cell.note #1058</a>. Many thanks to <a href="https://github.com/xydens">xydens</a> for this contribution. </li> <li> <a href="#conditional-formatting">Conditional Formatting</a> has been completed. The &lt;extLst&gt; conditional formattings including dataBar and the three iconSet types (3Triangles, 3Stars, 5Boxes) are now available. </li> </ul> |
 | 3.6.1   | <ul> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1047">Clarify merging cells by row/column numbers #1047</a>. Many thanks to <a href="https://github.com/kendallroth">Kendall Roth</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1048">Fix README mistakes concerning freezing views #1048</a>. Many thanks to <a href="https://github.com/overlookmotel">overlookmotel</a> for this contribution. </li> <li> Merged: <ul> <li><a href="https://github.com/exceljs/exceljs/pull/1073">fix issue #1045 horizontalCentered & verticalCentered in page not working #1073</a></li> <li><a href="https://github.com/exceljs/exceljs/pull/1082">Fix the problem of anchor failure of readme_zh.md file #1082</a></li> <li><a href="https://github.com/exceljs/exceljs/pull/1065">Fix problems caused by case of worksheet names #1065</a></li> </ul> Many thanks to <a href="https://github.com/Alanscut">Alan Wang</a> for this contribution. </li> </ul> |
 | 3.7.0   | <ul> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1076">Fix Issue #1075: Unable to read/write defaultColWidth attribute in &lt;sheetFormatPr&gt; node #1076</a>. Many thanks to <a href="https://github.com/kigh-ota">Kaiichiro Ota</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1078">function duplicateRows added #1078</a> and <a href="https://github.com/exceljs/exceljs/pull/1088">Duplicate rows #1088</a>. Many thanks to <a href="https://github.com/cbeltrangomez84">cbeltrangomez84</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1087">Prevent from unhandled promise rejection durning workbook load #1087</a>. Many thanks to <a href="https://github.com/sohai">Wojtek</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1071">fix issue #899 Support for inserting pictures with hyperlinks #1071</a>. Many thanks to <a href="https://github.com/Alanscut">Alan Wang</a> for this contribution. </li> <li> Merged <a href="https://github.com/exceljs/exceljs/pull/1089">Update TS definition to reference proper internal libraries #1089</a>. Many thanks to <a href="https://github.com/jakawell">Jesse Kawell</a> for this contribution. </li> </ul> |

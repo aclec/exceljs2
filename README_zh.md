@@ -10,9 +10,33 @@
 
 # 安装
 
+ExcelJS 发布在 npm 上，可以使用任意包管理器安装：
+
 ```shell
 npm install exceljs
+# 或
+bun add exceljs
+# 或
+pnpm add exceljs
+yarn add exceljs
 ```
+
+TypeScript 类型定义（`index.d.ts`）引用了 Node 的类型，因此 TypeScript 项目需要安装 `@types/node`（仅使用浏览器包时也一样，或者启用 `skipLibCheck`）。
+
+从 4.x 升级？请阅读 [UPGRADE-5.0.md](UPGRADE-5.0.md) 和 [CHANGELOG](CHANGELOG.md)。
+
+# 环境要求
+
+| 环境 | 支持的版本 |
+| ---- | ---------- |
+| Node.js | 22.12 及以上 |
+| Bun | 1.4 及以上 |
+| 浏览器 | 支持 ES2020 的现代浏览器（使用 `dist/` 中预构建的包） |
+| TypeScript | 类型定义已在 TypeScript 5.9、6.0 和 7.0 下测试 |
+
+版本 5 不再提供 ES5 构建：`exceljs/dist/es5` 已被移除，包和浏览器包都不再需要 polyfill。需要支持旧运行环境（Node.js < 22.12、IE）的应用请继续使用 ExcelJS 4.x。
+
+解析不可信文件时的限制和注意事项（合并单元格上限、行列边界、CSV 公式注入等）请参阅英文文档的 [Security & limits](README.md#security--limits) 一节和 [SECURITY.md](SECURITY.md)。
 
 # 新的功能!
 
@@ -176,64 +200,12 @@ npm install exceljs
 const ExcelJS = require('exceljs');
 ```
 
-## ES5 导入[⬆](#目录)<!-- Link generated with jump2header -->
-
-要使用 ES5 编译代码，请使用 *dist/es5* 路径。
-
-```javascript
-const ExcelJS = require('exceljs/dist/es5');
-```
-
-**注意：**ES5 版本对许多 polyfill 都具有隐式依赖，而 exceljs 不再明确添加。
-您需要在依赖项中添加 `core-js` 和 `regenerator-runtime`，并在导入 `exceljs` 之前在代码中包含以下引用：
-
-```javascript
-// exceljs 所需的 polyfills
-require('core-js/modules/es.promise');
-require('core-js/modules/es.string.includes');
-require('core-js/modules/es.object.assign');
-require('core-js/modules/es.object.keys');
-require('core-js/modules/es.symbol');
-require('core-js/modules/es.symbol.async-iterator');
-require('regenerator-runtime/runtime');
-
-const ExcelJS = require('exceljs/dist/es5');
-```
-
-对于 IE 11，您还需要一个 polyfill 以支持 unicode regex 模式。 例如，
-
-```js
-const rewritePattern = require('regexpu-core');
-const {generateRegexpuOptions} = require('@babel/helper-create-regexp-features-plugin/lib/util');
-
-const {RegExp} = global;
-try {
-  new RegExp('a', 'u');
-} catch (err) {
-  global.RegExp = function(pattern, flags) {
-    if (flags && flags.includes('u')) {
-      return new RegExp(rewritePattern(pattern, flags, generateRegexpuOptions({flags, pattern})));
-    }
-    return new RegExp(pattern, flags);
-  };
-  global.RegExp.prototype = RegExp.prototype;
-}
-```
-
 ## 浏览器端[⬆](#目录)<!-- Link generated with jump2header -->
 
-ExcelJS 在 *dist/* 文件夹内发布了两个支持浏览器的包：
+ExcelJS 在 *dist/* 文件夹内发布了预构建的浏览器包（`exceljs.js` 和 `exceljs.min.js`）。它们以 ES2020 为目标，不需要任何 polyfill。
 
-一个是隐式依赖 `core-js` polyfills 的...
 ```html
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/6.26.0/polyfill.js"></script>
-<script src="exceljs.js"></script>
-```
-
-另一个则没有...
-```html
-<script src="--your-project's-pollyfills-here--"></script>
-<script src="exceljs.bare.js"></script>
+<script src="exceljs.min.js"></script>
 ```
 
 
@@ -291,8 +263,8 @@ const sheet = workbook.addWorksheet('My Sheet');
 示例：
 
 ```javascript
-// 创建带有红色标签颜色的工作表
-const sheet = workbook.addWorksheet('My Sheet', {properties:{tabColor:{argb:'FFC0000'}}});
+// 创建带有红色标签颜色的工作表（十六进制 alpha-red-green-blue 格式）
+const sheet = workbook.addWorksheet('My Sheet', {properties:{tabColor:{argb:'FFCC0000'}}});
 
 // 创建一个隐藏了网格线的工作表
 const sheet = workbook.addWorksheet('My Sheet', {views: [{showGridLines: false}]});
@@ -2337,10 +2309,10 @@ await workbook.commit();
 | --------------------- | ----------- |
 | input (必需的)        | 指定从中读取XLSX工作簿的文件或可读流的名称|
 | options (可选的)      | 指定如何处理读取解析期间发生的事件类型 |
-| options.entries       | 指定是否去触发事件(`'emit'`)或者不发出事件(`'ignore'`)，默认值是`'emit'` |
+| options.entries       | 指定是否去触发事件(`'emit'`)或者不发出事件(`'ignore'`)，默认值是`'ignore'` |
 | options.sharedStrings | 指定是否去缓存(`'cache'`)共享字符串，将其插入到相应的单元格值中，或者是否去触发(`'emit'`)或忽略(`'ignore'`)它们，在这两种情况下，单元格值都将是对共享字符串索引的引用。默认值是`'cache'` |
-| options.hyperlinks    | 指定是否去缓存超链接(`'cache'`)，将其插入到相应的单元格值中，是否去触发(`'emit'`)或忽略(`'ignore'`)它们。默认值是`'cache'` |
-| options.styles        | 指定是否去缓存样式(`'cache'`)，将其插入到相应的行或单元格值中，或是否忽略(`'忽略'`)它们。默认值是`'cache'`  |
+| options.hyperlinks    | 指定是否去缓存超链接(`'cache'`)，将其插入到相应的单元格值中，是否去触发(`'emit'`)或忽略(`'ignore'`)它们。默认值是`'ignore'` |
+| options.styles        | 指定是否去缓存样式(`'cache'`)，将其插入到相应的行或单元格值中，或是否忽略(`'ignore'`)它们。默认值是`'ignore'`  |
 | options.worksheets    |指定是否去触发(`'emit'`)或忽略(`'ignore'`)工作表。默认值是`'emit'` |
 
 ```js
@@ -2352,7 +2324,7 @@ for await (const worksheetReader of workbookReader) {
 }
 ```
 
-请注意，由于性能原因，`worksheetReader`返回一个行数组，而不是单独返回每一行: https://github.com/nodejs/node/issues/31979
+迭代 `worksheetReader` 时每次返回一行。出于性能原因（https://github.com/nodejs/node/issues/31979），`worksheetReader.parse()` 返回的是 `{eventType, value}` 事件数组。
 
 ###### 迭代遍历所有事件[⬆](#目录)<!-- Link generated with jump2header -->
 
@@ -2509,6 +2481,8 @@ Enum: `Excel.ValueType.Formula`
 一个 Excel 公式，用于即时计算值。请注意，虽然单元格类型将为“公式”，但该单元格可能具有一个有效类型值，该值将从结果值中得出。
 
 请注意，ExcelJS 无法处理公式以生成结果，必须提供该公式。
+
+请注意，公式前面不要加 `=`：应写 `'A1+A2'`，而不是 `'=A1+A2'`。
 
 例如：
 
