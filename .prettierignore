@@ -1,4 +1,13 @@
-build
-dist
-out
-spec/manual/public/
+# generated output
+/build
+/coverage
+/dist
+/graphify-out
+/node_modules
+/out
+spec/out
+bun.lock
+
+# 200 KB each: proseWrap would rewrap the whole documents
+README.md
+README_zh.md

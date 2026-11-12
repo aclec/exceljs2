@@ -1,0 +1,2 @@
+# run the locally installed lint-staged only (never download a package at commit time)
+node_modules/.bin/lint-staged

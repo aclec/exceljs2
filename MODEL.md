@@ -8,7 +8,7 @@ The workbook and its components define a simple JavaScript Object model which ca
 {
     worksheets: [
         // array of worksheet models
-    ]
+    ];
 }
 ```
 

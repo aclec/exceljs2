@@ -1,99 +1,99 @@
 {
-  "richText": [
-    {
-      "font": {
-        "size": 12,
-        "color": {
-          "theme": 0
+    "richText": [
+        {
+            "font": {
+                "size": 12,
+                "color": {
+                    "theme": 0
+                },
+                "name": "Calibri",
+                "family": 2,
+                "scheme": "minor"
+            },
+            "text": "This is "
         },
-        "name": "Calibri",
-        "family": 2,
-        "scheme": "minor"
-      },
-      "text": "This is "
-    },
-    {
-      "font": {
-        "italic": true,
-        "size": 12,
-        "color": {
-          "theme": 0
+        {
+            "font": {
+                "italic": true,
+                "size": 12,
+                "color": {
+                    "theme": 0
+                },
+                "name": "Calibri",
+                "scheme": "minor"
+            },
+            "text": "a"
         },
-        "name": "Calibri",
-        "scheme": "minor"
-      },
-      "text": "a"
-    },
-    {
-      "font": {
-        "size": 12,
-        "color": {
-          "theme": 1
+        {
+            "font": {
+                "size": 12,
+                "color": {
+                    "theme": 1
+                },
+                "name": "Calibri",
+                "family": 2,
+                "scheme": "minor"
+            },
+            "text": " "
         },
-        "name": "Calibri",
-        "family": 2,
-        "scheme": "minor"
-      },
-      "text": " "
-    },
-    {
-      "font": {
-        "size": 12,
-        "color": {
-          "argb": "FFFF6600"
+        {
+            "font": {
+                "size": 12,
+                "color": {
+                    "argb": "FFFF6600"
+                },
+                "name": "Calibri",
+                "scheme": "minor"
+            },
+            "text": "colorful"
         },
-        "name": "Calibri",
-        "scheme": "minor"
-      },
-      "text": "colorful"
-    },
-    {
-      "font": {
-        "size": 12,
-        "color": {
-          "theme": 1
+        {
+            "font": {
+                "size": 12,
+                "color": {
+                    "theme": 1
+                },
+                "name": "Calibri",
+                "family": 2,
+                "scheme": "minor"
+            },
+            "text": " text "
         },
-        "name": "Calibri",
-        "family": 2,
-        "scheme": "minor"
-      },
-      "text": " text "
-    },
-    {
-      "font": {
-        "size": 12,
-        "color": {
-          "argb": "FFCCFFCC"
+        {
+            "font": {
+                "size": 12,
+                "color": {
+                    "argb": "FFCCFFCC"
+                },
+                "name": "Calibri",
+                "scheme": "minor"
+            },
+            "text": "with"
         },
-        "name": "Calibri",
-        "scheme": "minor"
-      },
-      "text": "with"
-    },
-    {
-      "font": {
-        "size": 12,
-        "color": {
-          "theme": 1
+        {
+            "font": {
+                "size": 12,
+                "color": {
+                    "theme": 1
+                },
+                "name": "Calibri",
+                "family": 2,
+                "scheme": "minor"
+            },
+            "text": " in-cell "
         },
-        "name": "Calibri",
-        "family": 2,
-        "scheme": "minor"
-      },
-      "text": " in-cell "
-    },
-    {
-      "font": {
-        "bold": true,
-        "size": 12,
-        "color": {
-          "theme": 1
-        },
-        "name": "Calibri",
-        "family": 2,
-        "scheme": "minor"
-      },
-      "text": "format"
-    }
-  ]
+        {
+            "font": {
+                "bold": true,
+                "size": 12,
+                "color": {
+                    "theme": 1
+                },
+                "name": "Calibri",
+                "family": 2,
+                "scheme": "minor"
+            },
+            "text": "format"
+        }
+    ]
 }

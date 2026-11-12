@@ -1,14 +1,11 @@
 {
-  "compilerOptions": {
-    "module": "commonjs",
-    "target": "es5",
-    "sourceMap": true,
-    "types": [
-      "node",
-      "mocha"
-    ]
-  },
-  "exclude": [
-    "node_modules"
-  ]
+    "compilerOptions": {
+        "target": "es2022",
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "strict": true,
+        "noEmit": true,
+        "types": ["node", "mocha"]
+    },
+    "include": ["index.d.ts", "spec/typescript/**/*.ts"]
 }

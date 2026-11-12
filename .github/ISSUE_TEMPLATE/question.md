@@ -1,8 +1,8 @@
 ---
 name: 💬 Questions / Help
-title: '[Q] PLEASE USE DISCUSSIONS'
-label: ':speech_balloon: Question'
-about: https://github.com/exceljs/exceljs/discussions/categories/q-a 
+title: "[Q] PLEASE USE DISCUSSIONS"
+label: ":speech_balloon: Question"
+about: https://github.com/exceljs/exceljs/discussions/categories/q-a
 ---
 
 ## 💬 Questions and Help

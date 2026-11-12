@@ -1,0 +1,7 @@
+# Refresh the local graphify code map (graphify-out/, gitignored) in the background after a branch switch.
+# $3 = 1 for branch checkouts (not file checkouts). No-op when graphify is not installed or no graph exists.
+[ "$3" = "1" ] || exit 0
+command -v graphify >/dev/null 2>&1 || exit 0
+[ -d graphify-out ] || exit 0
+mkdir -p "$HOME/.cache"
+nohup graphify update . >"$HOME/.cache/graphify-rebuild.log" 2>&1 </dev/null &

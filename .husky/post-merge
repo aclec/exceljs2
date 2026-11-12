@@ -1,0 +1,6 @@
+# Refresh the local graphify code map (graphify-out/, gitignored) in the background after a merge or pull.
+# No-op when graphify is not installed or no graph was built yet.
+command -v graphify >/dev/null 2>&1 || exit 0
+[ -d graphify-out ] || exit 0
+mkdir -p "$HOME/.cache"
+nohup graphify update . >"$HOME/.cache/graphify-rebuild.log" 2>&1 </dev/null &

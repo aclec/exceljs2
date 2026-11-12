@@ -1,28 +1,14 @@
-// this module allows the specs to switch between source code and
-// transpiled code depending on the environment variable EXCEL_BUILD
+// this module lets the specs require lib modules by path relative to lib/
+// (it used to switch to the transpiled dist/es5 build, which was dropped in v5)
 
-/* eslint-disable import/no-dynamic-require */
-
-const libs = {};
-const basePath = (function() {
-  const nodeMajorVersion = parseInt(process.versions.node.split('.')[0], 10);
-  if (process.env.EXCEL_BUILD === 'es5' || nodeMajorVersion < 10) {
-    require('core-js/modules/es.promise');
-    require('core-js/modules/es.object.assign');
-    require('core-js/modules/es.object.keys');
-    require('core-js/modules/es.symbol');
-    require('core-js/modules/es.symbol.async-iterator');
-    require('regenerator-runtime/runtime');
-    libs.exceljs = require('../../dist/es5');
-    return '../../dist/es5/';
-  }
-  libs.exceljs = require('../../lib/exceljs.nodejs');
-  return '../../lib/';
-})();
+const libs = {
+    exceljs: require("../../lib/exceljs.nodejs"),
+};
+const basePath = "../../lib/";
 
 module.exports = function verquire(path) {
-  if (!libs[path]) {
-    libs[path] = require(basePath + path);
-  }
-  return libs[path];
+    if (!libs[path]) {
+        libs[path] = require(basePath + path);
+    }
+    return libs[path];
 };
