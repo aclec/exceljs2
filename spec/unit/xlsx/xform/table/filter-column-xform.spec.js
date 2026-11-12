@@ -65,6 +65,7 @@ describe('FilterColumnXform', () => {
       '<filterColumn colId="0" hiddenButton="0"><customFilters><customFilter val="a"/></customFilters></filterColumn>'
     );
     expect(await parse('<filterColumn colId="1" hiddenButton="0"/>')).to.deep.equal({
+      colId: '1',
       filterButton: true,
     });
   });
@@ -79,6 +80,6 @@ describe('FilterColumnXform', () => {
         ])
       )
     );
-    expect(model).to.deep.equal({filterButton: true});
+    expect(model).to.deep.equal({colId: '0', filterButton: true});
   });
 });
