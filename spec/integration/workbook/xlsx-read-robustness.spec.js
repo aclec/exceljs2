@@ -395,6 +395,32 @@ describe("xlsx read robustness", function () {
             expect(ws.getImages()).to.have.length(0);
         });
 
+        it("ignores relationships without a Target", async () => {
+            const withBackground = await baseWorkbookBuffer(async (wb, ws) => {
+                ws.addBackgroundImage(wb.addImage({ buffer: PNG, extension: "png" }));
+                ws.addImage(wb.addImage({ buffer: PNG, extension: "png" }), "E5:F6");
+                wb.addWorksheet("Sheet2").getCell("A1").value = "second";
+            });
+            const dropTargets = (xml) => xml.replace(/ Target="[^"]*"/g, "");
+
+            // sheet relationships (drawing, background image) and drawing relationships (image)
+            for (const parts of [[RELS], ["xl/drawings/_rels/drawing1.xml.rels"], [RELS, "xl/drawings/_rels/drawing1.xml.rels"]]) {
+                const patches = Object.fromEntries(parts.map((part) => [part, dropTargets]));
+                const ws = (await load(await tamper(withBackground, patches))).getWorksheet("Sheet1");
+                expect(ws.getCell("A1").value, parts.join()).to.equal("hello");
+                expect(ws.getImages(), parts.join()).to.have.length(0);
+            }
+
+            // workbook relationship of a worksheet: that sheet cannot be located
+            const wb = await load(
+                await tamper(withBackground, {
+                    "xl/_rels/workbook.xml.rels": (xml) => xml.replace(' Target="worksheets/sheet2.xml"', ""),
+                })
+            );
+            expect(wb.getWorksheet("Sheet1").getCell("A1").value).to.equal("hello");
+            expect(wb.getWorksheet("Sheet2")).to.equal(undefined);
+        });
+
         it("ignores a drawing part that is not a spreadsheet drawing", async () => {
             const buffer = await tamper(await richBuffer(), {
                 "xl/drawings/drawing1.xml": () =>
