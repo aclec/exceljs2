@@ -2452,8 +2452,8 @@ export interface XlsxReadOptions extends ZipReadLimits {
 /** The options of `xlsx.load`: {@link XlsxReadOptions}, and `base64` for data given as base64 text. */
 export interface XlsxLoadOptions extends XlsxReadOptions {
     /**
-     * The data is the base64 text of the file: a string, or a Node `Buffer` holding that text (a plain `Uint8Array` is
-     * not decoded as text).
+     * The data is the base64 text of the file: a string, or the bytes of that text (a Buffer, a Uint8Array or any
+     * ArrayBufferView, an ArrayBuffer, an array of byte values, a Blob).
      */
     base64: boolean;
 }
@@ -2521,11 +2521,11 @@ export interface Xlsx<T = Workbook> {
      */
     load(data: ArrayBuffer | ArrayBufferView | Blob | number[], options?: Partial<XlsxReadOptions>): Promise<T>;
     /**
-     * Loads a file into the workbook from its base64 text (`base64: true`): a string, or a Node `Buffer` of that text.
+     * Loads a file into the workbook from its base64 text (`base64: true`): a string, or the bytes of that text.
      * @returns the workbook, once read
      * @throws (rejects) as the other form
      */
-    load(data: string | globalThis.Buffer, options: Partial<XlsxLoadOptions> & { base64: true }): Promise<T>;
+    load(data: string | ArrayBuffer | ArrayBufferView | Blob | number[], options: Partial<XlsxLoadOptions> & { base64: true }): Promise<T>;
 
     /**
      * Writes the workbook as an xlsx file in memory.

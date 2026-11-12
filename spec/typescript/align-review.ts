@@ -31,12 +31,13 @@ range.tl = "B2";
 // @ts-expect-error - getter only: setting it throws
 range.count = 3;
 
-// --- xlsx.load with base64: a string or a Node Buffer of the text, not a plain Uint8Array ---------
+// --- xlsx.load with base64: the text as a string or as its bytes ---------------------------------
 declare const base64Text: string;
 export const fromString: Promise<ExcelJS.Workbook> = workbook.xlsx.load(base64Text, { base64: true });
 export const fromBuffer: Promise<ExcelJS.Workbook> = workbook.xlsx.load(Buffer.from(base64Text), { base64: true });
-// @ts-expect-error - a plain Uint8Array is not decoded as text (its toString() is "85,69,...")
-export const fromBytes = workbook.xlsx.load(new Uint8Array(4), { base64: true });
+export const fromBytes: Promise<ExcelJS.Workbook> = workbook.xlsx.load(new TextEncoder().encode(base64Text), { base64: true });
+// @ts-expect-error - a number is not base64 text
+export const fromNumber = workbook.xlsx.load(12, { base64: true });
 
 // --- ModelContainer: created empty to read a file into it -------------------------------------------
 const container = new ExcelJS.ModelContainer();

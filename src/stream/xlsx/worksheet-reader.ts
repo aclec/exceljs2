@@ -417,7 +417,10 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         }
 
         // references
-        const { sharedStrings, styles, properties } = this.workbook;
+        const { styles, properties } = this.workbook;
+        // with sharedStrings: "cache", a workbook without shared strings part has an empty table: its t="s" cells are
+        // empty, as for xlsx.load ("emit" / "ignore" give the index)
+        const sharedStrings = this.workbook.sharedStrings ?? (this.workbook.options.sharedStrings === "cache" ? [] : undefined);
         const date1904 = Boolean(properties && properties.model && properties.model.date1904);
 
         // xml position

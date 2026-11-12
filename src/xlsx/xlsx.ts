@@ -89,6 +89,28 @@ export interface XlsxWriteOptions {
 /** The data of a workbook to load: the bytes, a Blob (e.g. a File), or a base64 string (`base64` option). */
 export type XlsxLoadData = ZipInput | Blob | string;
 
+/**
+ * The base64 text of `xlsx.load(data, { base64: true })`: a string, or its bytes (a Buffer, any ArrayBufferView, an
+ * ArrayBuffer, an array of byte values or a Blob).
+ *
+ * @throws TypeError for any other value
+ */
+async function base64Text(data: XlsxLoadData): Promise<string> {
+    if (typeof data === "string") {
+        return data;
+    }
+    if (typeof Blob !== "undefined" && data instanceof Blob) {
+        return data.text();
+    }
+    if (Array.isArray(data)) {
+        return new TextDecoder().decode(Uint8Array.from(data));
+    }
+    if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) {
+        return new TextDecoder().decode(data);
+    }
+    throw new TypeError("Can't read the base64 text of the file: expected a string, a Buffer, a Uint8Array, an ArrayBuffer or a Blob");
+}
+
 // the parts that xlsx.ts deletes from the read model once reconciled
 type ReadState = Partial<
     Pick<
@@ -470,13 +492,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
      * (rows, columns, merged cells...: see the invariants of CLAUDE.md)
      */
     async load(data: XlsxLoadData, options?: XlsxLoadOptions): Promise<TWorkbook> {
-        let buffer: XlsxLoadData;
-        if (options && options.base64) {
-            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- a base64 string (or its Buffer), as it always was
-            buffer = Buffer.from(data.toString(), "base64");
-        } else {
-            buffer = data;
-        }
+        const buffer: XlsxLoadData = options && options.base64 ? Buffer.from(await base64Text(data), "base64") : data;
 
         // keyed by the names of the parts (zip entry names): no prototype (CLAUDE.md invariant)
         const model: XlsxReadModel = {

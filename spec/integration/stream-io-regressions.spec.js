@@ -1,6 +1,6 @@
 // Regressions of the streaming writer / reader found while typing src/stream (TypeScript port).
 const { PassThrough, Readable } = require("stream");
-const { baseWorkbookBuffer, tamper, readPart } = require("../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, readPart, editParts } = require("../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -69,6 +69,24 @@ describe("stream I/O regressions", () => {
     });
 
     describe("WorkbookReader", () => {
+        it('gives the t="s" cells of a workbook without shared strings part an empty value (sharedStrings: "cache"), as xlsx.load does', async () => {
+            const base = await baseWorkbookBuffer();
+            const buffer = editParts(base, (parts) => {
+                delete parts["xl/sharedStrings.xml"];
+            });
+            const loaded = new ExcelJS.Workbook();
+            await loaded.xlsx.load(buffer);
+            expect(loaded.getWorksheet("Sheet1").getCell("A1").value).to.equal(null);
+
+            const values = [];
+            for await (const ws of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]))) {
+                for await (const row of ws) {
+                    values.push(row.getCell(1).value);
+                }
+            }
+            expect(values).to.deep.equal([null]);
+        });
+
         it('reads a cell with a hyperlink listed before <sheetData> (hyperlinks: "cache") without losing its value', async () => {
             const base = await baseWorkbookBuffer((wb, ws) => {
                 ws.getCell("A2").value = { text: "link", hyperlink: "http://example.com/" };
