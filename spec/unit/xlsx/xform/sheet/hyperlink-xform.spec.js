@@ -58,9 +58,18 @@ describe("HyperlinkXform", () => {
         });
 
         it("reads legacy unprefixed sheet references as a place in the workbook", () => {
-            ["Sheet1!A1", "'My Sheet'!B2", "'It''s'!A1", "My Sheet!$B$2", "Data.2024!A1:B20", "'a/b#c'!XFD1048576"].forEach((target) =>
-                expect(HyperlinkXform.getLocation(target), target).to.equal(target)
-            );
+            [
+                "Sheet1!A1",
+                "'My Sheet'!B2",
+                "'It''s'!A1",
+                "My Sheet!$B$2",
+                "Data.2024!A1:B20",
+                "'a/b#c'!XFD1048576",
+                // sheet names may hold ' (not first or last) and #
+                "Bob's!A1",
+                "Q#1!B2",
+                "Bob's #2!A1:B2",
+            ].forEach((target) => expect(HyperlinkXform.getLocation(target), target).to.equal(target));
         });
 
         it("reads URLs and paths whose tail looks like a sheet reference as external", () => {
@@ -78,8 +87,19 @@ describe("HyperlinkXform", () => {
                 "Sheet1!A1x",
                 "Sheet1!ABCD1",
                 "'unterminated!A1",
+                "Bob'!A1",
+                "'Bob!A1",
                 undefined,
             ].forEach((target) => expect(HyperlinkXform.getLocation(target), target).to.equal(undefined));
+        });
+
+        it("tells legacy references from URLs in linear time", () => {
+            ["'", "a", "a'", "'a", "''", "a#", "#'"].forEach((unit) => {
+                const target = `${unit.repeat(10000)}!A1x`;
+                const start = Date.now();
+                HyperlinkXform.getLocation(target);
+                expect(Date.now() - start, JSON.stringify(unit)).to.be.below(50);
+            });
         });
     });
 });
