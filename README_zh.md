@@ -733,7 +733,7 @@ const rowSize = row.cellCount;
 const numValues = row.actualCellCount;
 ```
 
-## Add Rows[⬆](#contents)<!-- Link generated with jump2header -->
+## Add Rows[⬆](#目录)<!-- Link generated with jump2header -->
 
 ```javascript
 // Add a couple of Rows by key-value, after the last current row, using the column keys
@@ -875,7 +875,7 @@ const insertedRowsOriginal = worksheet.insertRows(1, rows, 'o');
 | value/s    | The new row/s values |  |
 | style            | 'i' for inherit from row above, , 'i+' to include empty cells, 'o' for original style, 'o+' to include empty cells, 'n' for none | *'n'* |
 
-## Splice[⬆](#contents)<!-- Link generated with jump2header -->
+## Splice[⬆](#目录)<!-- Link generated with jump2header -->
 
 ```javascript
 // Cut one or more rows (rows below are shifted up)
@@ -1549,7 +1549,7 @@ ws.getCell('A4').fill = {
 | fgColor  | N        | 指定图案前景色。默认为黑色。 |
 | bgColor  | N        | 指定图案背景色。默认为白色。 |
 
-**有效模式类型**
+<a id="有效模式类型"></a>**有效模式类型**
 
 * none
 * solid

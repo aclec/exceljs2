@@ -78,6 +78,9 @@ describe("HyperlinkXform", () => {
                 "https://x/#!a1",
                 "https://example.com/#!page1",
                 "http://example.com?x!A1",
+                // relative links to another workbook: a file name with an extension before the #
+                "Book2.xlsx#Sheet1!A1",
+                "report v1.2.xlsm#'My Sheet'!B2",
                 "mailto:a@b",
                 "mailto:a!b1",
                 "file:///c:/x.xlsx#Sheet!A1",

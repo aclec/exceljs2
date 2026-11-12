@@ -3,7 +3,7 @@ const ExcelJS = verquire("exceljs");
 describe("github issues", () => {
     it("pull request 1262 - protect should work with streaming workbook writer", async () => {
         const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
-            filename: "./test.xlsx",
+            filename: "./spec/out/test-pr-1262.xlsx",
         });
 
         const sheet = workbook.addWorksheet("data");
@@ -22,7 +22,7 @@ describe("github issues", () => {
 
         // read in file and ensure sheetProtection is there:
         const checkBook = new ExcelJS.Workbook();
-        await checkBook.xlsx.readFile("./test.xlsx");
+        await checkBook.xlsx.readFile("./spec/out/test-pr-1262.xlsx");
 
         const checkSheet = checkBook.getWorksheet("data");
         expect(checkSheet.sheetProtection.spinCount).to.equal(1);

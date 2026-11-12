@@ -10,7 +10,7 @@ describe("pull request  2244", () => {
                 extension: "jpeg",
             });
             worksheet.addImage(imageId1, "B2:D6");
-            await workbook.xlsx.writeFile("test.xlsx");
+            await workbook.xlsx.writeFile("./spec/out/test-pr-2244.xlsx");
         }
         let error;
         try {

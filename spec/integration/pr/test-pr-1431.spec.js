@@ -13,7 +13,7 @@ describe("github issues", () => {
         ];
 
         const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
-            filename: "./test.xlsx",
+            filename: "./spec/out/test-pr-1431.xlsx",
             useSharedStrings: true,
         });
 
@@ -24,7 +24,7 @@ describe("github issues", () => {
         await workbook.commit();
 
         return new Promise((resolve, reject) => {
-            const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader("./test.xlsx", {
+            const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader("./spec/out/test-pr-1431.xlsx", {
                 entries: "emit",
                 hyperlinks: "cache",
                 sharedStrings: "cache",

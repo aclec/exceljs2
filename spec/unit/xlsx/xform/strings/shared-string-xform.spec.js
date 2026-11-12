@@ -153,6 +153,17 @@ const expectations = [
 describe("SharedStringXform", () => {
     testXformHelper(expectations);
 
+    it("reads an empty <si/> as an empty string (re-saved as text, not [object Object])", async () => {
+        const { Readable } = require("stream");
+        const parseSax = verquire("utils/parse-sax");
+        for (const xml of ["<si/>", "<si></si>", '<si><rPh sb="0" eb="1"><t>x</t></rPh></si>']) {
+            const xform = new SharedStringXform();
+            const model = await xform.parse(parseSax(Readable.from([xml])));
+            expect(model, xml).to.equal("");
+            expect(new SharedStringXform().toXml(model), xml).not.to.include("object");
+        }
+    });
+
     it("escapes _xHHHH_ sequences in linear time", () => {
         ["_", "_x", "_x0041", "_x0041_", "_x00_"].forEach((unit) => {
             const text = unit.repeat(10000);
