@@ -36,8 +36,9 @@ describe('github issues', () => {
     });
 
     it('applies a filterColumn to the column named by its colId', async () => {
-      const table = await loadWithFilterColumns('<filterColumn colId="2" hiddenButton="0"/>');
-      expect(table.columns.map(column => Boolean(column.filterButton))).to.deep.equal([false, false, true]);
+      // columns without a filterColumn keep the default (visible) button
+      const table = await loadWithFilterColumns('<filterColumn colId="2" hiddenButton="1"/>');
+      expect(table.columns.map(column => Boolean(column.filterButton))).to.deep.equal([true, true, false]);
     });
 
     it('does not touch Array.prototype for a hostile colId', async () => {
