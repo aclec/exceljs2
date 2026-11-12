@@ -1,13 +1,18 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { TableStyleProperties } from "../../../../index";
 import BaseXform from "../base-xform";
 
-class TableStyleInfoXform extends BaseXform {
-    get tag() {
+/**
+ * The style of a table, `<tableStyleInfo name showFirstColumn...>`: the table style is `theme` in the model (`null` when
+ * absent).
+ */
+class TableStyleInfoXform extends BaseXform<TableStyleProperties> {
+    get tag(): string {
         return "tableStyleInfo";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: TableStyleProperties): void {
         xmlStream.leafNode(this.tag, {
             name: model.theme ? model.theme : undefined,
             showFirstColumn: model.showFirstColumn ? "1" : "0",
@@ -15,14 +20,15 @@ class TableStyleInfoXform extends BaseXform {
             showRowStripes: model.showRowStripes ? "1" : "0",
             showColumnStripes: model.showColumnStripes ? "1" : "0",
         });
-        return true;
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<tableStyleInfo>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === this.tag) {
             const { attributes } = node;
             this.model = {
-                theme: attributes.name ? attributes.name : null,
+                // unvalidated
+                theme: attributes.name ? (attributes.name as TableStyleProperties["theme"]) : null,
                 showFirstColumn: attributes.showFirstColumn === "1",
                 showLastColumn: attributes.showLastColumn === "1",
                 showRowStripes: attributes.showRowStripes === "1",
@@ -33,9 +39,9 @@ class TableStyleInfoXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

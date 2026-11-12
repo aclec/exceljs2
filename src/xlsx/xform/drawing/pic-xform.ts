@@ -1,6 +1,7 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { DrawingPictureModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 import StaticXform from "../static-xform";
 
 import BlipFillXform from "./blip-fill-xform";
@@ -9,7 +10,25 @@ import ExtLstXform from "./ext-lst-xform";
 
 import spPrJSON from "./sp-pr";
 
-class PicXform extends BaseXform {
+/** The prepare options of a picture (from DrawingXform.prepare). */
+export interface PicPrepareOptions {
+    /** The 0-based index of the anchor in its drawing. */
+    readonly index: number;
+    /** The N of `drawingN`. */
+    readonly drawingNumber?: number;
+}
+
+/**
+ * A picture, `<xdr:pic>` (CT_Picture order: nvPicPr, blipFill, spPr). Parsed as the merge of the models of its children:
+ * `{ hyperlinks?, rId }`.
+ */
+class PicXform extends BaseXform<DrawingPictureModel> {
+    declare map: {
+        readonly "xdr:nvPicPr": NvPicPrXform;
+        readonly "xdr:blipFill": BlipFillXform;
+        readonly "xdr:spPr": StaticXform;
+    };
+
     constructor() {
         super();
 
@@ -20,26 +39,29 @@ class PicXform extends BaseXform {
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "xdr:pic";
     }
 
-    prepare(model, options) {
-        model.index = options.index + 1;
-        model.creationId = ExtLstXform.creationId(options.drawingNumber || 0, model.index);
+    /** Sets the 1-based `index` of the picture and its `creationId`. */
+    override prepare(model: DrawingPictureModel, options: PicPrepareOptions): void {
+        const index = options.index + 1;
+        model.index = index;
+        model.creationId = ExtLstXform.creationId(options.drawingNumber || 0, index);
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: DrawingPictureModel): void {
         xmlStream.openNode(this.tag);
 
         this.map["xdr:nvPicPr"].render(xmlStream, model);
         this.map["xdr:blipFill"].render(xmlStream, model);
-        this.map["xdr:spPr"].render(xmlStream, model);
+        this.map["xdr:spPr"].render(xmlStream);
 
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element inside `<xdr:pic>` is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -48,22 +70,32 @@ class PicXform extends BaseXform {
             case this.tag:
                 this.reset();
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.mergeModel(this.parser.model);
+                // the static <xdr:spPr> has no model; a child without its element's content has a null model
+                const { parser } = this;
+                if (parser === this.map["xdr:nvPicPr"]) {
+                    this.mergeModel(this.map["xdr:nvPicPr"].model ?? {});
+                } else if (parser === this.map["xdr:blipFill"]) {
+                    this.mergeModel(this.map["xdr:blipFill"].model ?? {});
+                } else {
+                    this.mergeModel({});
+                }
                 this.parser = undefined;
             }
             return true;

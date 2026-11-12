@@ -1,15 +1,41 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
+import type { SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { ListItemOptions, StyleLookup, TableColumnModel, TableModel } from "../../../types";
 
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 import ListXform from "../list-xform";
 
 import AutoFilterXform from "./auto-filter-xform";
 import TableColumnXform from "./table-column-xform";
 import TableStyleInfoXform from "./table-style-info-xform";
 
-class TableXform extends BaseXform {
+/** The reconcile options of a {@link TableXform}: the parsed styles (for the dxfs of the columns). */
+export interface TableReconcileOptions {
+    readonly styles: StyleLookup;
+}
+
+/**
+ * A table part, `xl/tables/tableN.xml` (CT_Table order: autoFilter, tableColumns, tableStyleInfo), see
+ * {@link TableModel}. The auto filter is written only with a header row; parsing sets the `filterButton` of the columns
+ * from it.
+ */
+class TableXform extends BaseXform<TableModel> {
+    /** The namespaces of `<table>`. */
+    static readonly TABLE_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+        "mc:Ignorable": "xr xr3",
+        "xmlns:xr": "http://schemas.microsoft.com/office/spreadsheetml/2014/revision",
+        "xmlns:xr3": "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3",
+        // 'xr:uid': '{00000000-000C-0000-FFFF-FFFF00000000}',
+    };
+
+    declare map: {
+        readonly autoFilter: AutoFilterXform;
+        readonly tableColumns: ListXform<TableColumnModel>;
+        readonly tableStyleInfo: TableStyleInfoXform;
+    };
+
     constructor() {
         super();
 
@@ -25,16 +51,17 @@ class TableXform extends BaseXform {
         };
     }
 
-    prepare(model, options) {
+    /** Sets the `colId` (filter) and `id` of the columns. */
+    override prepare(model: TableModel, options: ListItemOptions): void {
         this.map.autoFilter.prepare(model);
         this.map.tableColumns.prepare(model.columns, options);
     }
 
-    get tag() {
+    get tag(): string {
         return "table";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: TableModel): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode(this.tag, {
             ...TableXform.TABLE_ATTRIBUTES,
@@ -52,12 +79,14 @@ class TableXform extends BaseXform {
             this.map.autoFilter.render(xmlStream, model);
         }
         this.map.tableColumns.render(xmlStream, model.columns);
-        this.map.tableStyleInfo.render(xmlStream, model.style);
+        // (the document table defaults the style of a table: see Table.validate)
+        this.map.tableStyleInfo.render(xmlStream, model.style!);
 
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element of the part is accepted (unknown ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -67,31 +96,36 @@ class TableXform extends BaseXform {
             case this.tag:
                 this.reset();
                 this.model = {
-                    name: attributes.name,
+                    // name is required (CT_Table); the values are unvalidated
+                    name: attributes.name!,
                     displayName: attributes.displayName || attributes.name,
                     tableRef: attributes.ref,
                     totalsRow: attributes.totalsRowCount === "1",
                     // headerRowCount defaults to 1 and Excel omits it
                     headerRow: attributes.headerRowCount !== "0",
+                    // set when the element closes
+                    columns: [],
                 };
                 break;
-            default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
+            default: {
+                const parser = ownEntry(this.map, node.name);
+                this.parser = parser;
+                if (parser) {
+                    parser.parseOpen(node);
                 }
                 break;
+            }
         }
         return true;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -99,47 +133,47 @@ class TableXform extends BaseXform {
             return true;
         }
         switch (name) {
-            case this.tag:
-                this.model.columns = this.map.tableColumns.model;
-                if (this.map.autoFilter.model) {
-                    this.model.autoFilterRef = this.map.autoFilter.model.autoFilterRef;
+            case this.tag: {
+                // the model was created when the element opened; the children were reset then (null when absent)
+                const model = this.model!;
+                // a malformed table without <tableColumns> has null columns (see TableModel)
+                const columns = this.map.tableColumns.model as TableColumnModel[];
+                model.columns = columns;
+                const autoFilter = this.map.autoFilter.model;
+                if (autoFilter) {
+                    model.autoFilterRef = autoFilter.autoFilterRef;
                     // with an autoFilter every column shows its button unless a filterColumn hides it
-                    (this.model.columns || []).forEach((column) => {
+                    for (const column of columns || []) {
                         column.filterButton = true;
-                    });
+                    }
                     // filterColumns are sparse: match them to table columns by colId
-                    this.map.autoFilter.model.columns.forEach((filterColumn) => {
-                        const column = this.model.columns && this.model.columns[parseInt(filterColumn.colId, 10)];
+                    for (const filterColumn of autoFilter.columns) {
+                        const column = columns && columns[BaseXform.toIntValue(filterColumn.colId, NaN)];
                         if (column) {
                             column.filterButton = filterColumn.filterButton;
                         }
-                    });
+                    }
                 }
-                this.model.style = this.map.tableStyleInfo.model;
+                model.style = this.map.tableStyleInfo.model;
                 return false;
+            }
             default:
                 // could be some unrecognised tags
                 return true;
         }
     }
 
-    reconcile(model, options) {
+    /** Resolves the `dxfId` of each column (an index into the dxfs of the styles part) to its `style`. */
+    override reconcile(model: TableModel, options: TableReconcileOptions): void {
         // fetch the dfxs from styles
         model.columns.forEach((column) => {
             if (column.dxfId !== undefined) {
-                column.style = options.styles.getDxfStyle(column.dxfId);
+                // parsed: the attribute string (a number on write)
+                const dxfId = typeof column.dxfId === "number" ? column.dxfId : parseInt(column.dxfId, 10);
+                column.style = options.styles.getDxfStyle(dxfId);
             }
         });
     }
 }
-
-TableXform.TABLE_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
-    "mc:Ignorable": "xr xr3",
-    "xmlns:xr": "http://schemas.microsoft.com/office/spreadsheetml/2014/revision",
-    "xmlns:xr3": "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3",
-    // 'xr:uid': '{00000000-000C-0000-FFFF-FFFF00000000}',
-};
 
 export default TableXform;

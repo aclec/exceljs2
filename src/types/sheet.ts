@@ -217,9 +217,8 @@ export type WorksheetMediumModel =
     | { type: "image"; imageId: number | string; range: ImageRangeModel; hyperlinks?: ImageHyperlinkModel };
 
 /**
- * The drawing part of a worksheet. Write (worksheet-xform prepare): `{ rId, name: "drawingN", anchors, rels }`; parse:
- * `{ anchors }`. PARTIAL: the anchor model is refined by the drawing xforms (anchorType, picture.index / creationId on
- * write; picture.rId / medium on read).
+ * The drawing part of a worksheet (drawing/drawing-xform). Write (worksheet-xform prepare): `{ rId, name: "drawingN",
+ * anchors, rels }`; parse: `{ anchors }`.
  */
 export interface DrawingModel {
     rId?: string;
@@ -228,34 +227,75 @@ export interface DrawingModel {
     rels?: RelationshipModel[];
 }
 
-/** One anchor of a drawing (PARTIAL, see {@link DrawingModel}). */
+/**
+ * The picture of a drawing anchor (drawing/pic-xform). Write: `{ rId, hyperlinks? }` (worksheet-xform prepare), then
+ * `index` / `creationId` (pic-xform prepare). Parse: `{ hyperlinks?, rId }` (`<a:hlinkClick>`, `<a:blip r:embed>`).
+ */
+export interface DrawingPictureModel {
+    /** The relationship id of the image (from the drawing part); a parsed `<a:blip>` may lack it. */
+    rId?: string;
+    hyperlinks?: ImageHyperlinkModel;
+    /** prepare: the 1-based index of the picture in its drawing (`id` and name of `<xdr:cNvPr>`). */
+    index?: number;
+    /** prepare: the GUID-shaped `a16:creationId`, unique in the workbook. */
+    creationId?: string;
+}
+
+/**
+ * One anchor of a drawing: a picture over a range of cells (drawing/two-cell-anchor-xform, one-cell-anchor-xform).
+ * The values parsed from a malformed file are not validated: an element absent from the anchor leaves `null` in its
+ * place (`tl`, `br`, `ext`, the values of a cell position, `picture`); the cell of a position is clamped to the grid.
+ */
 export interface DrawingAnchorModel {
     range: ImageRangeModel;
-    picture?: { rId: string; hyperlinks?: ImageHyperlinkModel; index?: number; creationId?: number | string };
+    picture?: DrawingPictureModel;
+    /** prepare: the element, from the range (`br`: two-cell). */
     anchorType?: "xdr:twoCellAnchor" | "xdr:oneCellAnchor";
     /** reconcile: the workbook medium of the picture. */
     medium?: MediaModel;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Tables (PARTIAL)
+// Tables
+
+/** A `<customFilter val operator>` of a filter column (table/custom-filter-xform). */
+export interface CustomFilterModel {
+    val?: string;
+    operator?: string;
+}
+
+/** A `<filter val>` of a filter column (table/filter-xform). */
+export interface FilterModel {
+    val?: string;
+}
 
 /**
- * A table column as the xforms see it: index.d.ts `TableColumnProperties` plus the write-side ids (`id`, `colId`, `dxfId`)
- * and the parse-side `dxfId` (a string). PARTIAL: refined by the table xforms.
+ * A `<filterColumn colId hiddenButton>` of the auto filter of a table (table/filter-column-xform): `colId` is the
+ * 0-based index of the column in the table (set by prepare; a string as written).
  */
-export type TableColumnModel = TableColumnProperties & {
-    id?: number;
+export interface FilterColumnModel {
     colId?: string;
-    dxfId?: number | string;
-    style?: DxfModel;
-};
+    filterButton?: boolean;
+    customFilters?: CustomFilterModel[];
+}
+
+/**
+ * A table column as the xforms see it: index.d.ts `TableColumnProperties` (its `style` is the dxf of the column) plus
+ * the write-side ids (`id`: 1-based, set by table-column-xform prepare; `colId`: see {@link FilterColumnModel}; `dxfId`:
+ * set by worksheet-xform prepare) and the parse-side `dxfId` (a string, resolved to `style` by table-xform reconcile).
+ */
+export type TableColumnModel = Omit<TableColumnProperties, "style"> &
+    FilterColumnModel & {
+        id?: number;
+        dxfId?: number | string;
+        style?: DxfModel;
+    };
 
 /**
  * A table (src/doc/table.ts `Table.model`, table-xform). Write: the validated document table plus `tableRef`,
  * `autoFilterRef`, `tl`, then `target` / `id` (xlsx.ts) and `rId` (worksheet-xform). Parse: `{ name, displayName,
- * tableRef, totalsRow, headerRow, columns, autoFilterRef?, style }`, without `ref` / `rows` / `tl`.
- * PARTIAL: refined by the table xforms.
+ * tableRef, totalsRow, headerRow, columns, autoFilterRef?, style }`, without `ref` / `rows` / `tl`; `style` is `null`
+ * without `<tableStyleInfo>`; a malformed file without `<tableColumns>` has `columns: null` (unvalidated).
  */
 export interface TableModel {
     name: string;
@@ -265,7 +305,7 @@ export interface TableModel {
     autoFilterRef?: string;
     headerRow?: boolean;
     totalsRow?: boolean;
-    style?: TableStyleProperties;
+    style?: TableStyleProperties | null;
     columns: TableColumnModel[];
     rows?: unknown[][];
     tl?: { row: number; col: number; address?: string };
