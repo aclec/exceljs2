@@ -28,14 +28,20 @@ describe("Cell value markers", () => {
             expect(ws.getCell("A2").text).to.equal("false");
         });
 
-        it("without text, or with a target that is not a string, is a JSON value", () => {
+        it("without text (or a null one) is a hyperlink on a cell without value, as read from a file", () => {
             ws.getCell("A1").value = { hyperlink: "https://example.com" };
-            ws.getCell("A2").value = { text: "a", hyperlink: 1 };
             ws.getCell("A3").value = { text: null, hyperlink: "https://example.com" };
-            for (const address of ["A1", "A2", "A3"]) {
-                expect(ws.getCell(address).type).to.equal(ValueType.String);
+            for (const address of ["A1", "A3"]) {
+                expect(ws.getCell(address).type, address).to.equal(ValueType.Hyperlink);
+                expect(ws.getCell(address).value, address).to.deep.equal({ hyperlink: "https://example.com" });
+                expect(ws.getCell(address).text, address).to.equal("");
             }
-            expect(ws.getCell("A1").text).to.equal('{"hyperlink":"https://example.com"}');
+        });
+
+        it("with a target that is not a string is a JSON value", () => {
+            ws.getCell("A2").value = { text: "a", hyperlink: 1 };
+            expect(ws.getCell("A2").type).to.equal(ValueType.String);
+            expect(ws.getCell("A2").text).to.equal('{"text":"a","hyperlink":1}');
         });
 
         it("is written and read back with an empty text", async () => {

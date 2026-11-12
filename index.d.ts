@@ -575,10 +575,10 @@ export interface CellRichTextValue {
 export interface CellHyperlinkValue {
     /**
      * The value shown: any value of a cell, such as a number or a rich text (a hyperlink read from a file shows the value
-     * of its cell, whatever its type); `cell.text` is its text, as for a cell of that value. It may be empty (`""`), not
-     * null.
+     * of its cell, whatever its type); `cell.text` is its text, as for a cell of that value. Absent for a hyperlink on a
+     * cell without value (as read from a file; `cell.text` is then `""`).
      */
-    text: string | number | boolean | Date | CellErrorValue | CellRichTextValue;
+    text?: string | number | boolean | Date | CellErrorValue | CellRichTextValue;
     hyperlink: string;
     tooltip?: string;
 }
@@ -645,7 +645,7 @@ export interface CellSharedStringValue {
  * the cell.
  *
  * The kind of an object value is told by its marker properties, by their presence and type (an empty text or formula,
- * a shared string 0 count), in this order: a `text` (not null) and a string `hyperlink` (hyperlink), a string `formula`
+ * a shared string 0 count), in this order: a string `hyperlink` (hyperlink, with its `text` if any), a string `formula`
  * or `sharedFormula` (formula; an empty formula is a formula cell without formula, `formulaType` None), an array
  * `richText`, a number `sharedString`, a string `error`. Any other object (outside this type: an untyped value, such as
  * one returned by the CSV `map` option) is held as a JSON value: its type is String, it is returned as is, and it is

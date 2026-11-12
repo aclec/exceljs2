@@ -13,11 +13,15 @@ declare const column: ExcelJS.Column;
 
 // --- cell values -----------------------------------------------------------------------------------------------------
 export function cellValues(): void {
-    // a hyperlink shows any value (a loaded one shows the value of its cell)
+    // a hyperlink shows any value (a loaded one shows the value of its cell), or none (a hyperlink on a cell without value)
+    cell.value = { hyperlink: "https://example.com" };
     cell.value = { text: 42, hyperlink: "https://example.com" };
     cell.value = { text: { richText: [{ text: "x", font: { bold: true } }] }, hyperlink: "#Sheet1!A1", tooltip: "t" };
     type HyperlinkText = Assert<
-        Equals<ExcelJS.CellHyperlinkValue["text"], string | number | boolean | Date | ExcelJS.CellErrorValue | ExcelJS.CellRichTextValue>
+        Equals<
+            ExcelJS.CellHyperlinkValue["text"],
+            string | number | boolean | Date | ExcelJS.CellErrorValue | ExcelJS.CellRichTextValue | undefined
+        >
     >;
 
     // a formula master: shared or array, with its range

@@ -84,8 +84,11 @@ export interface DateCellModel extends CellModelBase {
 /** A hyperlink. */
 export interface HyperlinkCellModel extends CellModelBase {
     type: typeof ValueType.Hyperlink;
-    /** The value shown: a string from the application; on read, the value of the cell, whatever its type. */
-    text: string | number | boolean | Date | CellErrorValue | RichTextValue;
+    /**
+     * The value shown: a string from the application; on read, the value of the cell, whatever its type (absent for a
+     * hyperlink on a cell without value, or on a formula without cached result).
+     */
+    text?: string | number | boolean | Date | CellErrorValue | RichTextValue;
     /** The link target. */
     hyperlink: string;
     tooltip?: string;

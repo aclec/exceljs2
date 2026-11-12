@@ -79,12 +79,22 @@ describe("Cell invalid values", () => {
             }).to.throw("Invalid rich text value");
         });
 
-        it("throws for an error value of an unknown code", () => {
+        it("keeps every error code, also the ones newer than the classic seven (Excel writes #SPILL!, #CALC!...)", () => {
+            for (const error of ["#REF!", "#SPILL!", "#CALC!", "#GETTING_DATA", "#BLOCKED!"]) {
+                ws.getCell("A1").value = { error };
+                expect(ws.getCell("A1").type, error).to.equal(ValueType.Error);
+                expect(ws.getCell("A1").value, error).to.deep.equal({ error });
+                ws.getCell("A2").value = { formula: "SEQUENCE(2)", result: { error } };
+                expect(ws.getCell("A2").result, error).to.deep.equal({ error });
+                ws.getCell("A3").value = { text: { error }, hyperlink: "https://example.com" };
+                expect(ws.getCell("A3").text, error).to.equal(error);
+            }
+        });
+
+        it("throws for an error value whose code is not a string", () => {
             expect(() => {
-                ws.getCell("A1").value = { error: "#FOO" };
-            }).to.throw("Invalid error value: #FOO is not an error code");
-            ws.getCell("A1").value = { error: "#REF!" };
-            expect(ws.getCell("A1").type).to.equal(ValueType.Error);
+                ws.getCell("A1").value = { formula: "A2", result: { error: 7 } };
+            }).to.throw("Invalid formula value");
         });
     });
 

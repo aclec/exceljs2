@@ -8,7 +8,7 @@
 import type { CellErrorValue, Comment, Style } from "../../index";
 import colCache from "../utils/col-cache";
 import { escapeHtml } from "../utils/under-dash";
-import { ErrorValue as ErrorCode, FormulaType, ValueType } from "./enums";
+import { FormulaType, ValueType } from "./enums";
 import { slideFormula, checkFormulaLength } from "../utils/shared-formula";
 import Note from "./note";
 import type DataValidations from "./data-validations";
@@ -38,9 +38,12 @@ import type {
 /** The name of a style property of a cell, row or column (`cell.font = ...`). */
 export type StyleName = keyof Style;
 
-/** The value of a hyperlink cell: index.d.ts `CellHyperlinkValue` (a loaded cell's text may be any value). */
+/**
+ * The value of a hyperlink cell: index.d.ts `CellHyperlinkValue` (a loaded cell's text may be any value, and is absent
+ * for a hyperlink on a cell without value).
+ */
 export interface HyperlinkValueObject {
-    text: HyperlinkCellModel["text"];
+    text?: HyperlinkCellModel["text"];
     hyperlink: string;
     tooltip?: string | undefined;
 }
@@ -69,7 +72,7 @@ export interface SharedStringRef {
  * text). Setting `undefined` empties the cell (the value is then `null`).
  *
  * The kind of value is told by its type, then by its marker properties (their presence and type, not their truthiness),
- * in this order: a `text` (not null) and a string `hyperlink` (hyperlink), a string `formula` or `sharedFormula`
+ * in this order: a string `hyperlink` (hyperlink, with its `text` if any), a string `formula` or `sharedFormula`
  * (formula), an array `richText`, a number `sharedString`, a string `error`.
  */
 export type CellValue =
@@ -854,10 +857,10 @@ class HyperlinkValue implements CellValueHolder {
 
     /** `{ text, hyperlink, tooltip? }` (a new object). */
     get value(): HyperlinkValueObject {
-        const v: HyperlinkValueObject = {
-            text: this.model.text,
-            hyperlink: this.model.hyperlink,
-        };
+        const v: HyperlinkValueObject = { hyperlink: this.model.hyperlink };
+        if (this.model.text !== undefined) {
+            v.text = this.model.text;
+        }
         if (this.model.tooltip) {
             v.tooltip = this.model.tooltip;
         }
@@ -1002,9 +1005,13 @@ function richTextText(value: RichTextObject): string {
 
 /**
  * The text shown by a hyperlink: its text as the cell of that value would show it (a string as is, the `toString()` of
- * a number, a boolean or a date, the code of an error, the runs of a rich text).
+ * a number, a boolean or a date, the code of an error, the runs of a rich text; empty for a hyperlink read from a file
+ * on a cell without value).
  */
 function hyperlinkText(text: HyperlinkCellModel["text"]): string {
+    if (text === undefined) {
+        return "";
+    }
     if (typeof text === "string") {
         return text;
     }
@@ -1372,17 +1379,13 @@ type AnyValue =
 // =============================================================================
 // Creation of the value holders
 
-/** The error codes of a cell value (`{ error }`, index.d.ts `CellErrorValue`). */
-const errorCodes: ReadonlySet<string> = new Set<string>(Object.values(ErrorCode));
-
-/** Whether a string is an error code (`"#N/A"`, `"#REF!"`...). */
-function isErrorCode(code: string): code is CellErrorValue["error"] {
-    return errorCodes.has(code);
-}
-
-/** Whether a value is an error value: an object whose `error` is an error code. */
+/**
+ * Whether a value is an error value: an object whose `error` is a string. Any code is kept as written (index.d.ts
+ * `CellErrorValue`): besides the classic seven, Excel writes `#SPILL!`, `#CALC!`, `#GETTING_DATA`... and the readers keep
+ * the code of the file.
+ */
 function isCellErrorValue(value: unknown): value is CellErrorValue {
-    return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string" && isErrorCode(value.error);
+    return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string";
 }
 
 /**
@@ -1449,7 +1452,10 @@ function hyperlinkModel(
     hyperlink: string,
     tooltip: string | undefined
 ): HyperlinkCellModel {
-    const model: HyperlinkCellModel = { address, type: ValueType.Hyperlink, text, hyperlink };
+    const model: HyperlinkCellModel = { address, type: ValueType.Hyperlink, hyperlink };
+    if (text !== undefined) {
+        model.text = text;
+    }
     if (tooltip) {
         model.tooltip = tooltip;
     }
@@ -1472,12 +1478,14 @@ function objectHolder(cell: Cell, address: string, value: object): AnyValue {
     if (value instanceof String) {
         return new StringValue({ address, type: ValueType.String, value: value.valueOf() });
     }
-    if ("hyperlink" in value && typeof value.hyperlink === "string" && "text" in value && value.text !== undefined && value.text !== null) {
-        if (!isHyperlinkText(value.text)) {
+    if ("hyperlink" in value && typeof value.hyperlink === "string") {
+        // without text (or a null one): a hyperlink on a cell without value, as read from a file
+        const text = "text" in value && value.text !== null ? value.text : undefined;
+        if (text !== undefined && !isHyperlinkText(text)) {
             throw new Error(`Invalid hyperlink value: its text must be ${RESULT_TYPES}, or a rich text`);
         }
         const tooltip = optionalField("hyperlink", "tooltip", "tooltip" in value ? value.tooltip : undefined, isString, "a string");
-        return new HyperlinkValue(hyperlinkModel(address, value.text, value.hyperlink, tooltip));
+        return new HyperlinkValue(hyperlinkModel(address, text, value.hyperlink, tooltip));
     }
     if (
         ("formula" in value && typeof value.formula === "string") ||
@@ -1514,10 +1522,7 @@ function objectHolder(cell: Cell, address: string, value: object): AnyValue {
     if (isSharedStringRef(value)) {
         return new SharedStringValue({ address, type: ValueType.SharedString, value });
     }
-    if ("error" in value && typeof value.error === "string") {
-        if (!isCellErrorValue(value)) {
-            throw new Error(`Invalid error value: ${value.error} is not an error code (${[...errorCodes].join(", ")})`);
-        }
+    if (isCellErrorValue(value)) {
         return new ErrorValue({ address, type: ValueType.Error, value });
     }
     return new JSONValue({ address, type: ValueType.String, value: JSON.stringify(value), rawValue: value });
