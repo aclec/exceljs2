@@ -1,3 +1,9 @@
+/// <reference types="node" />
+
+import { EventEmitter } from 'events';
+
+// Binary data returned by ExcelJS (a Node Buffer in Node/Bun, a Buffer polyfill in the browser bundle).
+// Kept ArrayBuffer-compatible so that results can be passed to browser APIs such as Blob.
 declare interface Buffer extends ArrayBuffer { }
 
 export declare enum RelationshipType {
@@ -305,8 +311,10 @@ export type DataValidationOperator =
 	| 'between' | 'notBetween' | 'equal' | 'notEqual' | 'greaterThan' | 'lessThan'
 	| 'greaterThanOrEqual' | 'lessThanOrEqual';
 
+export type DataValidationType = 'list' | 'whole' | 'decimal' | 'date' | 'textLength' | 'custom';
+
 export interface DataValidation {
-	type: 'list' | 'whole' | 'decimal' | 'date' | 'textLength' | 'custom';
+	type: DataValidationType;
 	formulae: any[];
 	allowBlank?: boolean;
 	operator?: DataValidationOperator;
@@ -399,6 +407,8 @@ export type CellValue =
 	}
 
 	export type CommentEditAs = 'twoCells' | 'oneCells' | 'absolute';
+
+	export type ImageEditAs = 'twoCell' | 'oneCell' | 'absolute';
 
 	export interface Comment {
 		texts?: RichText[];
@@ -523,7 +533,10 @@ export interface RowModel {
 export interface Row extends Style {
 	readonly worksheet: Worksheet;
 	readonly hasValues: boolean;
-	readonly dimensions: number;
+	/**
+	 * The min and max column numbers of the non-empty cells, or null if the row is empty
+	 */
+	readonly dimensions: { min: number; max: number } | null;
 	model: Partial<RowModel> | null;
 	/**
 	 * Set a specific row height
@@ -536,10 +549,13 @@ export interface Row extends Style {
 	hidden: boolean;
 
 	/**
-	 * Get a row as a sparse array
+	 * Get a row as a sparse array (index 0 is unused: column A is at index 1)
 	 */
-	// readonly values: CellValue[];
-	values: CellValue[] | { [key: string]: CellValue };
+	get values(): CellValue[];
+	/**
+	 * Set the row's values from a contiguous or sparse array, or from an object keyed by column key
+	 */
+	set values(value: CellValue[] | { [key: string]: CellValue });
 
 	/**
 	 * Set an outline level for rows
@@ -632,9 +648,9 @@ export interface Column {
 	style: Partial<Style>;
 
 	/**
-	 * The cell values in the column
+	 * The cell values in the column, as a sparse array indexed by row number
 	 */
-	values: CellValue;
+	values: CellValue[];
 
 	/**
 	 * Column letter key
@@ -888,7 +904,7 @@ export interface Image {
 	extension: 'jpeg' | 'png' | 'gif';
 	base64?: string;
 	filename?: string;
-	buffer?: Buffer;
+	buffer?: Buffer | globalThis.Buffer;
 }
 export interface IAnchor {
 	col: number;
@@ -996,7 +1012,9 @@ export interface WorksheetModel {
 }
 export type WorksheetState = 'visible' | 'hidden' | 'veryHidden';
 
-export type CellIsOperators = 'equal' | 'greaterThan' | 'lessThan' | 'between';
+export type CellIsOperators =
+	| 'equal' | 'notEqual' | 'greaterThan' | 'greaterThanOrEqual' | 'lessThan' | 'lessThanOrEqual'
+	| 'between' | 'notBetween';
 
 export type ContainsTextOperators = 'containsText' | 'containsBlanks' | 'notContainsBlanks' | 'containsErrors' | 'notContainsErrors';
 
@@ -1014,7 +1032,10 @@ export interface Cvfo {
 	value?: number;
 }
 export interface ConditionalFormattingBaseRule {
-	priority: number;
+	/**
+	 * Rules without a priority are given one (after the highest existing priority) when written
+	 */
+	priority?: number;
 	style?: Partial<Style>;
 }
 export interface ExpressionRuleType extends ConditionalFormattingBaseRule {
@@ -1078,6 +1099,14 @@ export interface DataBarRuleType extends ConditionalFormattingBaseRule {
 	axisPosition?: 'auto' | 'middle' | 'none';
 	direction?: 'context' | 'leftToRight' | 'rightToLeft';
 	cfvo?: Cvfo[];
+	/**
+	 * Colour of the bars
+	 */
+	color?: Partial<Color>;
+	borderColor?: Partial<Color>;
+	negativeFillColor?: Partial<Color>;
+	negativeBorderColor?: Partial<Color>;
+	axisColor?: Partial<Color>;
 }
 
 export type ConditionalFormattingRule = ExpressionRuleType | CellIsRuleType | Top10RuleType | AboveAverageRuleType | ColorScaleRuleType | IconSetRuleType
@@ -1167,7 +1196,7 @@ export interface Worksheet {
 	 * Cut one or more columns (columns to the right are shifted left)
 	 * and optionally insert more
 	 *
-	 * If column properties have been definde, they will be cut or moved accordingly
+	 * If column properties have been defined, they will be cut or moved accordingly
 	 *
 	 * Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
 	 *
@@ -1218,7 +1247,7 @@ export interface Worksheet {
 	spliceRows(start: number, count: number, ...insert: any[][]): void;
 
 	/**
-	 * Add a couple of Rows by key-value, after the last current row, using the column keys,
+	 * Add a row by key-value, after the last current row, using the column keys,
 	 * or add a row by contiguous Array (assign to columns A, B & C)
 	 */
 	addRow(data: any[] | any, style?: string): Row;
@@ -1337,7 +1366,7 @@ export interface Worksheet {
 	 * Using the image id from `Workbook.addImage`,
 	 * embed an image within the worksheet to cover a range
 	 */
-	addImage(imageId: number, range: string | { editAs?: string; } & ImageRange & { hyperlinks?: ImageHyperlinkValue } | { editAs?: string; } & ImagePosition & { hyperlinks?: ImageHyperlinkValue }): void;
+	addImage(imageId: number, range: string | { editAs?: ImageEditAs; } & ImageRange & { hyperlinks?: ImageHyperlinkValue } | { editAs?: ImageEditAs; } & ImagePosition & { hyperlinks?: ImageHyperlinkValue }): void;
 
 	getImages(): Array<{
 		type: 'image',
@@ -1352,7 +1381,7 @@ export interface Worksheet {
 	/**
 	 * Worksheet protection
 	 */
-	protect(password: string, options: Partial<WorksheetProtection>): Promise<void>;
+	protect(password?: string, options?: Partial<WorksheetProtection>): Promise<void>;
 	unprotect(): void;
 
 	/**
@@ -1484,10 +1513,10 @@ export interface Xlsx {
 	read(stream: import('stream').Stream, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
 
 	/**
-	 * load from an array buffer
+	 * load from a Buffer, an ArrayBuffer or a Uint8Array
 	 * @param buffer
 	 */
-	load(buffer: Buffer, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
+	load(buffer: Buffer | Uint8Array, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
 
 	/**
 	 * write to a buffer
@@ -1592,11 +1621,6 @@ export interface Csv {
 	read(stream: import('stream').Stream, options?: Partial<CsvReadOptions>): Promise<Worksheet>;
 
 	/**
-	 * Create input stream for reading
-	 */
-	createInputStream(options?: Partial<CsvReadOptions>): import('events').EventEmitter;
-
-	/**
 	 * write to a buffer
 	 */
 	writeBuffer(options?: Partial<CsvWriteOptions>): Promise<Buffer>;
@@ -1622,8 +1646,8 @@ export interface Media {
 export interface Address {
 	sheetName?: string;
 	address: string;
-	col: string;
-	row: string;
+	col: number;
+	row: number;
 	$col$row: string;
 }
 
@@ -1782,10 +1806,10 @@ export class Workbook {
 
 export interface TableStyleProperties {
 	/**
-	 * The colour theme of the table
+	 * The colour theme of the table, or null for no table style
 	 * @default 'TableStyleMedium2'
 	 */
-	theme?: 'TableStyleDark1' | 'TableStyleDark10' | 'TableStyleDark11' | 'TableStyleDark2' | 'TableStyleDark3' | 'TableStyleDark4' | 'TableStyleDark5' | 'TableStyleDark6' | 'TableStyleDark7' | 'TableStyleDark8' | 'TableStyleDark9' | 'TableStyleLight1' | 'TableStyleLight10' | 'TableStyleLight11' | 'TableStyleLight12' | 'TableStyleLight13' | 'TableStyleLight14' | 'TableStyleLight15' | 'TableStyleLight16' | 'TableStyleLight17' | 'TableStyleLight18' | 'TableStyleLight19' | 'TableStyleLight2' | 'TableStyleLight20' | 'TableStyleLight21' | 'TableStyleLight3' | 'TableStyleLight4' | 'TableStyleLight5' | 'TableStyleLight6' | 'TableStyleLight7' | 'TableStyleLight8' | 'TableStyleLight9' | 'TableStyleMedium1' | 'TableStyleMedium10' | 'TableStyleMedium11' | 'TableStyleMedium12' | 'TableStyleMedium13' | 'TableStyleMedium14' | 'TableStyleMedium15' | 'TableStyleMedium16' | 'TableStyleMedium17' | 'TableStyleMedium18' | 'TableStyleMedium19' | 'TableStyleMedium2' | 'TableStyleMedium20' | 'TableStyleMedium21' | 'TableStyleMedium22' | 'TableStyleMedium23' | 'TableStyleMedium24' | 'TableStyleMedium25' | 'TableStyleMedium26' | 'TableStyleMedium27' | 'TableStyleMedium28' | 'TableStyleMedium3' | 'TableStyleMedium4' | 'TableStyleMedium5' | 'TableStyleMedium6' | 'TableStyleMedium7' | 'TableStyleMedium8' | 'TableStyleMedium9';
+	theme?: null | 'TableStyleDark1' | 'TableStyleDark10' | 'TableStyleDark11' | 'TableStyleDark2' | 'TableStyleDark3' | 'TableStyleDark4' | 'TableStyleDark5' | 'TableStyleDark6' | 'TableStyleDark7' | 'TableStyleDark8' | 'TableStyleDark9' | 'TableStyleLight1' | 'TableStyleLight10' | 'TableStyleLight11' | 'TableStyleLight12' | 'TableStyleLight13' | 'TableStyleLight14' | 'TableStyleLight15' | 'TableStyleLight16' | 'TableStyleLight17' | 'TableStyleLight18' | 'TableStyleLight19' | 'TableStyleLight2' | 'TableStyleLight20' | 'TableStyleLight21' | 'TableStyleLight3' | 'TableStyleLight4' | 'TableStyleLight5' | 'TableStyleLight6' | 'TableStyleLight7' | 'TableStyleLight8' | 'TableStyleLight9' | 'TableStyleMedium1' | 'TableStyleMedium10' | 'TableStyleMedium11' | 'TableStyleMedium12' | 'TableStyleMedium13' | 'TableStyleMedium14' | 'TableStyleMedium15' | 'TableStyleMedium16' | 'TableStyleMedium17' | 'TableStyleMedium18' | 'TableStyleMedium19' | 'TableStyleMedium2' | 'TableStyleMedium20' | 'TableStyleMedium21' | 'TableStyleMedium22' | 'TableStyleMedium23' | 'TableStyleMedium24' | 'TableStyleMedium25' | 'TableStyleMedium26' | 'TableStyleMedium27' | 'TableStyleMedium28' | 'TableStyleMedium3' | 'TableStyleMedium4' | 'TableStyleMedium5' | 'TableStyleMedium6' | 'TableStyleMedium7' | 'TableStyleMedium8' | 'TableStyleMedium9';
 	/**
 	  * Highlight the first column (bold)
 	  * @default false
@@ -2014,27 +2038,50 @@ export namespace stream {
 		}
 
 		class WorkbookReader extends Workbook {
-			constructor(input: string | import('stream').Stream, options: Partial<WorkbookStreamReaderOptions>);
-			read(): Promise<void>;
+			constructor(input: string | import('stream').Stream, options?: Partial<WorkbookStreamReaderOptions>);
+			read(input?: string | import('stream').Stream, options?: Partial<WorkbookStreamReaderOptions>): Promise<void>;
 			[Symbol.asyncIterator](): AsyncGenerator<WorksheetReader>;
-			parse(): AsyncIterator<any>;
+			parse(input?: string | import('stream').Stream, options?: Partial<WorkbookStreamReaderOptions>): AsyncIterator<any>;
 		}
 
+		/**
+		 * At runtime the WorkbookReader is an EventEmitter ('worksheet', 'shared-strings',
+		 * 'hyperlinks', 'entry', 'end', 'finished', 'error')
+		 */
+		interface WorkbookReader extends EventEmitter {}
+
 		interface WorksheetReaderOptions {
-			workbook: Workbook;
-			id: number;
-			entry: import('stream').Stream;
+			workbook: WorkbookReader;
+			id: number | string;
+			iterator: AsyncIterable<any>;
 			options: WorkbookStreamReaderOptions;
 		}
 
-		class WorksheetReader {
+		class WorksheetReader extends EventEmitter {
 			constructor(options: WorksheetReaderOptions);
+			readonly workbook: WorkbookReader;
+			/**
+			 * The sheetId from the workbook, or the sheet file number (a string) if the
+			 * worksheet could not be matched to the workbook
+			 */
+			id: number | string;
+			/**
+			 * The worksheet name (`Sheet<id>` if the worksheet could not be matched to the workbook)
+			 */
+			name: string;
+			state?: WorksheetState;
+			/**
+			 * The dimensions of the rows read so far
+			 */
+			readonly dimensions: Range;
+			/**
+			 * The column definitions, or null if none have been read (or created by getColumn)
+			 */
+			readonly columns: Column[] | null;
 			read(): Promise<void>;
 			[Symbol.asyncIterator](): AsyncGenerator<Row>;
 			parse(): AsyncIterator<Array<any>>;
-			dimensions(): number;
-			columns(): number;
-			getColumn(c: number): Column;
+			getColumn(c: number | string): Column;
 		}
 	}
 }
