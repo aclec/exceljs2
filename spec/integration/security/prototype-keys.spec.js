@@ -206,6 +206,62 @@ describe("prototype-named keys in xlsx parts", function () {
         expect(await writeUnrelatedWorkbook()).to.equal("hello");
     });
 
+    describe("treats ids named like Object.prototype members as unknown", () => {
+        it("a sheet relationship id", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                "xl/workbook.xml": (xml) => xml.replace(/r:id="rId\d+"/, 'r:id="constructor"'),
+            });
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer); // used to throw a TypeError on the inherited constructor
+            expect(wb.worksheets).to.have.length(0);
+        });
+
+        it("a shared formula index", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                "xl/worksheets/sheet1.xml": (xml) =>
+                    xml.replace("</sheetData>", '<row r="5"><c r="A5"><f t="shared" si="toString"/><v>1</v></c></row></sheetData>'),
+            });
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer);
+            expect(wb.getWorksheet("Sheet1").getCell("A5").value).to.deep.equal({ result: 1 });
+            await wb.xlsx.writeBuffer(); // used to throw on a missing shared formula master
+        });
+
+        it("a background image target", async () => {
+            const base = await baseWorkbookBuffer((wb, ws) => {
+                ws.addBackgroundImage(wb.addImage({ filename: "./spec/integration/data/image.png", extension: "png" }));
+            });
+            const buffer = await tamper(base, {
+                "xl/worksheets/_rels/sheet1.xml.rels": (xml) => xml.replace(/\.\.\/media\/[^"]+/, "../media/constructor"),
+            });
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer);
+            expect(wb.getWorksheet("Sheet1").getBackgroundImageId()).to.equal(undefined);
+            await wb.xlsx.writeBuffer(); // used to reject on the inherited Object constructor
+        });
+
+        it("a cell reference looked up in the streamed hyperlinks", async () => {
+            const base = await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B2").value = { text: "x", hyperlink: "http://example.com/" };
+            });
+            const buffer = await tamper(base, {
+                "xl/worksheets/sheet1.xml": (xml) => xml.replace('r="A1"', 'r="toString"'),
+            });
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), { hyperlinks: "cache", sharedStrings: "cache" });
+            const cells = [];
+            for await (const ws of reader) {
+                for await (const row of ws) {
+                    // used to throw: the inherited toString was taken for the cell's hyperlink
+                    row.eachCell((cell) => cells.push([cell.value, cell.hyperlink]));
+                }
+            }
+            expect(cells).to.deep.equal([
+                ["hello", undefined],
+                ["x", undefined],
+            ]);
+        });
+    });
+
     it("leaves the global prototypes untouched for every attribute of every part (document and streaming readers)", async () => {
         const cases = attributeCases(texts);
         expect(cases.length).to.be.above(200);
