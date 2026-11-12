@@ -1096,12 +1096,24 @@ export interface ConditionalFormattingBaseRule {
 export interface ExpressionRuleType extends ConditionalFormattingBaseRule {
     type: "expression";
     formulae?: any[];
+    /**
+     * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
+     * other sheets (always done when a formula contains a sheet reference such as Other!A1).
+     * Set on the rules read from that extension only.
+     */
+    x14?: boolean;
 }
 
 export interface CellIsRuleType extends ConditionalFormattingBaseRule {
     type: "cellIs";
     formulae?: any[];
     operator?: CellIsOperators;
+    /**
+     * Write the rule in the x14 extension of the worksheet, as Excel does for formulae that reference
+     * other sheets (always done when a formula contains a sheet reference such as Other!A1).
+     * Set on the rules read from that extension only.
+     */
+    x14?: boolean;
 }
 
 export interface Top10RuleType extends ConditionalFormattingBaseRule {

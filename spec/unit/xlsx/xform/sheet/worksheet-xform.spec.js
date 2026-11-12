@@ -5,6 +5,7 @@ const testXformHelper = require("../test-xform-helper");
 const Enums = verquire("doc/enums");
 const XmlStream = verquire("utils/xml-stream");
 const WorksheetXform = verquire("xlsx/xform/sheet/worksheet-xform");
+const RelType = verquire("xlsx/rel-type");
 
 const SharedStringsXform = verquire("xlsx/xform/strings/shared-strings-xform");
 const StylesXform = verquire("xlsx/xform/style/styles-xform");
@@ -187,5 +188,93 @@ describe("WorksheetXform", () => {
         expect(iConditionalFormatting).not.to.equal(-1);
         expect(iDataValidations).not.to.equal(-1);
         expect(iConditionalFormatting).to.be.lessThan(iDataValidations);
+    });
+
+    describe("formula conditional formats that Excel writes in the x14 extension", () => {
+        const X14_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        const XM_NS = "http://schemas.microsoft.com/office/excel/2006/main";
+
+        function renderSheet(conditionalFormattings) {
+            const xform = new WorksheetXform();
+            const model = JSON.parse(JSON.stringify(require("./data/sheet.4.0.json")));
+            model.conditionalFormattings = conditionalFormattings;
+            const xmlStream = new XmlStream();
+            const options = {
+                styles: new StylesXform(true),
+                sharedStrings: new SharedStringsXform(),
+                hyperlinks: [],
+            };
+            xform.prepare(model, options);
+            xform.render(xmlStream, model);
+            return xmlStream.xml;
+        }
+
+        const fill = { type: "pattern", pattern: "solid", bgColor: { argb: "FFFFFF00" } };
+
+        it("writes a rule referencing another sheet in the extension only, after the other parts", () => {
+            const xml = renderSheet([
+                {
+                    ref: "A1:A5",
+                    rules: [
+                        { type: "expression", formulae: ["A1>1"], style: { fill } },
+                        { type: "expression", formulae: ["'Other sheet'!$A$1=A1"], style: { fill } },
+                    ],
+                },
+                { ref: "B1:B5", rules: [{ type: "cellIs", operator: "greaterThan", formulae: ["Other!$B$1"], style: { fill } }] },
+            ]);
+
+            // the main section keeps the same-sheet rule only
+            expect(xml).to.include(
+                '<conditionalFormatting sqref="A1:A5"><cfRule type="expression" dxfId="0" priority="1"><formula>A1&gt;1</formula></cfRule></conditionalFormatting>'
+            );
+            expect(xml).not.to.include('<conditionalFormatting sqref="B1:B5">');
+            expect(xml.match(/<cfRule /g)).to.have.length(1);
+
+            const dxf = '<x14:dxf><fill><patternFill patternType="solid"><bgColor rgb="FFFFFF00"/></patternFill></fill></x14:dxf>';
+            const id = "\\{[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}\\}";
+            const escape = (text) => text.replace(/[$()[\]{}|*+?.^\\]/g, "\\$&");
+            const extLst = new RegExp(
+                `${escape(`<extLst><ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}" xmlns:x14="${X14_NS}"><x14:conditionalFormattings>`)}` +
+                    `${escape(`<x14:conditionalFormatting xmlns:xm="${XM_NS}">`)}` +
+                    `<x14:cfRule type="expression" priority="2" id="${id}">` +
+                    `${escape(`<xm:f>&apos;Other sheet&apos;!$A$1=A1</xm:f>${dxf}</x14:cfRule><xm:sqref>A1:A5</xm:sqref></x14:conditionalFormatting>`)}` +
+                    `${escape(`<x14:conditionalFormatting xmlns:xm="${XM_NS}">`)}` +
+                    `<x14:cfRule type="cellIs" priority="3" operator="greaterThan" id="${id}">` +
+                    `${escape(`<xm:f>Other!$B$1</xm:f>${dxf}</x14:cfRule><xm:sqref>B1:B5</xm:sqref></x14:conditionalFormatting>`)}` +
+                    `${escape("</x14:conditionalFormattings></ext></extLst></worksheet>")}$`
+            );
+            expect(xml).to.match(extLst);
+        });
+
+        it("writes a rule flagged x14 in the extension, and a same-sheet rule in the main section only", () => {
+            const flagged = renderSheet([{ ref: "A1", rules: [{ type: "expression", x14: true, formulae: ["A1=1"] }] }]);
+            expect(flagged).not.to.include("<conditionalFormatting");
+            expect(flagged).to.match(/<x14:cfRule type="expression" priority="1" id="\{[0-9A-F-]+\}"><xm:f>A1=1<\/xm:f><\/x14:cfRule>/);
+
+            const local = renderSheet([{ ref: "A1", rules: [{ type: "expression", formulae: ['A1="Hi!"'] }] }]);
+            expect(local).to.include('<conditionalFormatting sqref="A1"><cfRule type="expression" priority="1">');
+            expect(local).not.to.include("extLst");
+        });
+    });
+
+    it("indexes hyperlinks by the cell references of the file without inheriting Object.prototype members", () => {
+        const xform = new WorksheetXform();
+        const model = {
+            hyperlinks: [
+                { address: "__proto__", rId: "rId1" },
+                { address: "B2", target: "Sheet2!A1" },
+            ],
+            relationships: [{ Id: "rId1", Type: RelType.Hyperlink, Target: "http://example.com/", TargetMode: "External" }],
+            rows: [],
+            conditionalFormattings: [],
+        };
+        const options = { styles: new StylesXform(true) };
+        xform.reconcile(model, options);
+
+        const { hyperlinkMap } = options;
+        expect(Object.getOwnPropertyDescriptor(hyperlinkMap, "__proto__").value).to.equal("http://example.com/");
+        expect(hyperlinkMap.B2).to.equal("#Sheet2!A1");
+        expect(hyperlinkMap.toString).to.equal(undefined);
+        expect(hyperlinkMap.constructor).to.equal(undefined);
     });
 });
