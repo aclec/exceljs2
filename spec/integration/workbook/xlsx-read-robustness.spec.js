@@ -172,6 +172,18 @@ describe('xlsx read robustness', function() {
       expect(ws.getCell('B1').value).to.equal('2024-02-30');
       expect(ws.getCell('C1').value).to.deep.equal({formula: 'A1', result: 'soon'});
     });
+
+    it('keeps falsy formula results', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('A2').value = {formula: '1-1', result: 0};
+        ws.getCell('B2').value = {formula: '1=2', result: false};
+        ws.getCell('C2').value = {formula: '""', result: ''};
+      });
+      const ws = (await load(buffer)).getWorksheet('Sheet1');
+      expect(ws.getCell('A2').value).to.deep.equal({formula: '1-1', result: 0});
+      expect(ws.getCell('B2').value).to.deep.equal({formula: '1=2', result: false});
+      expect(ws.getCell('C2').value).to.deep.equal({formula: '""', result: ''});
+    });
   });
 
   describe('worksheet relationships', () => {
