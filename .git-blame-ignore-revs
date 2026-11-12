@@ -1,5 +1,8 @@
 # Commits listed here are skipped by `git blame` (and by GitHub's blame view).
 # Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
 #
-# It will list the single repository-wide Prettier reformatting commit (made after the
-# v5 modernisation branches are merged), so that blame keeps pointing at the real authors.
+# Repository-wide Prettier reformatting commit (v5 modernisation), so that blame keeps
+# pointing at the real authors.
+
+# style: format the code base with the maintainer's Prettier config
+eaedba416093bb863df40ddbfdbd8160c5726caa

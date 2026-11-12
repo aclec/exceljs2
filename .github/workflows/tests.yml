@@ -131,9 +131,7 @@ jobs:
                   bun-version: ${{ env.BUN_VERSION }}
             - run: bun install --frozen-lockfile
             - run: bun run lint
-            # TODO: drop continue-on-error once the repository-wide Prettier commit has landed
             - run: bun run format:check
-              continue-on-error: true
 
     audit:
         name: Dependency audit
