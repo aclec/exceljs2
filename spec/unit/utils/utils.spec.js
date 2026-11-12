@@ -31,7 +31,7 @@ describe("utils", () => {
         });
 
         // escaped (\m), padding (_m) and fill (*m) characters are literal text
-        ["", "[Green]#,##0 ;[Red](#,##0)", "0.0\\ \\m", "#,##0_m", "0*m"].forEach((fmt) => {
+        ["", "[Green]#,##0 ;[Red](#,##0)", "0.0\\ \\m", "#,##0_m", "0*m", '0"*" "pts"', '"a_" 0 "d"', '0"\\" "m"'].forEach((fmt) => {
             it(`'${fmt}' is not a date`, () => {
                 expect(utils.isDateFmt(fmt)).to.be.false();
             });
