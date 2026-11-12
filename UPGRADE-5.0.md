@@ -310,13 +310,82 @@ worksheet.addImage(imageId, position);
 `Buffer`, or the Buffer polyfill in the browser bundle): it can be passed to `fs.writeFile` or cast to `Buffer`, and still to
 `new Blob([data])`. Assigning it to an `ArrayBuffer` variable no longer compiles (it never was one); copy it with
 `data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)` when an `ArrayBuffer` is needed. `xlsx.load()` is typed
-`ArrayBuffer | Uint8Array` (Node Buffers included).
+`ArrayBuffer | ArrayBufferView | Blob | number[]` (Node Buffers included), or base64 text with `{ base64: true }`.
 
 New or widened types: `worksheet.dataValidations` (`DataValidations`: `add`, `find`, `remove`, `model`), `DataValidationType`,
 `ImageEditAs`, all `cellIs` operators (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`, `notBetween`), optional conditional-formatting
 `priority`, data bar colours, optional `worksheet.protect()` arguments, optional `WorkbookReader` options, `WorksheetReader`
 `id`/`name`/`state`, and the EventEmitter methods of the streaming readers. `xlsx.load()` accepts Node Buffers and `Uint8Array`, and
 `Image.buffer` accepts Node Buffers, with TypeScript 5.7+ typed arrays.
+
+### Typings checked against the runtime
+
+`index.d.ts` is now checked at compile time against the TypeScript sources (`src/types/doc-conformance.ts`,
+`src/types/stream-conformance.ts`): every public member must exist at run time with a compatible type. Aligning it changed the following;
+each item can break code that compiled with 4.x.
+
+Values that are `undefined` or `null` in normal use now say so:
+
+| Member                                                                                                          | 5.0                                                  |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `cell.numFmt`, `font`, `alignment`, `protection`, `border`, `fill` (also on rows and columns)                   | `... \| undefined`                                   |
+| `cell.hyperlink`, `name`, `dataValidation`, `note`, `formula`, `result`, `formulaType`                          | `... \| undefined`                                   |
+| `row.height`                                                                                                    | optional                                             |
+| `row.model`                                                                                                     | getter `RowModel \| null`; the setter rejects `null` |
+| `worksheet.getSheetValues()`                                                                                    | `(CellValue[] \| undefined)[]` (sparse)              |
+| `worksheet.views`, `headerFooter`, `pageSetup.margins`                                                          | `\| null` for a sheet read from a file without them  |
+| `worksheet.columns`                                                                                             | getter `Column[] \| null`                            |
+| `worksheet.getTable()`, `findRows()` items, `insertRows()`, `getBackgroundImageId()`                            | `\| undefined`                                       |
+| `workbook.title`, `creator`, `created` and the other document properties                                        | `\| undefined` (absent in the file)                  |
+| `workbook.views`                                                                                                | `WorkbookView[] \| undefined` (a file without views) |
+| `workbook.getImage()`; streaming `getWorksheet()`, `getImage()`, `lastRow`, `findRow()`, `findCell()`           | `\| undefined`                                       |
+| `outlineProperties.summaryBelow` / `summaryRight`, `RowBreak.min`, `WorkbookView.firstSheet` / `activeTab`      | optional                                             |
+| Conditional-formatting `rule.style` parts (`DifferentialStyle`), gradient `degree` / stop `color`, `top10.rank` | `null` / optional as read from a file                |
+
+Removed (they did not exist, or had no effect): the `Anchor` class (now an interface), `config.setValue`, `cell.release()` and the other
+internal merge helpers, `worksheet.commit()` (on document worksheets), `Table.columns` / `rows` / `style`, `DefinedNames.getMatrix()`,
+`WorksheetProperties.showGridLines` (set `views[].showGridLines`), `date1904` on formula values, `stream` / `filename` in
+`XlsxWriteOptions`, the `Workbook` base of `stream.xlsx.WorkbookWriter` / `WorkbookReader` (they are not workbooks: no `xlsx`, `csv`,
+`worksheets`...), the constructor of `stream.xlsx.WorksheetReader` (an interface: it is not exported) and the fields of `ZlibOptions` other
+than `level`.
+
+Corrected signatures:
+
+- `getCell(address)` / `getCell(row, col)` and `findCell(address)` / `findCell(row, col)`: a row number with a column letter
+  (`getCell(2, "B")`) threw or returned `undefined` and no longer compiles.
+- `fillFormula(range, ...)` takes an address string (a `Range` or `Location` threw); its `results` may hold strings and booleans; new
+  `shareType`.
+- `mergeCells` / `unMergeCells` take the range arguments the runtime accepts (`RangeArguments`).
+- `Range.containsEx()` needs `row` and `col`; `definedNames.removeEx()` takes a cell (removing a range did nothing).
+- `addRow` / `insertRow` / `addRows` take `RowValues` and a `RowStyleOption` (`"n" | "i" | "i+" | "o" | "o+"`); `row.splice()` takes
+  `CellValue`s; `TableProperties.rows` is `CellValue[][]`; conditional-formatting `formulae` are `CfFormula[]`
+  (`string | number | boolean`), and `colorScale` / `iconSet` rules require `cfvo` (writing threw without them).
+- `CellHyperlinkValue.text` may be a number, boolean, date, error or rich text (as read back).
+- `removeConditionalFormatting(filter?)` takes an index or a filter function.
+- `Media` describes `workbook.media` (`type: "image"`, optional `name` / `buffer`, `base64`, `filename`); `WorkbookModel` and
+  `WorksheetModel` describe the real models (`WorksheetModel.media` holds worksheet images, `revision` is a number, `themes` a record,
+  `mergeCells` for the setter).
+- `workbook.worksheets` is `readonly` (a getter).
+- `xlsx.write(output)` takes any object with `write` / `end` or a Node writable stream and resolves with the `Xlsx` object; `csv.read()`
+  takes a Node readable stream, `csv.write()` a writable one; CSV `map` options take and return `CellValue`, and the fast-csv row types hold
+  `unknown` instead of `any`.
+- Streaming: `stream.xlsx.WorkbookWriter.commit()` resolves with the writer; the `stream` option is a `NodeJS.WritableStream`; reader events
+  are typed (`WorkbookReaderEvents`, `WorksheetReaderEvents`): unknown event names and wrong listener arguments no longer compile; `parse()`
+  yields typed events (`WorkbookReaderEvent`, `WorksheetReaderEvent[]`) instead of `any`.
+
+New at run time: `ExcelJS.PaperSize` (`ExcelJS.PaperSize.A4`), an object of the common paper sizes; it was a `const enum`, unusable with
+`isolatedModules`. `pageSetup.paperSize` accepts any paper size number of the standard (`8` for A3).
+
+`Range` addresses and `count` are `readonly` (they are getters: setting them threw). `xlsx.load(data, { base64: true })` takes a string or a
+Node `Buffer` of the text (a plain `Uint8Array` was not decoded as text). `new ModelContainer()` takes an optional model.
+
+Added (they existed at run time): `ModelContainer`; `cell.html`; `row.style`; `CellFormulaValue.shareType` / `ref`; `comment.anchor`;
+`Range.setTLBR()` / `forEachAddress()`; `worksheet.sheetProtection`, `rowBreaks`, `conditionalFormattings`; `PageSetup.copies`,
+`usePrinterDefaults`, `useFirstPageNumber`; the `autoFilter` option of `addWorksheet`; `addImage` corners given as `{ col, row }` or native
+offsets (`ImageAnchorPosition`); `TableColumnProperties.totalsRowResult`; `Color.tint` / `indexed`; `Font.condense` / `extend` / `shadow`;
+`Borders.color`; icon-set `icons` (`CfIcon`); `workbook.language`, `revision`, `contentStatus`, `media`; `xlsx.load()` with a `Blob`, any
+`ArrayBufferView`, a byte array or base64 text; `xlsx.read()` with an async iterable; the full `stream.xlsx.WorksheetWriter` and
+`WorksheetReader` APIs, the `HyperlinkReader` and the document properties of `WorkbookWriter`.
 
 `index.d.ts` now starts with `/// <reference types="node" />`, so that it works with TypeScript 6 and 7, which no longer load `@types/*`
 packages automatically. Install `@types/node` as a dev dependency (also in browser projects), or enable `skipLibCheck`. As a consequence,

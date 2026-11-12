@@ -21,8 +21,10 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
 - The library is written in TypeScript: `src/**/*.ts` is compiled to CommonJS in `lib/` (with `.d.ts` and source maps). The package entry
   point keeps its shape; deep imports of internal `lib/` modules now expose their main value as the default export. See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#package-exports).
-- TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers). See
-  [UPGRADE-5.0.md](UPGRADE-5.0.md#typescript).
+- TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers) and now checked against it at compile
+  time: nullable values say so, members that did not exist are removed, signatures follow what the code accepts, the streaming classes are
+  no longer declared as workbooks, and missing members are declared. See
+  [UPGRADE-5.0.md](UPGRADE-5.0.md#typings-checked-against-the-runtime).
 - Behaviour changes when reading and writing: internal hyperlinks are read as hyperlink cells and written as a `location`; style setters
   copy shared styles instead of modifying them; CSV whitespace-only cells, large integers and `parserOptions.headers`; table header
   defaults; streaming `WorksheetReader.id` and `sharedStrings: 'emit'` event shape. See [UPGRADE-5.0.md](UPGRADE-5.0.md).
@@ -261,6 +263,9 @@ without decoding them); reading and CSV are unchanged. The minified browser bund
 - README: installation with any package manager, requirements, a "Security & limits" section, streaming reader defaults (#1531), tab colour
   example (#2577), formulas without a leading `=` (#3011).
 - New [UPGRADE-5.0.md](UPGRADE-5.0.md) and [SECURITY.md](SECURITY.md).
+- README examples are type-checked against `index.d.ts` in CI (`bun run check:readme`); the examples that failed at run time were fixed
+  (`ExcelJS.` instead of the undefined `Excel` / `Enums`, note protection values, a table row with too many values, CSV `quote: null`).
+- Every exported symbol and public member of `src/` has TSDoc (`bun run check:tsdoc`).
 
 ### Zip library (fflate)
 

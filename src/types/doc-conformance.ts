@@ -108,8 +108,9 @@ export type ModelContainerConforms = Assert<
     Check<
         ModelContainer,
         Public.ModelContainer,
-        // `model` holds the model given to the constructor or parsed by `xlsx`: a parsed worksheet model lacks what only
-        // the Worksheet getter sets (`state`, `rowBreaks`, `merges`, `dimensions` as a Range)
+        // `model` holds the model given to the constructor or parsed by `xlsx`, `undefined` before a read without one
+        // (typed `WorkbookModel` internally: the xlsx writer needs one); a parsed worksheet model lacks what only the
+        // Worksheet getter sets (`state`, `rowBreaks`, `merges`, `dimensions` as a Range)
         "model"
     >
 >;

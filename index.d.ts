@@ -1151,7 +1151,7 @@ export interface PageSetup {
      * | Double Japan Postcard Rotated |  `82`       |
      * | 16K 197x273 mm                |  `119`      |
      */
-    paperSize: PaperSize;
+    paperSize: PaperSize | (number & {});
 
     /**
      * Whether to show the row numbers and column letters, `false` by default
@@ -1376,19 +1376,28 @@ export interface Range extends Location {
     /** The worksheet name of a reference such as `Sheet1!A1:B2`, `undefined` without one. */
     sheetName: string | undefined;
 
-    tl: string;
-    $t$l: string;
+    /** The top-left cell address (`A1`). */
+    readonly tl: string;
+    /** The top-left cell address, absolute (`$A$1`). */
+    readonly $t$l: string;
 
-    br: string;
-    $b$r: string;
+    /** The bottom-right cell address (`B2`). */
+    readonly br: string;
+    /** The bottom-right cell address, absolute (`$B$2`). */
+    readonly $b$r: string;
 
-    range: string;
-    $range: string;
+    /** The reference, with the sheet name if any (`Sheet1!A1:B2`). */
+    readonly range: string;
+    /** The absolute reference (`Sheet1!$A$1:$B$2`). */
+    readonly $range: string;
 
-    shortRange: string;
-    $shortRange: string;
+    /** The reference, as a single address for a single cell (`A1:B2`, `A1`; with the sheet name if any). */
+    readonly shortRange: string;
+    /** The absolute reference, as a single address for a single cell (`$A$1:$B$2`, `$A$1`). */
+    readonly $shortRange: string;
 
-    count: number;
+    /** The number of cells of the range. */
+    readonly count: number;
 
     /**
      * Sets the range from the list of arguments of a range (as `worksheet.mergeCells` takes them), given as ONE array:
@@ -2330,7 +2339,10 @@ export interface XlsxReadOptions extends ZipReadLimits {
 
 /** The options of `xlsx.load`: {@link XlsxReadOptions}, and `base64` for data given as base64 text. */
 export interface XlsxLoadOptions extends XlsxReadOptions {
-    /** The data is the base64 text of the file (a string, or the bytes of that text). */
+    /**
+     * The data is the base64 text of the file: a string, or a Node `Buffer` holding that text (a plain `Uint8Array` is
+     * not decoded as text).
+     */
     base64: boolean;
 }
 
@@ -2394,11 +2406,11 @@ export interface Xlsx<T = Workbook> {
      */
     load(data: ArrayBuffer | ArrayBufferView | Blob | number[], options?: Partial<XlsxReadOptions>): Promise<T>;
     /**
-     * Loads a file into the workbook from its base64 text (`base64: true`).
+     * Loads a file into the workbook from its base64 text (`base64: true`): a string, or a Node `Buffer` of that text.
      * @returns the workbook, once read
      * @throws (rejects) as the other form
      */
-    load(data: string | Uint8Array, options: Partial<XlsxLoadOptions> & { base64: true }): Promise<T>;
+    load(data: string | globalThis.Buffer, options: Partial<XlsxLoadOptions> & { base64: true }): Promise<T>;
 
     /**
      * Writes the workbook as an xlsx file in memory.
@@ -2892,13 +2904,13 @@ export class Workbook {
  * `model` without creating worksheets, and writes `model`.
  */
 export class ModelContainer {
-    /** @param model - the model to write (`undefined` before reading a file into the container) */
-    constructor(model: WorkbookModel);
+    /** @param model - the model to write (omitted to read a file into the container) */
+    constructor(model?: WorkbookModel);
     /**
      * The workbook model: what `xlsx` writes, and what it sets when reading (then the parsed model, whose worksheets
-     * hold their parsed rows and cells).
+     * hold their parsed rows and cells); `undefined` before a file is read into a container created without one.
      */
-    model: WorkbookModel;
+    model: WorkbookModel | undefined;
     /** The xlsx reader and writer of the model (its read methods resolve with the container). */
     readonly xlsx: Xlsx<ModelContainer>;
 }
