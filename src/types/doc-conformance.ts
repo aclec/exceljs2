@@ -113,15 +113,8 @@ export type DefinedNamesConforms = Assert<
         "addEx" | "removeEx"
     >
 >;
-/** The runtime Table conforms to index.d.ts `Table`, but for the known mismatches listed. */
-export type TableConforms = Assert<
-    Check<
-        Table,
-        Public.Table,
-        // TODO(align)
-        "getColumn"
-    >
->;
+/** The runtime Table conforms to index.d.ts `Table`. */
+export type TableConforms = Assert<Check<Table, Public.Table>>;
 /** The runtime Worksheet conforms to index.d.ts `Worksheet`, but for the known mismatches listed. */
 export type WorksheetConforms = Assert<
     Check<

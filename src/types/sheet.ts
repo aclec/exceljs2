@@ -7,13 +7,14 @@
 import type {
     AutoFilter,
     CellIsOperators,
+    CfIcon,
     CfvoTypes,
     Comment,
     ContainsTextOperators,
     DataBarRuleType,
     DataValidation,
     HeaderFooter,
-    IconSetTypes,
+    IconSetRuleType,
     ImageEditAs,
     Margins,
     PageSetup,
@@ -150,11 +151,8 @@ export interface CfvoModel {
     value?: number | string;
 }
 
-/** A custom icon of an x14 icon set (`<x14:cfIcon>`). `iconId` is set by render (the index of the icon). */
-export interface CfIconModel {
-    iconSet: IconSetTypes;
-    iconId?: number;
-}
+/** A custom icon of an x14 icon set (`<x14:cfIcon>`): index.d.ts `CfIcon`. `iconId` is set by render (the index of the icon). */
+export type CfIconModel = CfIcon;
 
 /** Fields of every rule model. */
 interface CfRuleModelBase {
@@ -203,11 +201,14 @@ export interface AboveAverageRuleModel extends CfRuleModelBase {
     aboveAverage?: boolean;
 }
 
-/** A `colorScale` rule (index.d.ts `ColorScaleRuleType`): rendering requires `cfvo` and `color`. */
+/**
+ * A `colorScale` rule (index.d.ts `ColorScaleRuleType`): rendering requires `cfvo` and `color` (it throws without them).
+ * A parsed color is `undefined` for an auto color.
+ */
 export interface ColorScaleRuleModel extends CfRuleModelBase {
     type: "colorScale";
     cfvo?: CfvoModel[];
-    color?: ColorModel[];
+    color?: (ColorModel | undefined)[];
 }
 
 /**
@@ -216,13 +217,13 @@ export interface ColorScaleRuleModel extends CfRuleModelBase {
  */
 export interface IconSetRuleModel extends CfRuleModelBase {
     type: "iconSet";
-    /** Default 3TrafficLights. */
-    iconSet?: IconSetTypes;
+    /** Default 3TrafficLights1 (parsed as `"3TrafficLights"` when absent). */
+    iconSet?: IconSetRuleType["iconSet"];
     reverse?: boolean;
     showValue?: boolean;
     custom?: boolean;
     cfvo?: CfvoModel[];
-    /** x14 parse: the custom icons (absent from index.d.ts: rendered as `custom="1"` with `<x14:cfIcon>` elements). */
+    /** x14 parse: the custom icons (rendered as `custom="1"` with `<x14:cfIcon>` elements, in the extension only). */
     icons?: CfIconModel[];
 }
 
