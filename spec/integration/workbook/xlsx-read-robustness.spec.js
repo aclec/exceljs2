@@ -249,6 +249,7 @@ describe('xlsx read robustness', function() {
             '<c r="C1" t="d"><v>2024-02-21T13:14:15.250+02:00</v></c>' +
             '<c r="D1" t="d"><v>2024-02-21T13:14Z</v></c>' +
             '<c r="E1" t="d"><f>A1</f><v>2024-02-21T13:14:15</v></c>' +
+            '<c r="F1" t="d"><v>0099-12-31</v></c>' +
             '</row>'
         ),
       });
@@ -261,6 +262,7 @@ describe('xlsx read robustness', function() {
         formula: 'A1',
         result: new Date(Date.UTC(2024, 1, 21, 13, 14, 15)),
       });
+      expect(ws.getCell('F1').value.toISOString()).to.equal('0099-12-31T00:00:00.000Z');
     });
 
     it('keeps invalid t="d" values as strings', async () => {
