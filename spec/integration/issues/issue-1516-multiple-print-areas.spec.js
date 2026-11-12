@@ -43,5 +43,26 @@ describe('github issues', () => {
       const names = definedNames(await readPart(await wb.xlsx.writeBuffer(), 'xl/workbook.xml'));
       expect(names).to.have.length(1);
     });
+
+    it('round-trips whole-column and whole-row print areas', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'xl/workbook.xml': xml =>
+          xml.replace(
+            '</sheets>',
+            '</sheets><definedNames>' +
+              '<definedName name="_xlnm.Print_Area" localSheetId="0">' +
+              "'Sheet1'!$A:$C,'Sheet1'!$1:$3,'Sheet1'!$E$5</definedName>" +
+              '</definedNames>'
+          ),
+      });
+      const wb = await load(buffer);
+      expect(wb.getWorksheet('Sheet1').pageSetup.printArea).to.equal('A:C&&1:3&&E5');
+
+      const names = definedNames(await readPart(await wb.xlsx.writeBuffer(), 'xl/workbook.xml'));
+      expect(names).to.deep.equal([
+        '<definedName name="_xlnm.Print_Area" localSheetId="0">' +
+          '&apos;Sheet1&apos;!$A:$C,&apos;Sheet1&apos;!$1:$3,&apos;Sheet1&apos;!$E5</definedName>',
+      ]);
+    });
   });
 });
