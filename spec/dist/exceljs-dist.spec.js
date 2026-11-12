@@ -43,6 +43,13 @@ describe('ExcelJS', () => {
           await wb2.xlsx.load(buffer);
           expect(wb2.getWorksheet('blort').getCell('A1').value).to.equal('Hello, World!');
         });
+
+        it('compresses with the bundled fflate, not node:zlib', () => {
+          // zlib is an empty module in the bundle, so lib/utils/deflate.js selects fflate
+          const code = fs.readFileSync(file, 'utf8');
+          expect(code).not.to.match(/require\(["'](node:)?zlib["']\)/);
+          expect(code).to.include('deflateRawSync');
+        });
       });
     });
   });

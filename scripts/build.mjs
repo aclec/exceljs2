@@ -29,6 +29,8 @@ const ALIASES = {
     stream: require.resolve("stream-browserify"),
     string_decoder: polyfill("string_decoder"),
     util: polyfill("util"),
+    // lib/utils/deflate.js falls back to fflate when node:zlib is not there
+    zlib: shim("empty.js"),
 };
 
 // lib/ and its dependencies may use either the bare or the node: prefixed specifier
