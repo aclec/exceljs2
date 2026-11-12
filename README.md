@@ -54,14 +54,16 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
  A to XFD (1 to 16,384). References outside it throw an error, and the `min`/`max` of `<col>`
  definitions read from a file are clamped to the last column.
 * **Merged cells.** At most 1,048,576 cells (one full column) can be covered by merges in one
- worksheet. `mergeCells` throws beyond that, and so does loading a file that exceeds it.
+ worksheet, and in a whole workbook loaded from a file. `mergeCells` throws beyond that, and so
+ does loading a file that exceeds it.
  Checking for overlapping merges takes time proportional to the merged area, not to the number of merges.
 * **Data validations.** Validations read from a file are expanded to one entry per cell in
- `worksheet.dataValidations.model` until 100,000 cells have been expanded for the worksheet. Ranges
+ `worksheet.dataValidations.model` until 100,000 cells have been expanded for the workbook. Ranges
  that do not fit (for example a whole column) are kept as a single range key such as `'B1:B1048576'`.
  `sqref` tokens that are not cell references are ignored.
  `cell.dataValidation` resolves both forms and both are written back to the file.
-* **Defined names.** Defined-name ranges larger than 100,000 cells are kept as a single rectangle
+* **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
+ once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
  and column splices, but are not enumerated by `definedNames.forEach()`, and removing a name from any
  cell of such a range removes the whole range.

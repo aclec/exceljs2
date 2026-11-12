@@ -20,6 +20,22 @@ async function timed(fn) {
     return { result, ms: Date.now() - start };
 }
 
+// a workbook with sheets Sheet1..SheetN, and patches applying fragment(i) after the sheetData of each
+async function sheetsBuffer(count) {
+    return baseWorkbookBuffer((wb) => {
+        for (let i = 2; i <= count; i++) {
+            wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+        }
+    });
+}
+function afterEachSheetData(count, fragment) {
+    const patches = {};
+    for (let i = 1; i <= count; i++) {
+        patches[`xl/worksheets/sheet${i}.xml`] = (xml) => afterSheetData(xml)(fragment(i));
+    }
+    return patches;
+}
+
 describe("hostile input", function () {
     this.timeout(20000);
 
@@ -46,6 +62,27 @@ describe("hostile input", function () {
             });
             expect(error).to.be.an("error");
             expect(error.message).to.match(/Out of bounds/);
+        });
+
+        it("caps the merged cells of the whole workbook, not of each worksheet", async () => {
+            // each worksheet is under the cap of 1048576 merged cells, the workbook is not
+            const buffer = await tamper(
+                await sheetsBuffer(2),
+                afterEachSheetData(2, () => '<mergeCells count="1"><mergeCell ref="B1:B524289"/></mergeCells>')
+            );
+            const { result: error, ms } = await timed(() => load(buffer).catch((e) => e));
+            expect(error).to.be.an("error");
+            expect(error.message).to.match(/merged cells/);
+            expect(ms).to.be.below(2000); // rejected before the cells are created
+        });
+
+        it("still loads merges spread over several worksheets", async () => {
+            const buffer = await tamper(
+                await sheetsBuffer(3),
+                afterEachSheetData(3, () => '<mergeCells count="1"><mergeCell ref="B2:K1001"/></mergeCells>')
+            );
+            const wb = await load(buffer);
+            wb.eachSheet((ws) => expect(ws.getCell("K1001").master.address).to.equal("B2"));
         });
 
         it("loads many small merges in linear time", async () => {
@@ -118,6 +155,44 @@ describe("hostile input", function () {
             const ws = (await load(buffer)).getWorksheet("Sheet1");
             expect(Object.keys(ws.dataValidations.model)).to.deep.equal(["A1"]);
             expect(Object.getPrototypeOf(ws.dataValidations.model)).to.equal(Object.prototype);
+        });
+
+        it("shares the expansion budget between the worksheets of a workbook", async () => {
+            const buffer = await tamper(
+                await sheetsBuffer(3),
+                afterEachSheetData(
+                    3,
+                    () =>
+                        '<dataValidations count="1"><dataValidation type="list" sqref="A1:CV1000">' +
+                        '<formula1>"a"</formula1></dataValidation></dataValidations>'
+                )
+            );
+            const wb = await load(buffer);
+            // 100,000 cells: the first worksheet uses the whole budget, the others keep a range key
+            expect(Object.keys(wb.getWorksheet("Sheet1").dataValidations.model)).to.have.length(100000);
+            expect(Object.keys(wb.getWorksheet("Sheet2").dataValidations.model)).to.deep.equal(["A1:CV1000"]);
+            expect(Object.keys(wb.getWorksheet("Sheet3").dataValidations.model)).to.deep.equal(["A1:CV1000"]);
+            wb.eachSheet((ws) => {
+                expect(ws.getCell("CV1000").dataValidation).to.deep.include({ type: "list" });
+                expect(ws.getCell("CW1000").dataValidation).to.equal(undefined);
+            });
+        });
+
+        it("keeps whole-column validations on several worksheets", async () => {
+            const buffer = await tamper(
+                await sheetsBuffer(3),
+                afterEachSheetData(
+                    3,
+                    (i) =>
+                        `<dataValidations count="1"><dataValidation type="whole" operator="greaterThan" sqref="C1:C1048576">` +
+                        `<formula1>${i}</formula1></dataValidation></dataValidations>`
+                )
+            );
+            const wb = await load(buffer);
+            const out = await load(await wb.xlsx.writeBuffer());
+            [1, 2, 3].forEach((i) => {
+                expect(out.getWorksheet(`Sheet${i}`).getCell("C77").dataValidation).to.deep.include({ formulae: [i] });
+            });
         });
 
         it("does not write validations that were removed", async () => {
@@ -306,6 +381,15 @@ describe("hostile input", function () {
             expect(ms).to.be.below(5000);
             expect(wb.getWorksheet("Sheet1").getCell("Z99").names).to.deep.equal(["everything"]);
             expect(wb.definedNames.model).to.deep.equal([{ name: "everything", ranges: ["Sheet1!$A$1:$XFD$1048576"] }]);
+        });
+
+        it("shares the expansion budget between the names of a workbook", async () => {
+            const names = [0, 1, 2].map((i) => `<definedName name="n${i}">Sheet1!$A$1:$CV$1000</definedName>`).join("");
+            const wb = await load(await tamper(await baseWorkbookBuffer(), withDefinedNames(names)));
+            // 100,000 cells: the first name uses the whole budget, the others are kept as rectangles
+            expect(Object.keys(wb.definedNames.rangeMap)).to.deep.equal(["n1", "n2"]);
+            expect(wb.getWorksheet("Sheet1").getCell("CV1000").names).to.deep.equal(["n0", "n1", "n2"]);
+            expect(wb.definedNames.model).to.deep.equal(["n0", "n1", "n2"].map((name) => ({ name, ranges: ["Sheet1!$A$1:$CV$1000"] })));
         });
 
         it("shifts and removes large ranges with row splices", () => {

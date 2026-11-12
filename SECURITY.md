@@ -33,8 +33,8 @@ The main use case we defend is an application (typically a server) that **parses
 
 - Small inputs that cause disproportionate memory or CPU use, or that crash the process in a way the application cannot catch (out-of-memory
   aborts, catastrophic regular-expression backtracking, quadratic algorithms). Since 5.0, ExcelJS bounds cell references to the Excel grid,
-  caps merged cells per worksheet, keeps large data-validation and defined-name ranges as ranges, clamps column definitions and rejects
-  over-long formulas; see [Security & limits](README.md#security--limits).
+  caps merged cells per worksheet and per loaded workbook, keeps large data-validation and defined-name ranges as ranges, clamps column
+  definitions and rejects over-long formulas; see [Security & limits](README.md#security--limits).
 - Prototype pollution or other corruption of the application's global state.
 - Malformed or injected XML in written files (for example from cell values or names).
 - Reading or writing files outside the paths given by the application, and code execution.

@@ -59,11 +59,12 @@ Cell references must be within rows 1 to 1,048,576 and columns A to XFD (16,384)
 row (for example `A1048577`) now throws `Out of bounds. Excel supports rows from 1 to 1048576`; 4.x only checked the column. `<col min max>`
 definitions read from a file are clamped to column 16,384.
 
-### Merged cells are capped per worksheet
+### Merged cells are capped
 
 A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()` throws
-`Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that, and `xlsx.load` / `xlsx.read` reject a file that contains
-such merges.
+`Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. A file loaded with `xlsx.load` / `xlsx.read` can have at
+most 1,048,576 merged cells **in all its worksheets together**, and is rejected with
+`Cannot merge <range>: the workbook would exceed 1048576 merged cells` otherwise.
 
 The check for overlapping merges now takes time proportional to the area being merged instead of the number of existing merges, so files
 with tens of thousands of merges load quickly. The `Cannot merge already merged cells` error is unchanged.
@@ -71,7 +72,7 @@ with tens of thousands of merges load quickly. The `Cannot merge already merged 
 ### Large data-validation ranges stay ranges
 
 In 4.x, every `sqref` range read from a file was expanded to one entry per cell in `worksheet.dataValidations.model`, so
-`sqref="A1:XFD1048576"` could exhaust memory. In 5.0, ranges are expanded until 100,000 cells have been expanded for the worksheet; ranges
+`sqref="A1:XFD1048576"` could exhaust memory. In 5.0, ranges are expanded until 100,000 cells have been expanded for the workbook; ranges
 that do not fit are stored under a single **range key**:
 
 ```js
@@ -91,7 +92,8 @@ Also:
 ### Large defined-name ranges stay ranges
 
 Defined names are stored one entry per cell so that they follow row and column splices. A defined-name range covering more than **100,000
-cells** (for example `Sheet1!$A$1:$XFD$1048576`) is now kept as a single rectangle instead. Such ranges:
+cells** (for example `Sheet1!$A$1:$XFD$1048576`) is now kept as a single rectangle instead, and so are the ranges read from a file once
+100,000 cells have been expanded for all its names. Such ranges:
 
 - are returned by `workbook.definedNames.model`, `getRanges(name)` and `cell.names`;
 - move or shrink with `spliceRows` / `spliceColumns`;
