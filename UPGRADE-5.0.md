@@ -183,5 +183,7 @@ Both writers now take the same options, and the old shapes keep working:
   other errors start with `Invalid or unsupported zip file:`. Part names are decoded as UTF-8, like JSZip did.
 - **Streaming reader input**: besides file names and `stream.Readable`, any object with a `pipe` method (e.g. a `readable-stream` or older
   stream), a web `ReadableStream` and an async iterable of byte chunks are accepted.
+- **Image extensions** must be 1 to 5 letters or digits (`png`, `jpeg`, ...). Another value (which would end up in a zip entry name and in
+  XML) makes `writeBuffer` / `write` reject and `WorkbookWriter.addImage` throw.
 - A failing output stream (or an unreadable image file) now rejects `write` / `writeFile` / `WorkbookWriter.commit()` instead of leaving the
   promise pending or raising an unhandled rejection.

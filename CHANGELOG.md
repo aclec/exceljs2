@@ -123,6 +123,9 @@ upstream PR code was merged) and has a regression test.
   descriptor signature (unzipper); descriptors are now checked against the size of the data read.
 - Fixed: write errors (failing output stream, unreadable image file) reject `write` / `writeFile` / `WorkbookWriter.commit()` instead of
   leaving them pending or raising an unhandled rejection.
+- Security: an image `extension` was used unchecked in the zip entry name (`xl/media/image1.<extension>`, zip slip for whoever extracts the
+  file) and, by the streaming writer, in the relationship XML (relationship injection). Both writers now require 1 to 5 letters or digits,
+  and the streaming writer XML-encodes relationship targets.
 - Removed the internal modules that no longer had a user (`lib/utils/auto-drain`, `browser-buffer-encode`, `iterate-stream`,
   `stream-base64`, `string-builder`, `stuttered-pipe`, `typed-stack`); they were only reachable through deep imports (`exceljs/lib/...`).
 - The streaming `WorkbookReader` accepts any stream with a `pipe` method (e.g. `readable-stream`), web `ReadableStream`s and async
