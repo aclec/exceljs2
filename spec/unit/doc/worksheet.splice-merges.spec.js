@@ -54,7 +54,8 @@ function mergeRanges(ws) {
 }
 
 const row = (n) => [`x${n}`];
-const column = (n) => Array.from({ length: 12 }, (_, i) => `y${n}${i + 1}`);
+// a column of values for rows 1 to 12, without values in the rows of emptyRows
+const column = (n, emptyRows = []) => Array.from({ length: 12 }, (_, i) => (emptyRows.includes(i + 1) ? null : `y${n}${i + 1}`));
 
 describe("Worksheet merges after splicing", () => {
     describe("rows", () => {
@@ -162,11 +163,15 @@ describe("Worksheet merges after splicing", () => {
                 op: (ws) => ws.spliceColumns(1, 0, column(1)),
                 merges: ["B5:B9", "C2:D3", "F1:H1"],
             },
-            { name: "insert a column inside a merge", op: (ws) => ws.spliceColumns(3, 0, column(1)), merges: ["A5:A9", "B2:D3", "F1:H1"] },
+            {
+                name: "insert an empty column inside a merge",
+                op: (ws) => ws.spliceColumns(3, 0, column(1, [2, 3])),
+                merges: ["A5:A9", "B2:D3", "F1:H1"],
+            },
             { name: "delete the master column of a merge", op: (ws) => ws.spliceColumns(2, 1), merges: ["A5:A9", "B2:B3", "D1:F1"] },
             {
                 name: "delete and insert more columns inside a merge",
-                op: (ws) => ws.spliceColumns(6, 1, column(1), column(2)),
+                op: (ws) => ws.spliceColumns(6, 1, column(1, [1]), column(2, [1])),
                 merges: ["A5:A9", "B2:C3", "E1:H1"],
             },
             { name: "delete a whole merge", op: (ws) => ws.spliceColumns(1, 1), merges: ["A2:B3", "D1:F1"] },
@@ -187,6 +192,58 @@ describe("Worksheet merges after splicing", () => {
             expect(ws.getCell("C2").value).to.equal("m1");
             expect(ws.getCell("D3").value).to.equal("m1");
             expect(ws.getCell("H1").value).to.equal("m2");
+        });
+    });
+
+    describe("values inserted inside a merge", () => {
+        // Excel widens a merge over the cells inserted inside it, and refuses to change part of a merged cell: a value
+        // inserted there would be lost, so the splice throws before anything changes
+        function expectUnchanged(ws) {
+            expect(mergeRanges(ws)).to.deep.equal(Object.keys(ROW_MERGES).sort());
+            expect(ws.getCell("B2").value).to.equal("m1");
+            expect(ws.getCell("A3").value).to.equal("a3");
+            expect(ws.getCell("C3").isMergedTo(ws.getCell("B2"))).to.equal(true);
+            checkConsistency(ws);
+        }
+
+        it("insertRow refuses values in the merged columns", () => {
+            const ws = buildSheet(ROW_MERGES);
+            expect(() => ws.insertRow(3, ["a", "b-inserted", "c-inserted"])).to.throw(/C3.*B2:C4|B3.*B2:C4/);
+            expectUnchanged(ws);
+        });
+
+        it("insertRows refuses values given by column key", () => {
+            const ws = buildSheet(ROW_MERGES);
+            ws.columns = [{ key: "a" }, { key: "b" }, { key: "c" }];
+            expect(() => ws.insertRows(3, [{ a: 1 }, { a: 2, c: "lost" }])).to.throw(/C4.*B2:C5/);
+            expectUnchanged(ws);
+        });
+
+        it("spliceRows refuses values that replace rows inside a merge", () => {
+            const ws = buildSheet(ROW_MERGES);
+            expect(() => ws.spliceRows(6, 1, row(1), ["x", "y", "z", "w", "lost"])).to.throw(/E7.*E5:E9/);
+            expect(mergeRanges(ws)).to.deep.equal(Object.keys(ROW_MERGES).sort());
+            expect(ws.getCell("A6").value).to.equal("a6");
+        });
+
+        it("still widens the merge when the inserted cells of the merge are empty", () => {
+            const ws = buildSheet(ROW_MERGES);
+            ws.insertRows(3, [
+                ["a", null, ""],
+                [undefined, undefined, undefined, "d"],
+            ]);
+            expect(mergeRanges(ws)).to.deep.equal(["A12:D12", "B2:C5", "E7:E10"]);
+            expect(ws.getCell("A3").value).to.equal("a");
+            expect(ws.getCell("D4").value).to.equal("d");
+            checkConsistency(ws);
+        });
+
+        it("spliceColumns refuses values in the merged rows", () => {
+            const ws = buildSheet(COL_MERGES);
+            expect(() => ws.spliceColumns(3, 0, column(1, [2]))).to.throw(/C3.*B2:D3/);
+            expect(mergeRanges(ws)).to.deep.equal(Object.keys(COL_MERGES).sort());
+            expect(ws.getCell("C5").value).to.equal("c5");
+            checkConsistency(ws);
         });
     });
 

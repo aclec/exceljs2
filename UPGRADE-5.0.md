@@ -181,6 +181,13 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
 
 ## Other behaviour changes
 
+- **Merged cells follow splices.** `spliceRows`, `insertRow(s)`, `duplicateRow` and `spliceColumns` move, shrink or widen the merges with
+  the cells (4.x left the merges at their old place, see the [README](README.md#merged-cells)). As in Excel, rows or columns inserted inside
+  a merge widen it, and only its master cell holds a value: inserting values into the cells of a merge now throws
+  `Cannot insert a value in B3: it would be inside the merged cells B2:C5, unmerge them first`, before anything changes (4.x kept the values
+  in a broken merge). Empty inserted cells (`null`, `undefined`, `''`) are accepted. Call `worksheet.unMergeCells()` first to insert values
+  there.
+
 - **Invalid XML characters are removed on write.** U+FFFE, U+FFFF and unpaired surrogates (which are not allowed in XML 1.0) are stripped
   from text when writing xlsx, like control characters already were. Valid surrogate pairs (emoji, etc.) are kept.
 - **CSV special values.** When reading CSV, cells whose text is `__proto__`, `constructor`, `toString`, ... are read as plain strings. 4.x

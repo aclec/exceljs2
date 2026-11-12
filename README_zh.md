@@ -922,7 +922,6 @@ const insertedRowsOriginal = worksheet.insertRows(1, rows, 'o');
 
 ```javascript
 // Cut one or more rows (rows below are shifted up)
-// Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
 worksheet.spliceRows(4, 3);
 
 // remove one row and insert two more.
@@ -2705,7 +2704,7 @@ sudo apt-get install libfontconfig
 
 ## 拼接与合并[⬆](#目录)<!-- Link generated with jump2header -->
 
-如果任何 `splice` 操作影响合并的单元格，则合并组将无法正确移动
+5.0 已修复：合并单元格会随拼接操作移动的行和列一起移动，详见英文文档 [Merged Cells](README.md#merged-cells)。
 
 # 发布历史[⬆](#目录)<!-- Link generated with jump2header -->
 

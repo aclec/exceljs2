@@ -779,7 +779,7 @@ worksheet.getColumn(7).values = [,,2,3,,5,,7,,,,11];
 
 // cut one or more columns (columns to the right are shifted left)
 // If column properties have been defined, they will be cut or moved accordingly
-// Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
+// Merged cells move with the columns (see Merged Cells)
 worksheet.spliceColumns(3,2);
 
 // remove one column and insert two more.
@@ -942,7 +942,8 @@ const html = '<div>' + cell.html + '</div>';
 
 ## Merged Cells[⬆](#contents)<!-- Link generated with jump2header -->
 
-A worksheet can have at most 1,048,576 merged cells in total (see <a href="#security--limits">Security &amp; limits</a>).
+A worksheet can have at most 1,048,576 merged cells in total, and a workbook `workbook.maxMergedCells` (4,194,304 by default;
+see <a href="#security--limits">Security &amp; limits</a>).
 
 ```javascript
 // merge a range of cells
@@ -968,6 +969,22 @@ worksheet.mergeCells('K10', 'M12');
 
 // merge by start row, start column, end row, end column (equivalent to K10:M12)
 worksheet.mergeCells(10,11,12,13);
+```
+
+Merges follow the rows and columns moved by `spliceRows`, `insertRow(s)`, `duplicateRow` and `spliceColumns`: a merge below
+(or to the right of) the splice moves with its cells and keeps its value and styles, a merge whose rows (or columns) are all
+removed is removed, and a merge that loses some of them shrinks (down to a single cell, which is no longer merged).
+
+As in Excel, rows or columns inserted inside a merge widen it. Only the master cell of a merge holds a value, so inserting a
+value into the cells of a merge throws before anything changes; `null`, `undefined` and `''` are not values. Unmerge first to
+keep such values:
+
+```javascript
+worksheet.mergeCells('B2:C4');
+worksheet.insertRow(3, ['a']);                // B2:C5, 'a' in A3
+worksheet.insertRow(3, ['a', 'b']);           // throws: Cannot insert a value in B3: it would be inside the merged cells B2:C6...
+worksheet.unMergeCells('B2');
+worksheet.insertRow(3, ['a', 'b']);           // 'b' in B3, no merge
 ```
 
 ## Insert Rows[⬆](#contents)<!-- Link generated with jump2header -->
@@ -1029,7 +1046,7 @@ const insertedRowsOriginal = worksheet.insertRows(1, rows, 'o');
 
 ```javascript
 // Cut one or more rows (rows below are shifted up)
-// Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
+// Merged cells move with the rows (see Merged Cells)
 worksheet.spliceRows(4, 3);
 
 // remove one row and insert two more.
@@ -2983,7 +3000,7 @@ sudo apt-get install libfontconfig
 
 ## Splice vs Merge[⬆](#contents)<!-- Link generated with jump2header -->
 
-If any splice operation affects a merged cell, the merge group will not be moved correctly
+Fixed in 5.0: merged cells move with the rows and columns that splices move, see [Merged Cells](#merged-cells).
 
 # Release History[⬆](#contents)<!-- Link generated with jump2header -->
 

@@ -103,9 +103,9 @@ describe("Merged-cell limits", function () {
         expect(ws.getCell("A2").isMerged).to.equal(false);
         ws.mergeCells("A1:A4");
         // a splice that widens a merge is checked against the budget too
-        expect(() => ws.spliceRows(2, 0, [1])).to.throw(/would exceed 10 merged cells/);
+        expect(() => ws.spliceRows(2, 0, [])).to.throw(/would exceed 10 merged cells/);
         wb.maxMergedCells = 11;
-        ws.spliceRows(2, 0, [1]);
+        ws.spliceRows(2, 0, []);
         expect(ws.getCell("A5").master.address).to.equal("A1");
         // removing a worksheet frees its share
         wb.removeWorksheet(wb.getWorksheet("a").id);
