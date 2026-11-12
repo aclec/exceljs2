@@ -18,6 +18,12 @@ async function timed(fn) {
     return { result, ms: Date.now() - start };
 }
 
+function timedSync(fn) {
+    const start = Date.now();
+    const result = fn();
+    return { result, ms: Date.now() - start };
+}
+
 describe("hostile input: algorithmic complexity", function () {
     this.timeout(20000);
 
@@ -85,5 +91,37 @@ describe("hostile input: algorithmic complexity", function () {
         expect(printArea.startsWith("A1:B2&&A1:B2&&")).to.equal(true);
         expect(printArea.length).to.equal(100000 * "A1:B2&&".length - 2);
         expect(ms).to.be.below(1500);
+    });
+
+    it("writes names of far single cells in time proportional to the cells, not to their indexes", async () => {
+        let names = "";
+        for (let i = 0; i < 100; i++) {
+            names += `<definedName name="n${i}">Sheet1!$XFD$1048576</definedName>`;
+        }
+        const buffer = await tamper(await baseWorkbookBuffer(), {
+            "xl/workbook.xml": (xml) => xml.replace("</sheets>", `</sheets><definedNames>${names}</definedNames>`),
+        });
+        const wb = await load(buffer);
+        const { result: written, ms } = await timed(() => wb.xlsx.writeBuffer());
+        expect(ms).to.be.below(1000);
+        const names2 = (await load(written)).definedNames.model;
+        expect(names2.length).to.equal(100);
+        expect(names2[99]).to.deep.equal({ name: "n99", ranges: ["Sheet1!$XFD$1048576"] });
+    });
+
+    it("splices names of far single cells in time proportional to the cells", () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("Sheet1");
+        ws.getColumn(1).width = 10;
+        for (let i = 0; i < 100; i++) {
+            wb.definedNames.add("Sheet1!$XFD$1048576", `n${i}`);
+            wb.definedNames.add("Sheet1!$B$2", `n${i}`);
+        }
+        const { ms } = timedSync(() => {
+            ws.spliceRows(1, 1);
+            ws.spliceColumns(1, 1);
+        });
+        expect(ms).to.be.below(500);
+        expect(wb.definedNames.model[99]).to.deep.equal({ name: "n99", ranges: ["Sheet1!$A$1", "Sheet1!$XFC$1048575"] });
     });
 });
