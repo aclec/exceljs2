@@ -4,6 +4,17 @@ const SharedStringXform = verquire("xlsx/xform/strings/shared-string-xform");
 
 const expectations = [
     {
+        // ECMA-376 ST_Xstring: _xHHHH_ encodes a character, so a literal one is written with its _ escaped as _x005F_
+        title: "text holding _xHHHH_ sequences",
+        create() {
+            return new SharedStringXform();
+        },
+        preparedModel: "a_x0041_b _x00e9_ _x005F_ _x12_ x_ _x0041_x0042_",
+        xml: "<si><t>a_x005F_x0041_b _x005F_x00e9_ _x005F_x005F_ _x12_ x_ _x005F_x0041_x005F_x0042_</t></si>",
+        parsedModel: "a_x0041_b _x00e9_ _x005F_ _x12_ x_ _x0041_x0042_",
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
         title: "text",
         create() {
             return new SharedStringXform();
@@ -141,4 +152,14 @@ const expectations = [
 
 describe("SharedStringXform", () => {
     testXformHelper(expectations);
+
+    it("escapes _xHHHH_ sequences in linear time", () => {
+        ["_", "_x", "_x0041", "_x0041_", "_x00_"].forEach((unit) => {
+            const text = unit.repeat(10000);
+            const start = Date.now();
+            const xml = new SharedStringXform().toXml(text);
+            expect(Date.now() - start, unit).to.be.below(50);
+            expect(xml.length).to.be.at.least(text.length);
+        });
+    });
 });

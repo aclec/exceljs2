@@ -28,6 +28,18 @@ async function parse(iterable) {
 describe("parseSax", () => {
     const buffer = Buffer.from(XML, "utf8");
 
+    it("rejects a document that ends before its root element is closed", async () => {
+        for (const xml of ["<root><a>text", "<root><a", "<root>", '<?xml version="1.0"?>', ""]) {
+            const error = await parse([Buffer.from(xml)]).then(
+                () => undefined,
+                (e) => e
+            );
+            expect(error, JSON.stringify(xml)).to.be.an("error");
+            expect(error.message, JSON.stringify(xml)).to.match(/unclosed tag|unexpected end|root element/);
+        }
+        expect(await parse([Buffer.from("<root/>  ")])).to.deep.equal({ text: "  ", attribute: undefined });
+    });
+
     [1, 2, 3, 5, 7].forEach((size) => {
         it(`decodes multi-byte characters split across ${size}-byte chunks`, async () => {
             const result = await parse(chunks(buffer, size));

@@ -297,6 +297,49 @@ describe("WorkbookReader (stream)", () => {
             expect(files.handles[0].fd).to.equal(-1);
         });
 
+        it("does not leave an unhandled rejection when closing the file of a collected worksheet fails", async function () {
+            this.timeout(10000);
+            const gc = exposeGc();
+            const files = trackOpenedFiles();
+            const { open } = fs.promises;
+            fs.promises.open = async (...args) => {
+                const handle = await open.apply(fs.promises, args);
+                const close = handle.close.bind(handle);
+                handle.close = async () => {
+                    await close();
+                    throw new Error("simulated close failure");
+                };
+                return handle;
+            };
+            // the rejection would be reported to mocha's own listener: record it instead
+            const listeners = process.listeners("unhandledRejection");
+            process.removeAllListeners("unhandledRejection");
+            const unhandled = [];
+            process.on("unhandledRejection", (reason) => unhandled.push(reason));
+            try {
+                const buffer = await bigSheetFirstBuffer();
+                for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                    if (worksheet.name !== "Second") continue;
+                    // eslint-disable-next-line no-unused-vars
+                    for await (const row of worksheet) {
+                        // read
+                    }
+                }
+                for (let i = 0; i < 50 && files.handles[0].fd !== -1; i++) {
+                    gc();
+                    await new Promise((resolve) => setTimeout(resolve, 20));
+                }
+                expect(files.handles[0].fd).to.equal(-1);
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            } finally {
+                fs.promises.open = open;
+                files.restore();
+                process.removeAllListeners("unhandledRejection");
+                listeners.forEach((listener) => process.on("unhandledRejection", listener));
+            }
+            expect(unhandled.map((reason) => reason.message)).to.deep.equal([]);
+        });
+
         it("closes the spooled worksheet file before removing the temp dir when every worksheet is read", async () => {
             const files = trackOpenedFiles();
             const removed = trackRemovals(files);
@@ -800,6 +843,38 @@ describe("WorkbookReader (stream)", () => {
         });
         expect(reader.options.worksheets).to.equal("emit");
         expect(events).to.deep.equal(["worksheet Sheet1", 'row [null,{"sharedString":0}]']);
+    });
+
+    it("reads shared strings as the document reader does", async () => {
+        const fonts = [
+            { color: { argb: "FFFF0000" }, name: "Arial", size: 9, family: 2, charset: 1, scheme: "minor" },
+            { bold: true, italic: true, underline: "double", strike: true, outline: true, vertAlign: "superscript" },
+            { color: { theme: 1, tint: 0.5 }, underline: true },
+        ];
+        const buffer = await tamper(
+            await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B1").value = { richText: fonts.map((font, i) => ({ font, text: `run ${i}` })) };
+                ws.getCell("C1").value = { richText: [{ text: "plain" }, { font: { bold: true }, text: " bold" }] };
+                ws.getCell("D1").value = "last";
+            }),
+            {
+                // a phonetic run (not part of the text), an escaped character and an empty string
+                "xl/sharedStrings.xml": (xml) =>
+                    xml.replace(
+                        "<si><t>last</t></si>",
+                        '<si><t>last</t><rPh sb="0" eb="1"><t>phonetic</t></rPh></si>' + "<si><t>a_x0041_b</t></si><si><t/></si>"
+                    ),
+                "xl/worksheets/sheet1.xml": (xml) =>
+                    xml.replace("</row>", '<c r="E1" t="s"><v>4</v></c><c r="F1" t="s"><v>5</v></c></row>'),
+            }
+        );
+        const doc = new ExcelJS.Workbook();
+        await doc.xlsx.load(buffer);
+        const expected = doc.getWorksheet(1).getRow(1).values;
+        expect(expected[4]).to.equal("last");
+        expect(expected[5]).to.equal("aAb");
+        const [sheet] = await readAll(chunkedStream(buffer));
+        expect(sheet.rows[0].values).to.deep.equal(expected);
     });
 
     it("emits shared strings in sharedStrings: emit mode", async () => {

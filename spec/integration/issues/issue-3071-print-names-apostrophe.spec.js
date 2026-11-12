@@ -14,7 +14,7 @@ describe("github issues", () => {
         const buffer = await wb.xlsx.writeBuffer();
         const xml = (await readPart(buffer, "xl/workbook.xml")).replace(/&apos;/g, "'");
         expect(xml).to.include(
-            '<definedName name="_xlnm.Print_Area" localSheetId="0">' + "'Bob''s sheet'!$A1:$B2,'Bob''s sheet'!$D4:$E5</definedName>"
+            '<definedName name="_xlnm.Print_Area" localSheetId="0">' + "'Bob''s sheet'!$A$1:$B$2,'Bob''s sheet'!$D$4:$E$5</definedName>"
         );
         expect(xml).to.include(
             '<definedName name="_xlnm.Print_Titles" localSheetId="0">' + "'Bob''s sheet'!$A:$B,'Bob''s sheet'!$1:$2</definedName>"

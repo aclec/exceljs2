@@ -28,7 +28,8 @@ const ALIASES = {
     fs: shim("empty.js"),
     stream: require.resolve("stream-browserify"),
     string_decoder: polyfill("string_decoder"),
-    util: polyfill("util"),
+    util: shim("util.js"),
+    "util-deprecate": shim("util-deprecate.js"),
     // lib/utils/deflate.js falls back to fflate when node:zlib is not there
     zlib: shim("empty.js"),
 };

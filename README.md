@@ -90,11 +90,12 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 * **Number formats.** Custom number formats longer than Excel's limit of 255 characters are
  ignored when a file is read.
 * **Merged cells.** At most 1,048,576 cells (one full column) can be covered by merges in one
- worksheet, and `workbook.maxMergedCells` (4,194,304 by default, four full worksheets) in a whole
- workbook. `mergeCells`, the streaming writer and loading a file throw beyond that, so a workbook
+ worksheet, and `workbook.maxMergedCells` (1,048,576 by default, one full worksheet: about 600 MB
+ of memory) in a whole workbook. `mergeCells`, the streaming writer and loading a file throw beyond that, so a workbook
  written with the defaults can always be read back with the defaults. Raise the workbook budget for
- trusted files with `workbook.xlsx.load(data, {maxMergedCells: n})` (the `WorkbookWriter` takes the
- same option).
+ trusted files with `workbook.xlsx.load(data, {maxMergedCells: n})`, for a workbook built in memory
+ with `workbook.maxMergedCells = n` (the `WorkbookWriter` takes the same option); a file written with
+ a raised budget needs the same `maxMergedCells` load option to be read back.
  Checking for overlapping merges takes time proportional to the merged area, not to the number of merges.
 * **Data validations.** Validations read from a file are expanded to one entry per cell in
  `worksheet.dataValidations.model` until 100,000 cells have been expanded for the workbook. Ranges
@@ -946,7 +947,7 @@ const html = '<div>' + cell.html + '</div>';
 
 ## Merged Cells[⬆](#contents)<!-- Link generated with jump2header -->
 
-A worksheet can have at most 1,048,576 merged cells in total, and a workbook `workbook.maxMergedCells` (4,194,304 by default;
+A worksheet can have at most 1,048,576 merged cells in total, and a workbook `workbook.maxMergedCells` (1,048,576 by default;
 see <a href="#security--limits">Security &amp; limits</a>).
 
 ```javascript
@@ -2236,7 +2237,7 @@ Options supported when reading XLSX files.
 | maxEntrySize     |     N       |  Number     | Maximum decompressed size of one part (zip entry) of the file, in bytes. Default is 1 GiB. See [Security & limits](#security--limits). |
 | maxUncompressedSize | N        |  Number     | Maximum decompressed size of all parts of the file, in bytes. Default is 2 GiB. |
 | maxCompressionRatio | N        |  Number     | Maximum compression ratio of a part larger than 10 MiB. Default is 1000. |
-| maxMergedCells   |     N       |  Number     | Maximum number of cells covered by merges in all the worksheets. Default is `workbook.maxMergedCells` (4,194,304); one worksheet holds at most 1,048,576 whatever this option. See [Security & limits](#security--limits). |
+| maxMergedCells   |     N       |  Number     | Maximum number of cells covered by merges in all the worksheets. Default is `workbook.maxMergedCells` (1,048,576); one worksheet holds at most 1,048,576 whatever this option. See [Security & limits](#security--limits). |
 | ignoreNodes      |     N       |  Array      | A list of node names to ignore while loading the XLSX document. Improves performance in some situations. <br/> Available: `sheetPr`, `dimension`, `sheetViews `, `sheetFormatPr`, `cols `, `sheetData`, `autoFilter `, `mergeCells `, `rowBreaks`, `hyperlinks `, `pageMargins`, `dataValidations`, `pageSetup`, `headerFooter `, `printOptions `, `picture`, `drawing`, `sheetProtection`, `tableParts `, `conditionalFormatting`, `extLst`,|
 
 ```javascript
@@ -2475,7 +2476,7 @@ The constructor takes an optional options object with the following fields:
 | filename         | If stream not specified, this field specifies the path to a file to write the XLSX workbook to. |
 | useSharedStrings | Specifies whether to use shared strings in the workbook. Default is `false`. |
 | useStyles        | Specifies whether to add style information to the workbook. Styles can add some performance overhead. Default is `false`. |
-| maxMergedCells   | Maximum number of cells covered by merges in all the worksheets, see [Security & limits](#security--limits). Default is 4,194,304. |
+| maxMergedCells   | Maximum number of cells covered by merges in all the worksheets, see [Security & limits](#security--limits). Default is 1,048,576. |
 | zip              | Zip options: `level` (0 to 9, 0 stores the parts uncompressed, default 6), `forceZip64` (write ZIP64 records even when they are not needed; they are added automatically past 4 GiB or 65,535 entries) and `comment`. The same options are accepted by `xlsx.write` / `writeBuffer` / `writeFile`. Default is `undefined`. |
 
 If neither stream nor filename is specified in the options, the workbook writer will create a StreamBuf object
@@ -3009,6 +3010,23 @@ sudo apt-get install libfontconfig
 ## Splice vs Merge[⬆](#contents)<!-- Link generated with jump2header -->
 
 Fixed in 5.0: merged cells move with the rows and columns that splices move, see [Merged Cells](#merged-cells).
+
+## Fake timers[⬆](#contents)<!-- Link generated with jump2header -->
+
+`xlsx.load` / `read` / `readFile` and `xlsx.write` / `writeBuffer` / `writeFile` give the event loop a turn (`setImmediate`, or a
+`MessageChannel` message in browsers) after every 25 ms of work, measured with `Date.now()`, so that a server stays responsive during a
+large read or write. Fake timers (`vi.useFakeTimers()`, `jest.useFakeTimers()`, sinon's `useFakeTimers()`) queue `setImmediate` until the
+test advances them:
+
+- `load` and `writeBuffer` settle as usual when the fake timers also fake `Date` (their default: the clock does not move, so no turn is
+  taken), and with a real `Date` for workbooks read or written in less than 25 ms;
+- with a real `Date`, larger workbooks wait for a turn every 25 ms;
+- `write(stream)` to a stream (anything with an `on` method, as `writeFile` uses) waits for one turn before completing the archive, so that
+  a failed write of the stream is reported.
+
+In the last two cases the promise settles only once the test advances the timers (`await vi.runAllTimersAsync()`,
+`await jest.runAllTimersAsync()`, `await clock.runAllAsync()`); or run that code with real timers, or fake only the timers the test needs
+(for example `vi.useFakeTimers({ toFake: ["setTimeout", "Date"] })`).
 
 # Release History[⬆](#contents)<!-- Link generated with jump2header -->
 
