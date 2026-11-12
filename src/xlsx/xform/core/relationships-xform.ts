@@ -1,11 +1,19 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
+import type { SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { RelationshipModel } from "../../../types";
 import BaseXform from "../base-xform";
 
 import RelationshipXform from "./relationship-xform";
 
-class RelationshipsXform extends BaseXform {
+/** A relationships part (`_rels/*.rels`): the list of its `<Relationship>` elements. */
+class RelationshipsXform extends BaseXform<RelationshipModel[]> {
+    /** The namespace of `<Relationships>`. */
+    static readonly RELATIONSHIPS_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/package/2006/relationships",
+    };
+
+    declare map: { readonly Relationship: RelationshipXform };
+
     constructor() {
         super();
 
@@ -14,19 +22,23 @@ class RelationshipsXform extends BaseXform {
         };
     }
 
-    render(xmlStream, model) {
-        model = model || this._values;
+    override render(xmlStream: XmlStream, model: readonly RelationshipModel[]): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode("Relationships", RelationshipsXform.RELATIONSHIPS_ATTRIBUTES);
 
-        model.forEach((relationship) => {
-            this.map.Relationship.render(xmlStream, relationship);
-        });
+        const relationshipXform = this.map.Relationship;
+        for (const relationship of model) {
+            relationshipXform.render(xmlStream, relationship);
+        }
 
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /**
+     * @returns `true` for `<Relationships>` and its relationships
+     * @throws Error on any other element
+     */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -35,26 +47,27 @@ class RelationshipsXform extends BaseXform {
             case "Relationships":
                 this.model = [];
                 return true;
+            case "Relationship":
+                this.parser = this.map.Relationship;
+                this.parser.parseOpen(node);
+                return true;
             default:
-                this.parser = this.map[node.name];
-                if (this.parser) {
-                    this.parser.parseOpen(node);
-                    return true;
-                }
                 throw new Error(`Unexpected xml node in parseOpen: ${JSON.stringify(node)}`);
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /** @throws Error on an unexpected end tag */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.model.push(this.parser.model);
+                // <Relationships> opened the list before its items; RelationshipXform has its model once open
+                this.model!.push(this.map.Relationship.model!);
                 this.parser = undefined;
             }
             return true;
@@ -67,9 +80,5 @@ class RelationshipsXform extends BaseXform {
         }
     }
 }
-
-RelationshipsXform.RELATIONSHIPS_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/package/2006/relationships",
-};
 
 export default RelationshipsXform;

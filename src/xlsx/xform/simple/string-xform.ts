@@ -1,9 +1,23 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { XmlAttributes } from "../../../utils/xml-stream";
+import BaseXform, { type ValueXformOptions } from "../base-xform";
 
-class StringXform extends BaseXform {
-    constructor(options) {
+/**
+ * An element holding a string, in an attribute (`<vertAlign val="superscript"/>`) or as its text
+ * (`<dc:title>Report</dc:title>`). Rendered unless the model is `undefined` (an empty string is written).
+ */
+class StringXform extends BaseXform<string> {
+    /** The element. */
+    readonly tag: string;
+    /** The attribute holding the value; `undefined`: the text of the element. */
+    readonly attr: string | undefined;
+    /** Fixed attributes written on the element. */
+    readonly attrs: XmlAttributes | undefined;
+    /** The chunks of text of the element being parsed (text mode). */
+    protected text: string[] = [];
+
+    constructor(options: ValueXformOptions) {
         super();
 
         this.tag = options.tag;
@@ -11,7 +25,7 @@ class StringXform extends BaseXform {
         this.attrs = options.attrs;
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: string | undefined): void {
         if (model !== undefined) {
             xmlStream.openNode(this.tag);
             if (this.attrs) {
@@ -26,7 +40,8 @@ class StringXform extends BaseXform {
         }
     }
 
-    parseOpen(node) {
+    /** Starts reading its element (attribute mode: the model is the attribute, `undefined` if absent). */
+    override parseOpen(node: SaxTag): void {
         if (node.name === this.tag) {
             if (this.attr) {
                 this.model = node.attributes[this.attr];
@@ -36,13 +51,13 @@ class StringXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (!this.attr) {
             this.text.push(text);
         }
     }
 
-    parseClose() {
+    override parseClose(): boolean {
         if (!this.attr) {
             this.model = this.text.join("");
         }

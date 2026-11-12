@@ -1,13 +1,39 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import XmlStream from "../../../utils/xml-stream";
-import BaseXform from "../base-xform";
+import type { SaxTag } from "../../../utils/parse-sax";
+import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
+import type { AppModel } from "../../../types";
+import BaseXform, { ownEntry } from "../base-xform";
 import StringXform from "../simple/string-xform";
 
 import AppHeadingPairsXform from "./app-heading-pairs-xform";
 import AppTitleOfPartsXform from "./app-titles-of-parts-xform";
 
-class AppXform extends BaseXform {
+/**
+ * `docProps/app.xml`, the extended properties: the application, the worksheet names (rendered only), the company and
+ * the manager (rendered and parsed). The other properties are written with fixed values and not parsed.
+ */
+class AppXform extends BaseXform<AppModel> {
+    /** Formats a date as W3CDTF (ISO 8601 without the fraction of seconds). */
+    static DateFormat(this: void, dt: Date): string {
+        return dt.toISOString().replace(/[.]\d{3,6}/, "");
+    }
+
+    /** The attributes of a W3CDTF date element. */
+    static readonly DateAttrs: XmlAttributes = { "xsi:type": "dcterms:W3CDTF" };
+
+    /** The namespaces of `<Properties>`. */
+    static readonly PROPERTY_ATTRIBUTES: XmlAttributes = {
+        xmlns: "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+        "xmlns:vt": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    };
+
+    // the key "TitleOfParts" does not match the element (TitlesOfParts): its content is skipped as an unknown element
+    declare map: {
+        readonly Company: StringXform;
+        readonly Manager: StringXform;
+        readonly HeadingPairs: AppHeadingPairsXform;
+        readonly TitleOfParts: AppTitleOfPartsXform;
+    };
+
     constructor() {
         super();
 
@@ -19,7 +45,8 @@ class AppXform extends BaseXform {
         };
     }
 
-    render(xmlStream, model) {
+    /** @param model - `worksheets` is required to render */
+    override render(xmlStream: XmlStream, model: AppModel & Required<Pick<AppModel, "worksheets">>): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
 
         xmlStream.openNode("Properties", AppXform.PROPERTY_ATTRIBUTES);
@@ -41,7 +68,8 @@ class AppXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<Properties>` and the properties that are parsed, `false` for the others (skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -50,7 +78,7 @@ class AppXform extends BaseXform {
             case "Properties":
                 return true;
             default:
-                this.parser = this.map[node.name];
+                this.parser = ownEntry(this.map, node.name);
                 if (this.parser) {
                     this.parser.parseOpen(node);
                     return true;
@@ -61,13 +89,13 @@ class AppXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -76,10 +104,12 @@ class AppXform extends BaseXform {
         }
         switch (name) {
             case "Properties":
+                // (`?? undefined`: a child's model is null only after a reset, which this xform never does)
                 this.model = {
-                    worksheets: this.map.TitleOfParts.model,
-                    company: this.map.Company.model,
-                    manager: this.map.Manager.model,
+                    // never set: the titles of parts are not parsed
+                    worksheets: this.map.TitleOfParts.model ?? undefined,
+                    company: this.map.Company.model ?? undefined,
+                    manager: this.map.Manager.model ?? undefined,
                 };
                 return false;
             default:
@@ -87,16 +117,5 @@ class AppXform extends BaseXform {
         }
     }
 }
-
-AppXform.DateFormat = function (dt) {
-    return dt.toISOString().replace(/[.]\d{3,6}/, "");
-};
-
-AppXform.DateAttrs = { "xsi:type": "dcterms:W3CDTF" };
-
-AppXform.PROPERTY_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
-    "xmlns:vt": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
-};
 
 export default AppXform;
