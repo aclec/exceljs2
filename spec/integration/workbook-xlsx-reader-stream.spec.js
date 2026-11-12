@@ -453,6 +453,37 @@ describe("WorkbookReader (stream)", () => {
         expect(values.slice(4)).to.deep.equal(["2024-02-30", "not a date"]);
     });
 
+    it('reads t="d" cells like the document reader', async () => {
+        const texts = [
+            "2024-02-29T24:00",
+            "2024-02-29T24:00:01",
+            "0099-12-31T10:00",
+            "2024-03-01T00:30+01:00",
+            "2024-02-29T12:30+15:00",
+            "2024-02-29T25:00",
+            "2023-02-29",
+        ];
+        const cells = texts.map((text) => `<c t="d"><v>${text}</v></c>`).join("");
+        const buffer = await tamper(await baseWorkbookBuffer(), {
+            "xl/worksheets/sheet1.xml": (xml) =>
+                xml.replace(/<sheetData>.*<\/sheetData>/, `<sheetData><row r="1">${cells}</row></sheetData>`),
+        });
+        const [sheet] = await readAll(chunkedStream(buffer));
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        const documentValues = wb.getWorksheet(1).getRow(1).values.slice(1);
+        expect(sheet.rows[0].values.slice(1)).to.deep.equal(documentValues);
+        expect(documentValues.map((value) => (value instanceof Date ? value.toISOString() : value))).to.deep.equal([
+            "2024-03-01T00:00:00.000Z",
+            "2024-02-29T24:00:01",
+            "0099-12-31T10:00:00.000Z",
+            "2024-02-29T23:30:00.000Z",
+            "2024-02-29T12:30+15:00",
+            "2024-02-29T25:00",
+            "2023-02-29",
+        ]);
+    });
+
     it("merges options passed to read() with the defaults", async () => {
         const buffer = await baseWorkbookBuffer();
         const reader = new ExcelJS.stream.xlsx.WorkbookReader();
