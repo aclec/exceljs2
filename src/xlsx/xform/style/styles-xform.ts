@@ -62,6 +62,11 @@ export interface StylesManagerIndex {
     font: Record<string, number>;
     border: Record<string, number>;
     fill: Record<string, number>;
+    /**
+     * The id of the cell format of the styles that have only a number format (or nothing), by number format id: the
+     * styles of most cells, registered without rendering their `<xf>` again.
+     */
+    numFmtStyle: Map<number | undefined, number>;
 }
 
 /**
@@ -209,6 +214,7 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
             font: {},
             border: {},
             fill: {},
+            numFmtStyle: new Map(),
         };
     }
 
@@ -421,24 +427,39 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
             style.numFmtId = this._addNumFmtStr("mm-dd-yy");
         }
 
-        if (model.font) {
-            style.fontId = this._addFont(model.font);
+        const { font, border, fill, alignment, protection } = model;
+        if (!font && !border && !fill && !alignment && !protection) {
+            // the format of a style with only a number format depends on it only: skip rendering its <xf>
+            const index = this.managerIndex.numFmtStyle;
+            let styleId = index.get(style.numFmtId);
+            if (styleId === undefined) {
+                styleId = this._addStyle(style);
+                index.set(style.numFmtId, styleId);
+            }
+            if (weakMap) {
+                weakMap.set(model, styleId);
+            }
+            return styleId;
         }
 
-        if (model.border) {
-            style.borderId = this._addBorder(model.border);
+        if (font) {
+            style.fontId = this._addFont(font);
         }
 
-        if (model.fill) {
-            style.fillId = this._addFill(model.fill);
+        if (border) {
+            style.borderId = this._addBorder(border);
         }
 
-        if (model.alignment) {
-            style.alignment = model.alignment;
+        if (fill) {
+            style.fillId = this._addFill(fill);
         }
 
-        if (model.protection) {
-            style.protection = model.protection;
+        if (alignment) {
+            style.alignment = alignment;
+        }
+
+        if (protection) {
+            style.protection = protection;
         }
 
         const styleId = this._addStyle(style);

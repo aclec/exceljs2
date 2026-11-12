@@ -47,16 +47,31 @@ class StyleXform extends BaseXform<XfModel> {
             fontId: model.fontId || 0,
             fillId: model.fillId || 0,
             borderId: model.borderId || 0,
-            xfId: this.xfId ? model.xfId || 0 : undefined,
-            applyNumberFormat: model.numFmtId ? "1" : undefined,
-            applyFont: model.fontId ? "1" : undefined,
-            applyFill: model.fillId ? "1" : undefined,
-            applyBorder: model.borderId ? "1" : undefined,
-            applyAlignment: model.alignment ? "1" : undefined,
-            applyProtection: model.protection ? "1" : undefined,
         });
+        if (this.xfId) {
+            xmlStream.addAttribute("xfId", model.xfId || 0);
+        }
 
-        // the attributes are all written: rendering the children terminates the start tag
+        if (model.numFmtId) {
+            xmlStream.addAttribute("applyNumberFormat", "1");
+        }
+        if (model.fontId) {
+            xmlStream.addAttribute("applyFont", "1");
+        }
+        if (model.fillId) {
+            xmlStream.addAttribute("applyFill", "1");
+        }
+        if (model.borderId) {
+            xmlStream.addAttribute("applyBorder", "1");
+        }
+        if (model.alignment) {
+            xmlStream.addAttribute("applyAlignment", "1");
+        }
+        if (model.protection) {
+            xmlStream.addAttribute("applyProtection", "1");
+        }
+
+        // Rendering tags causes close of XML stream: the attributes must be added before rendering the children
         if (model.alignment) {
             this.map.alignment.render(xmlStream, model.alignment);
         }
