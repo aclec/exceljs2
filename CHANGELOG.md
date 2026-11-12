@@ -97,6 +97,11 @@ All fixes have regression tests in `spec/integration/security`.
       merges on a worksheet whose `sheetId` is 65535: 7.6 s); the workbook keeps a running total.
     - XML: a truncated part (an element left open) is rejected by both readers instead of being read as if complete (the streaming reader
       returned the first rows of a cut worksheet without an error).
+- Hostile names (found while porting to TypeScript): XML elements named after `Object.prototype` members (`<constructor/>`, `<toString/>`,
+  `__proto__`…) are skipped as unknown instead of crashing the load; zip parts named `constructor` / `toString` (themes, drawings, media,
+  tables, comments, worksheets) are kept apart from the prototype; a `<comment>` with `note=`, `type=` or `texts=` attributes no longer
+  crashes the load; the x14 data bar / icon set extensions no longer write a model property named after the file; `_.keyBy` returns a
+  null-prototype object.
 
 ### Dependencies
 
@@ -226,6 +231,27 @@ upstream PR code was merged) and has a regression test.
 
 - An empty shared string (`<si/>`) reads as `""` in both readers; it used to be re-saved as `[object Object]`.
 - A link to another workbook such as `"Book2.xlsx#Sheet1!A1"` is written as an external link again (not as a place in this workbook).
+
+Found while porting to TypeScript (each with a regression test that fails on the JavaScript code):
+
+- Streaming writer: distinct shared formulas were all written with `si="0"` (the counter was copied per row); `findCell` never found a cell.
+- Streaming reader: with `hyperlinks: "cache"`, a `<hyperlinks>` before `<sheetData>` erased the cell values; a stray `</row>` emitted a
+  `null` row; `HyperlinkReader.each` threw; a row with `s="0"` threw with `styles: "ignore"` (the default).
+- A styles part without dxfs or without cellXfs, or a workbook without styles part whose rows, columns or conditional formattings are
+  styled, made the load throw.
+- `cell.text` of a merged cell threw when its master was empty and gave `[object Object]` for a rich text or formula master; `cell.text` and
+  `toCsvString()` of a formula error gave `[object Object]`; `toCsvString()` of rich text threw.
+- `table.displayName` always returned the name (typo) and could not be set; `table.theme` read and wrote the wrong property.
+- `worksheet.addPivotTable()` threw on a loaded workbook (`pivotTables` was undefined).
+- `pageSetup.cellComments: "asDisplayed"` (the documented value) was not written.
+- The internal `StreamBuf` is a real `Duplex`: `on('data')`, `pause()`, `destroy()` behave as in Node.
+
+### Performance
+
+The TypeScript port was measured against the JavaScript code on every hot path (`bun run benchmark:suite`, median of 7 runs, Node 26):
+writing a workbook (`writeBuffer`) is 30 % faster, the streaming writer 45 % faster, the streaming reader 11 % faster (cells are written
+with one string per start tag, the style registry skips the cells that only have a number format, the reader scans canonical cell references
+without decoding them); reading and CSV are unchanged. The minified browser bundle is 448 KiB instead of 471 KiB.
 
 ### Documentation
 
