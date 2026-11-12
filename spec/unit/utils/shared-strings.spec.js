@@ -25,4 +25,26 @@ describe('SharedStrings', () => {
     expect(ss.getString(iXml)).to.equal('<tag>value</tag>');
     expect(ss.getString(iAmpersand)).to.equal('&');
   });
+
+  it('Shares rich text values by content', () => {
+    const ss = new SharedStrings();
+    const bold = {richText: [{font: {bold: true}, text: 'Hello'}]};
+    const italic = {richText: [{font: {italic: true}, text: 'Hello'}]};
+
+    const iBold = ss.add(bold);
+    const iItalic = ss.add(italic);
+    const iBoldV2 = ss.add({richText: [{font: {bold: true}, text: 'Hello'}]});
+    // a plain string that looks like a serialised rich text is a different value
+    const iJson = ss.add(JSON.stringify(bold.richText));
+    const iJsonObject = ss.add(JSON.stringify(bold));
+    const iObject = ss.add('[object Object]');
+
+    expect(new Set([iBold, iItalic, iJson, iJsonObject, iObject]).size).to.equal(5);
+    expect(iBoldV2).to.equal(iBold);
+    expect(ss.getString(iBold)).to.equal(bold);
+    expect(ss.getString(iItalic)).to.equal(italic);
+    expect(ss.getString(iJson)).to.equal(JSON.stringify(bold.richText));
+    expect(ss.count).to.equal(5);
+    expect(ss.totalRefs).to.equal(6);
+  });
 });

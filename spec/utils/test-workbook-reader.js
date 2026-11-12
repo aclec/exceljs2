@@ -175,7 +175,8 @@ module.exports = {
         }
       });
 
-      wb.read(filename, {entries: 'emit', worksheets: 'emit'});
+      // shared strings are emitted, so cells hold {sharedString: index}
+      wb.read(filename, {entries: 'emit', worksheets: 'emit', sharedStrings: 'emit'});
     });
   },
 };
