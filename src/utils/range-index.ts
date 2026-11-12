@@ -73,8 +73,8 @@ class RangeIndex<R extends IndexedRange = IndexedRange> {
     }
 
     /**
-     * Removes a rectangle added before.
-     * @throws TypeError when it was not added.
+     * Removes a rectangle added before, once: removing it again removes other rectangles of its blocks.
+     * @throws TypeError when it was never added.
      */
     remove(range: R): void {
         this._eachBlock(range, (key) => {

@@ -53,7 +53,7 @@ function inherits(
 }
 
 // eslint-disable-next-line no-control-regex -- the characters that XML 1.0 does not allow
-const xmlDecodeRegex = /[<>&'"\x7F\x00-\x08\x0B-\x0C\x0E-\x1F\uD800-\uDFFF￾￿]/;
+const xmlDecodeRegex = /[<>&'"\x7F\x00-\x08\x0B-\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]/;
 // Removes each open...close section (the first close after an open), like
 // text.replace(/\[[^\]]*]/g, '') but in linear time: that regular expression rescans the rest of the
 // text for every unclosed '['. An open without a close after it is kept.

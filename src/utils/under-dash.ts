@@ -206,7 +206,10 @@ export function isUndefined(val: unknown): val is undefined {
     return Object.prototype.toString.call(val) === "[object Undefined]";
 }
 
-/** Whether val is a plain object (`[object Object]`: no array, date, null...). */
+/**
+ * Whether val's toString tag is `[object Object]`: plain and null-prototype objects, class instances; not arrays,
+ * dates, null...
+ */
 export function isObject(val: unknown): val is Record<string, unknown> {
     return Object.prototype.toString.call(val) === "[object Object]";
 }
@@ -216,7 +219,8 @@ export function isObject(val: unknown): val is Record<string, unknown> {
  * missing), other values replace the target's; undefined values are skipped, and so are the keys `__proto__`,
  * `constructor` and `prototype`.
  * @param target - The object merged into, and returned; a new object when falsy.
- * @returns target.
+ * @returns target. Its type, the intersection of the arguments' types, is an approximation: a property that a source
+ * sets to undefined keeps the target's value.
  */
 export function deepMerge<T extends object, A>(target: T, a: A): T & A;
 export function deepMerge<T extends object, A, B>(target: T, a: A, b: B): T & A & B;

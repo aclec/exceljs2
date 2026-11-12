@@ -1,3 +1,4 @@
+import { EventEmitter } from "events";
 import { Duplex } from "stream";
 
 import { nop } from "./utils";
@@ -178,8 +179,11 @@ export interface StreamBufOptions {
  * - as a stream hub: pipe it to several writables;
  * - as a readable stream: feed data into the writable part and have some other code read from it.
  *
- * It implements the Duplex methods itself, without Node's stream state machine (only 'finish', 'data' and
- * 'readable' are emitted, by write() and end()). write() takes strings, Buffers, ArrayBuffers and StringBufs.
+ * It implements the read / write / pipe methods of Duplex itself and does not use Duplex's flow control: write() and
+ * end() emit 'data', 'readable' and 'finish' directly, and the listener methods (on, addListener, removeListener, off,
+ * removeAllListeners) are EventEmitter's, so that adding a 'data' or 'readable' listener does not resume the stream nor
+ * read (drain) its data. The Duplex state exists (the constructor builds it): destroy() works and emits 'close'.
+ * Async iteration is not supported. write() takes strings, Buffers, ArrayBuffers and StringBufs.
  */
 class StreamBuf extends Duplex {
     /** The size of each internal buffer, in bytes. */
@@ -342,6 +346,7 @@ class StreamBuf extends Duplex {
     /**
      * Writes the last chunk if any, then passes the buffered data on to the pipes, ends them and emits 'finish'.
      * With a chunk and no pipe, 'finish' is not emitted (write() does not call back without a pipe).
+     * @throws Error when chunk is not of a type write() takes; a callback must be the third argument (`end(cb)` throws).
      */
     override end(chunk?: unknown, encoding?: BufferEncoding | WriteCallback, callback?: WriteCallback): this {
         const writeComplete = (error?: Error | null): void => {
@@ -443,6 +448,21 @@ class StreamBuf extends Duplex {
         // not implemented
         throw new Error("Not Implemented");
     }
+
+    /**
+     * @throws Error always: not implemented (Readable's iterator would loop forever: read() never returns null).
+     */
+    override [Symbol.asyncIterator](): never {
+        throw new Error("Not Implemented");
+    }
+}
+
+// Readable's listener methods drive its flow state: on('data') calls resume() (undoing pause()), on('readable') calls
+// read(0) on the next tick (which returns, so drains, all the data here), removeListener can resume. StreamBuf emits its
+// events itself, as when it did not construct the Duplex state: it uses the plain EventEmitter methods.
+const emitterMethods = ["on", "addListener", "removeListener", "off", "removeAllListeners"] as const;
+for (const name of emitterMethods) {
+    Object.defineProperty(StreamBuf.prototype, name, Object.getOwnPropertyDescriptor(EventEmitter.prototype, name)!);
 }
 
 export default StreamBuf;
