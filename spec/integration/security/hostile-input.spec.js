@@ -230,6 +230,36 @@ describe("hostile input", function () {
         });
     });
 
+    describe("XML nesting", () => {
+        // saxes keeps an object per open element: deep nesting costs memory in both readers, the streaming one too
+        const deep = (depth) => ({
+            [SHEET]: (xml) => xml.replace("</sheetData>", `</sheetData>${"<a>".repeat(depth)}${"</a>".repeat(depth)}`),
+        });
+        const streamRead = async (buffer) => {
+            for await (const ws of new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]))) {
+                // eslint-disable-next-line no-unused-vars
+                for await (const row of ws) {
+                    // read
+                }
+            }
+        };
+
+        it("rejects elements nested more than 1000 deep in both readers", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), deep(1001));
+            for (const read of [load, streamRead]) {
+                const error = await read(buffer).catch((e) => e);
+                expect(error).to.be.an("error");
+                expect(error.message).to.equal("XML elements are nested more than 1000 deep");
+            }
+        });
+
+        it("still reads unknown elements nested less deep", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), deep(900));
+            expect((await load(buffer)).getWorksheet("Sheet1").getCell("A1").value).to.equal("hello");
+            await streamRead(buffer);
+        });
+    });
+
     describe("row numbers", () => {
         const withRow = (r) => ({ [SHEET]: (xml) => xml.replace("</sheetData>", `<row r="${r}"/></sheetData>`) });
 
