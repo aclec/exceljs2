@@ -8,7 +8,7 @@
 const PAUSE_INTERVAL = 25;
 
 /** Work split into steps: an iterator (usually a generator) that yields between items. Yielded values are ignored. */
-export type Steps = Iterator<unknown, unknown, undefined>;
+export type Steps<R = unknown> = Iterator<unknown, R, undefined>;
 
 /**
  * A promise that resolves after a turn of the event loop (timers and I/O run): setImmediate in Node.js and Bun, a
@@ -32,8 +32,10 @@ function nextTurn(): Promise<void> {
 }
 
 /** Runs all the steps of a generator at once. */
-function runSteps(steps: Steps): void {
-    for (let step = steps.next(); !step.done; step = steps.next());
+function runSteps<R>(steps: Steps<R>): R {
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
 }
 
 /** Runs steps of work, giving the event loop a turn every `interval` ms. */
@@ -67,13 +69,16 @@ class Pacer {
     }
 
     /** Runs the steps of a generator, pausing between them. */
-    async run(steps: Steps): Promise<void> {
-        for (let step = steps.next(); !step.done; step = steps.next()) {
+    async run<R>(steps: Steps<R>): Promise<R> {
+        let step = steps.next();
+        while (!step.done) {
             const pause = this.pause();
             if (pause) {
                 await pause;
             }
+            step = steps.next();
         }
+        return step.value;
     }
 }
 

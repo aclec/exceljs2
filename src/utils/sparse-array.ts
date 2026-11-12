@@ -114,15 +114,17 @@ export function shiftSteps(indices: readonly number[], first: number, last: numb
     let s = 0; // next source
     let d = 0; // next destination
     for (;;) {
-        // indices[s] and indices[d] exist: s and d are below indices.length
-        while (s < indices.length && indices[s]! < first) {
-            s++;
+        // undefined past the end of indices
+        let sourceIndex = indices[s];
+        while (sourceIndex !== undefined && sourceIndex < first) {
+            sourceIndex = indices[++s];
         }
-        while (d < indices.length && indices[d]! - offset < first) {
-            d++;
+        let destinationIndex = indices[d];
+        while (destinationIndex !== undefined && destinationIndex - offset < first) {
+            destinationIndex = indices[++d];
         }
-        const source = s < indices.length && indices[s]! <= last ? indices[s]! : Infinity;
-        const destination = d < indices.length && indices[d]! - offset <= last ? indices[d]! - offset : Infinity;
+        const source = sourceIndex !== undefined && sourceIndex <= last ? sourceIndex : Infinity;
+        const destination = destinationIndex !== undefined && destinationIndex - offset <= last ? destinationIndex - offset : Infinity;
         const step = Math.min(source, destination);
         if (step === Infinity) {
             return steps;

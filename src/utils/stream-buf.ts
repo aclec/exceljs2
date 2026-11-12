@@ -221,14 +221,14 @@ class StreamBuf extends Duplex {
 
     /** All the data written and not read yet, in one Buffer; null when nothing was written. */
     toBuffer(): Buffer | null {
-        switch (this.buffers.length) {
-            case 0:
-                return null;
-            case 1:
-                return this.buffers[0]!.toBuffer();
-            default:
-                return Buffer.concat(this.buffers.map((rwBuf) => rwBuf.toBuffer()));
+        const [first] = this.buffers;
+        if (!first) {
+            return null;
         }
+        if (this.buffers.length === 1) {
+            return first.toBuffer();
+        }
+        return Buffer.concat(this.buffers.map((rwBuf) => rwBuf.toBuffer()));
     }
 
     // writable
@@ -302,8 +302,9 @@ class StreamBuf extends Duplex {
         if (this.pipes.length) {
             if (this.batch) {
                 this._writeToBuffers(chunk);
-                while (!this.corked && this.buffers.length > 1) {
-                    void this._pipe(this.buffers.shift()!);
+                let full: ReadWriteBuf | undefined;
+                while (!this.corked && this.buffers.length > 1 && (full = this.buffers.shift())) {
+                    void this._pipe(full);
                 }
             } else if (!this.corked) {
                 void this._pipe(chunk).then(() => done());
@@ -384,7 +385,10 @@ class StreamBuf extends Duplex {
             let first;
             while (size && (first = this.buffers[0]) && !first.eod) {
                 // not null: size is not 0
-                const buffer = first.read(size)!;
+                const buffer = first.read(size);
+                if (!buffer) {
+                    break;
+                }
                 size -= buffer.length;
                 buffers.push(buffer);
                 if (first.eod && first.full) {
@@ -463,7 +467,11 @@ class StreamBuf extends Duplex {
 // events itself, as when it did not construct the Duplex state: it uses the plain EventEmitter methods.
 const emitterMethods = ["on", "addListener", "removeListener", "off", "removeAllListeners"] as const;
 for (const name of emitterMethods) {
-    Object.defineProperty(StreamBuf.prototype, name, Object.getOwnPropertyDescriptor(EventEmitter.prototype, name)!);
+    const descriptor = Object.getOwnPropertyDescriptor(EventEmitter.prototype, name);
+    if (!descriptor) {
+        throw new Error(`EventEmitter.prototype.${name} is missing`);
+    }
+    Object.defineProperty(StreamBuf.prototype, name, descriptor);
 }
 
 export default StreamBuf;

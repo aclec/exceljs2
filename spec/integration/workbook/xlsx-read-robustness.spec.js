@@ -520,4 +520,57 @@ describe("xlsx read robustness", function () {
             await wb.xlsx.writeBuffer();
         });
     });
+
+    describe("read() of a stream", () => {
+        it("rejects a stream of strings with a clear TypeError", async () => {
+            const buffer = await baseWorkbookBuffer();
+            const stream = Readable.from([buffer.toString("latin1")]);
+            const wb = new ExcelJS.Workbook();
+            let error;
+            await wb.xlsx.read(stream).catch((e) => {
+                error = e;
+            });
+            expect(error).to.be.an.instanceOf(TypeError);
+            expect(error.message).to.equal("Can't read the zip file: the stream must give bytes (Buffers or Uint8Arrays)");
+        });
+
+        it("reads an old-style stream (pipe only) through a PassThrough", async () => {
+            const buffer = await baseWorkbookBuffer();
+            const legacy = { pipe: (destination) => destination.end(buffer) };
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.read(legacy);
+            expect(wb.getWorksheet("Sheet1").getCell("A1").value).to.equal("hello");
+        });
+    });
+
+    describe("media, themes and relationships parts", () => {
+        it("keeps an empty media part as a medium without buffer, and the text of a theme part", async () => {
+            const buffer = editParts(await baseWorkbookBuffer(), (parts) => {
+                parts["xl/media/image9.png"] = "";
+                parts["xl/theme/theme2.xml"] = "<theme/>";
+            });
+            const wb = await load(buffer);
+            expect(wb.model.media).to.have.length(1);
+            expect(wb.model.media[0]).to.include({ type: "image", name: "image9", extension: "png", buffer: null });
+            expect(wb.model.themes.theme2).to.equal("<theme/>");
+            expect(wb.getWorksheet("Sheet1").getCell("A1").value).to.equal("hello");
+        });
+    });
+
+    describe("writing an unprepared model", () => {
+        it("addWorksheets throws a clear Error", async () => {
+            const wb = new ExcelJS.Workbook();
+            wb.addWorksheet("Sheet1");
+            const { model } = wb;
+            wb.xlsx.prepareModel(model, {});
+            // as a model whose worksheets were not prepared by worksheet-xform
+            delete model.worksheets[0].comments;
+            let error;
+            await wb.xlsx.addWorksheets({ append() {} }, model).catch((e) => {
+                error = e;
+            });
+            expect(error).to.be.an.instanceOf(Error);
+            expect(error.message).to.equal("addWorksheets: the worksheet Sheet1 has no notes list (prepareModel was not run)");
+        });
+    });
 });

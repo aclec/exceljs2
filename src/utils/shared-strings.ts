@@ -1,4 +1,5 @@
 import type { CellRichTextValue } from "../../index";
+import { createDictionary } from "./utils";
 
 /** A value of the shared strings table: a plain string or a rich text. */
 export type SharedStringValue = string | CellRichTextValue;
@@ -20,7 +21,7 @@ class SharedStrings {
     constructor() {
         this._values = [];
         this._totalRefs = 0;
-        this._hash = Object.create(null) as Record<string, number>;
+        this._hash = createDictionary<number>();
         this._richTextHash = new Map();
     }
 
@@ -59,8 +60,10 @@ class SharedStrings {
                 this._values.push(value);
             }
         } else {
-            // a string (any other value is converted to a property key, e.g. "[object Object]", as it always was)
-            const key = value as string;
+            // a string. Any other value is keyed by its string form, the property key it always gave: the cell xform also
+            // adds the Date or error text of a hyperlink read from a file (an error text gives "[object Object]")
+            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- documented above
+            const key = typeof value === "string" ? value : String(value);
             index = this._hash[key];
             if (index === undefined) {
                 index = this._hash[key] = this._values.length;

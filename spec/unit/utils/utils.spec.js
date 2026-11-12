@@ -127,4 +127,45 @@ describe("utils", () => {
             expect(utils.parseBoolean("false", true)).to.equal(false);
         });
     });
+
+    describe("toIsoDateString", () => {
+        it("gives the UTC date part of the ISO form (it always threw a TypeError)", () => {
+            expect(utils.toIsoDateString(new Date(Date.UTC(2024, 0, 31, 23, 59)))).to.equal("2024-01-31");
+        });
+    });
+
+    describe("createDictionary", () => {
+        it("creates an empty object without prototype", () => {
+            const dictionary = utils.createDictionary();
+            expect(Object.getPrototypeOf(dictionary)).to.equal(null);
+            expect(Object.keys(dictionary)).to.deep.equal([]);
+            dictionary.__proto__ = 1;
+            expect(dictionary.__proto__).to.equal(1);
+            expect(Object.keys(dictionary)).to.deep.equal(["__proto__"]);
+        });
+    });
+
+    describe("inherits", () => {
+        it("copies the own enumerable statics and prototype properties", () => {
+            function Base() {}
+            Base.prototype.base = () => "base";
+            function Derived() {}
+            const statics = { s: 1 };
+            Object.defineProperty(statics, "hidden", { value: 2, enumerable: false });
+            const prototype = {
+                get g() {
+                    return "g";
+                },
+            };
+            Object.defineProperty(prototype, "hiddenMethod", { value: () => 0, enumerable: false });
+            utils.inherits(Derived, Base, statics, prototype);
+            expect(Derived.s).to.equal(1);
+            expect(Object.hasOwn(Derived, "hidden")).to.equal(false);
+            const derived = new Derived();
+            expect(derived.g).to.equal("g");
+            expect(derived.base()).to.equal("base");
+            expect(derived.hiddenMethod).to.equal(undefined);
+            expect(Derived.super_).to.equal(Base);
+        });
+    });
 });

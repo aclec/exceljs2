@@ -60,14 +60,15 @@ function slideFormula(formula: string, fromCell: string, toCell: string): string
     const to = colCache.decode(toCell);
     const translate = (addrPart: string): string => {
         const match = CRrx.exec(addrPart);
-        if (!match) {
+        // groups 2 and 4 are not optional: a match has them
+        const colLetters = match?.[2];
+        const rowStr = match?.[4];
+        if (!match || colLetters === undefined || rowStr === undefined) {
             return addrPart;
         }
-        // groups 2 and 4 are not optional
         const colDollar = match[1];
-        const colStr = match[2]!.toUpperCase();
+        const colStr = colLetters.toUpperCase();
         const rowDollar = match[3];
-        const rowStr = match[4]!;
         if (colStr.length > 3 || (colStr.length === 3 && colStr > "XFD")) {
             // > XFD is the highest col number in excel 2007 and beyond, so this is a named range
             return addrPart;
