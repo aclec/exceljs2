@@ -25,16 +25,18 @@ Applications that must run on an older Node.js or on Internet Explorer should st
 
 ## Dependencies
 
-Runtime dependencies were upgraded and three were removed. They are internal to ExcelJS, but you may notice them in your lockfile or bundle:
+Runtime dependencies were upgraded, three were removed and the three zip libraries were replaced by one. They are internal to ExcelJS, but
+you may notice them in your lockfile or bundle:
 
 | Dependency      | 4.x      | 5.0                                                                            |
 | --------------- | -------- | ------------------------------------------------------------------------------ |
-| archiver        | ^5.0.0   | ^7.0.1                                                                         |
 | dayjs           | ^1.8.34  | ^1.11.23                                                                       |
 | fast-csv        | ^4.3.1   | ^5.0.8                                                                         |
-| jszip           | ^3.10.1  | ^3.10.2                                                                        |
 | saxes           | ^5.0.1   | ^6.0.0                                                                         |
-| unzipper        | ^0.10.11 | ^0.12.5                                                                        |
+| archiver        | ^5.0.0   | removed: see [Zip library](#zip-library-fflate)                                |
+| jszip           | ^3.10.1  | removed: see [Zip library](#zip-library-fflate)                                |
+| unzipper        | ^0.10.11 | removed: see [Zip library](#zip-library-fflate)                                |
+| fflate          | -        | ^0.8.3 (new, no dependencies)                                                  |
 | readable-stream | ^3.6.0   | removed: `node:stream` is used (`stream-browserify` inside the browser bundle) |
 | tmp             | ^0.2.0   | removed: `fs.promises.mkdtemp`                                                 |
 | uuid            | ^8.3.0   | removed: `crypto.randomUUID` / `crypto.getRandomValues`                        |
@@ -152,9 +154,9 @@ The typings use `get`/`set` accessor declarations in interfaces, which require T
 
 ## Zip library: fflate
 
-`archiver`, `jszip` and `unzipper` were replaced by a single zero-dependency library, [fflate](https://github.com/101arrowz/fflate)
-(^0.8.3), in the browser bundle and on Node.js and Bun. This supersedes their rows in the [Dependencies](#dependencies) table above. The zip
-records (including ZIP64) are written and read by ExcelJS itself; fflate compresses and decompresses.
+`archiver`, `jszip` and `unzipper` were replaced by ExcelJS's own zip code (records, ZIP64, limits) on top of one DEFLATE implementation per
+platform: `node:zlib` (native) on Node.js and Bun, and [fflate](https://github.com/101arrowz/fflate) (^0.8.3, no dependencies) in the
+browser bundle. The two produce standard archives that each reads from the other.
 
 ### `zip` option of the writers
 

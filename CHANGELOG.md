@@ -46,7 +46,8 @@ All fixes have regression tests in `spec/integration/security`.
 
 ### Dependencies
 
-- archiver, jszip and unzipper replaced by fflate ^0.8.3 (zero dependencies), see [Zip library](#zip-library-fflate) below
+- archiver, jszip and unzipper removed: `node:zlib` on Node.js and Bun, fflate ^0.8.3 (no dependencies) in the browser bundle, see
+  [Zip library](#zip-library-fflate) below
 - dayjs ^1.8.34 → ^1.11.23
 - fast-csv ^4.3.1 → ^5.0.8
 - saxes ^5.0.1 → ^6.0.0
@@ -110,9 +111,10 @@ upstream PR code was merged) and has a regression test.
 ### Zip library (fflate)
 
 - `archiver` (streaming writer), `unzipper` (streaming reader) and `jszip` (document reader / writer, browser bundle) were replaced by
-  [fflate](https://github.com/101arrowz/fflate) for DEFLATE and by ExcelJS's own zip container code (`lib/utils/zip-stream.js`,
-  `lib/utils/zip-reader.js`). Runtime dependencies go from 3 zip libraries (about 80 packages) to one package without dependencies; the
-  minified browser bundle shrinks from 529.6 KiB to 479.6 KiB (gzip 150.4 KiB → 138.5 KiB).
+  ExcelJS's own zip container code (`lib/utils/zip-stream.js`, `lib/utils/zip-reader.js`) on top of `node:zlib` on Node.js and Bun
+  (`lib/utils/deflate.js`; the streaming writer compresses in the thread pool, like archiver did) and
+  [fflate](https://github.com/101arrowz/fflate) in the browser bundle. Runtime dependencies go from 3 zip libraries (about 80 packages) to
+  one package without dependencies; the minified browser bundle shrinks from 529.6 KiB to 482.9 KiB (gzip 150.4 KiB → 139.5 KiB).
 - Security: both readers enforce decompression limits while inflating (`maxEntrySize`, `maxUncompressedSize`, `maxCompressionRatio`), so a
   zip bomb is rejected before it is materialised in memory or in the streaming reader's temporary files.
 - ZIP64: both writers add ZIP64 records past 4 GiB or 65,535 entries (`writeBuffer` could not before), `forceZip64` works in both.
