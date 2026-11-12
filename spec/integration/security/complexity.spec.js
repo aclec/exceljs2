@@ -124,4 +124,33 @@ describe("hostile input: algorithmic complexity", function () {
         expect(ms).to.be.below(500);
         expect(wb.definedNames.model[99]).to.deep.equal({ name: "n99", ranges: ["Sheet1!$A$1", "Sheet1!$XFC$1048575"] });
     });
+
+    it("keeps a <col> range spanning every column as a range instead of one object per column", async () => {
+        const SHEETS = 100;
+        const patches = {};
+        for (let i = 1; i <= SHEETS; i++) {
+            patches[`xl/worksheets/sheet${i}.xml`] = (xml) =>
+                xml
+                    .replace("<sheetData>", '<cols><col min="1" max="16384" width="20" customWidth="1"/></cols><sheetData>')
+                    .replace(/<c r="A1"/, '<c r="XFD1"');
+        }
+        const buffer = await tamper(
+            await baseWorkbookBuffer((wb) => {
+                for (let i = 2; i <= SHEETS; i++) {
+                    wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+                }
+            }),
+            patches
+        );
+        const heapBefore = process.memoryUsage().heapUsed;
+        const wb = await load(buffer);
+        const written = await wb.xlsx.writeBuffer();
+        // one Column object per column of every worksheet took 270 MB
+        expect(process.memoryUsage().heapUsed - heapBefore).to.be.below(100 * 1024 * 1024);
+
+        const ws = (await load(written)).getWorksheet(SHEETS);
+        expect(ws.getCell("XFD1").value).to.equal(SHEETS);
+        expect(ws.getColumn(100).width).to.equal(20);
+        expect(ws.model.cols.map(({ min, max, width }) => [min, max, width])).to.deep.equal([[1, 16384, 20]]);
+    });
 });
