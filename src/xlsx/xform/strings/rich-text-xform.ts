@@ -110,7 +110,7 @@ class RichTextXform extends BaseXform<RichTextRun> {
                 return false;
             case "t":
                 // the text, completed by the text xform's parseClose (a <t> misplaced inside <rPr> is ignored)
-                if (this.parser === this._textXform) {
+                if (this.parser && this.parser === this._textXform) {
                     this.textXform.parseClose();
                     this.model!.text = this.textXform.model!;
                 }
@@ -118,7 +118,7 @@ class RichTextXform extends BaseXform<RichTextRun> {
                 return true;
             case "rPr":
                 // the font (an <rPr> misplaced inside <t> is ignored). FontXform is not typed yet: its model is unknown
-                if (this.parser === this._fontXform) {
+                if (this.parser && this.parser === this._fontXform) {
                     this.model!.font = this.fontXform.model as FontModel;
                 }
                 this.parser = undefined;

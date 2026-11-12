@@ -58,5 +58,17 @@ describe("RichTextXform", () => {
     it("ignores a <t> misplaced inside <rPr> and an <rPr> misplaced inside <t>", async () => {
         expect(await parse(new RichTextXform(), "<r><rPr><t>x</t></rPr><t>y</t></r>")).to.deep.equal({ text: "y" });
         expect(await parse(new RichTextXform(), "<r><t>y<rPr/></t></r>")).to.deep.equal({});
+        // the guards hold before the text / font xforms are created
+        expect(await parse(new RichTextXform(), "<r><rPr><t><t/></t></rPr></r>")).to.deep.equal({});
+        expect(await parse(new RichTextXform(), "<r><t>x<rPr><rPr/></rPr></t></r>")).to.deep.equal({});
+    });
+});
+
+describe("SharedStringXform", () => {
+    it("ignores a run ended early by an element nested in it, as it always did", async () => {
+        expect(await parse(new SharedStringXform(), "<si><t>ab<x/>cd</t></si>")).to.equal("");
+        expect(await parse(new SharedStringXform(), "<si><t>a</t><r><t>b</t></r></si>")).to.deep.equal({
+            richText: [{ text: "a" }, { text: "b" }],
+        });
     });
 });

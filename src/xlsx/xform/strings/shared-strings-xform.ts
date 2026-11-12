@@ -73,7 +73,7 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
      * @returns its index in the table
      */
     add(value: SharedStringValue): number {
-        return typeof value === "object" && value.richText ? this.addRichText(value) : this.addText(value as string);
+        return typeof value !== "string" && value.richText ? this.addRichText(value) : this.addText(value as string);
     }
 
     /**

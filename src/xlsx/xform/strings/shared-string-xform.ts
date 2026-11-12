@@ -91,7 +91,7 @@ class SharedStringXform extends BaseXform<SharedStringValue> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // a child closed (its model is complete)
-                if (this.parser === this.map.r) {
+                if (name === "r" && this.parser === this.map.r) {
                     const run = this.map.r.model!;
                     const { model } = this;
                     if (typeof model === "string") {
@@ -102,7 +102,7 @@ class SharedStringXform extends BaseXform<SharedStringValue> {
                     } else {
                         this.model = { richText: [run] };
                     }
-                } else if (this.parser === this.map.t) {
+                } else if (name === "t" && this.parser === this.map.t) {
                     this.model = this.map.t.model!;
                 }
                 this.parser = undefined;

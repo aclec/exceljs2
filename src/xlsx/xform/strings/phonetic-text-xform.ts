@@ -88,15 +88,16 @@ class PhoneticTextXform extends BaseXform<PhoneticTextModel> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // a run closed (<rPh> created the model before its runs; a closed run has its model)
+                // a run closed (<rPh> created the model before its runs; a closed run has its model). An element nested
+                // in a run that ends it early (e.g. <t>a<x/></t>) is ignored, as it always was
                 const model = this.model!;
-                if (this.parser === this.map.r) {
+                if (name === "r" && this.parser === this.map.r) {
                     let rt = model.richText;
                     if (!rt) {
                         rt = model.richText = [];
                     }
                     rt.push(this.map.r.model!);
-                } else {
+                } else if (name === "t" && this.parser === this.map.t) {
                     model.text = this.map.t.model!;
                 }
                 this.parser = undefined;
