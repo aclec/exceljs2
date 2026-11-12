@@ -5,6 +5,7 @@ const testXformHelper = require("../test-xform-helper");
 const Enums = verquire("doc/enums");
 const XmlStream = verquire("utils/xml-stream");
 const WorksheetXform = verquire("xlsx/xform/sheet/worksheet-xform");
+const RelType = verquire("xlsx/rel-type");
 
 const SharedStringsXform = verquire("xlsx/xform/strings/shared-strings-xform");
 const StylesXform = verquire("xlsx/xform/style/styles-xform");
@@ -187,5 +188,26 @@ describe("WorksheetXform", () => {
         expect(iConditionalFormatting).not.to.equal(-1);
         expect(iDataValidations).not.to.equal(-1);
         expect(iConditionalFormatting).to.be.lessThan(iDataValidations);
+    });
+
+    it("indexes hyperlinks by the cell references of the file without inheriting Object.prototype members", () => {
+        const xform = new WorksheetXform();
+        const model = {
+            hyperlinks: [
+                { address: "__proto__", rId: "rId1" },
+                { address: "B2", target: "Sheet2!A1" },
+            ],
+            relationships: [{ Id: "rId1", Type: RelType.Hyperlink, Target: "http://example.com/", TargetMode: "External" }],
+            rows: [],
+            conditionalFormattings: [],
+        };
+        const options = { styles: new StylesXform(true) };
+        xform.reconcile(model, options);
+
+        const { hyperlinkMap } = options;
+        expect(Object.getOwnPropertyDescriptor(hyperlinkMap, "__proto__").value).to.equal("http://example.com/");
+        expect(hyperlinkMap.B2).to.equal("#Sheet2!A1");
+        expect(hyperlinkMap.toString).to.equal(undefined);
+        expect(hyperlinkMap.constructor).to.equal(undefined);
     });
 });

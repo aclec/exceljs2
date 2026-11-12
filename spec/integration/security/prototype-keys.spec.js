@@ -227,6 +227,32 @@ describe("prototype-named keys in xlsx parts", function () {
             await wb.xlsx.writeBuffer(); // used to throw on a missing shared formula master
         });
 
+        it('a hyperlink ref="__proto__" or r:id="__proto__"', async () => {
+            const base = await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B2").value = { text: "x", hyperlink: "http://example.com/" };
+                ws.getCell("B3").value = { text: "y", hyperlink: "http://example.org/" };
+            });
+            const buffer = await tamper(base, {
+                "xl/worksheets/sheet1.xml": (xml) =>
+                    xml
+                        .replace('<hyperlink ref="B2"', '<hyperlink ref="__proto__"')
+                        .replace(
+                            "</hyperlinks>",
+                            '<hyperlink ref="A1" r:id="__proto__"/><hyperlink ref="constructor" location="Sheet1!A1"/></hyperlinks>'
+                        ),
+            });
+            const before = snapshotPrototypes();
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer);
+            expect(snapshotPrototypes()).to.deep.equal(before);
+            const ws = wb.getWorksheet("Sheet1");
+            expect(ws.getCell("A1").value).to.equal("hello");
+            expect(ws.getCell("B2").value).to.equal("x");
+            expect(ws.getCell("B3").value).to.deep.equal({ text: "y", hyperlink: "http://example.org/" });
+            const out = await wb.xlsx.writeBuffer();
+            expect(await readPart(out, "xl/worksheets/sheet1.xml")).not.to.include("__proto__");
+        });
+
         it("a background image target", async () => {
             const base = await baseWorkbookBuffer((wb, ws) => {
                 ws.addBackgroundImage(wb.addImage({ filename: "./spec/integration/data/image.png", extension: "png" }));
