@@ -233,6 +233,7 @@ The typings were corrected to match the runtime. Code that relied on the old (wr
 | `TableStyleProperties.theme`                                  | theme names                                 | theme names or `null` (no style)                          |
 | `stream.xlsx.WorksheetReader` `dimensions`, `columns`         | methods                                     | getters; `columns` may be `null`                          |
 | `csv.createInputStream()`                                     | declared                                    | removed (it has thrown since 4.0: use `csv.read(stream)`) |
+| `writeBuffer()` result (`ExcelJS.Buffer`)                     | an `ArrayBuffer`-like interface             | a Node `Buffer` backed by an `ArrayBuffer`                |
 
 `editAs` is now checked: an object literal stored in a variable before the call widens `editAs` to `string` and no longer compiles. Annotate
 it instead:
@@ -243,10 +244,17 @@ const position = { tl: { col: 0, row: 0 }, ext: { width: 100, height: 50 }, edit
 worksheet.addImage(imageId, position);
 ```
 
-New or widened types: `DataValidationType`, `ImageEditAs`, all `cellIs` operators (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`,
-`notBetween`), optional conditional-formatting `priority`, data bar colours, optional `worksheet.protect()` arguments, optional
-`WorkbookReader` options, `WorksheetReader` `id`/`name`/`state`, and the EventEmitter methods of the streaming readers. `xlsx.load()`
-accepts Node Buffers and `Uint8Array`, and `Image.buffer` accepts Node Buffers, with TypeScript 5.7+ typed arrays.
+`(await workbook.xlsx.writeBuffer()) as Buffer` failed with TS2352 in 4.x; the result is now typed as what it is at run time (a Node
+`Buffer`, or the Buffer polyfill in the browser bundle): it can be passed to `fs.writeFile` or cast to `Buffer`, and still to
+`new Blob([data])`. Assigning it to an `ArrayBuffer` variable no longer compiles (it never was one); copy it with
+`data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)` when an `ArrayBuffer` is needed. `xlsx.load()` is typed
+`ArrayBuffer | Uint8Array` (Node Buffers included).
+
+New or widened types: `worksheet.dataValidations` (`DataValidations`: `add`, `find`, `remove`, `model`), `DataValidationType`,
+`ImageEditAs`, all `cellIs` operators (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`, `notBetween`), optional conditional-formatting
+`priority`, data bar colours, optional `worksheet.protect()` arguments, optional `WorkbookReader` options, `WorksheetReader`
+`id`/`name`/`state`, and the EventEmitter methods of the streaming readers. `xlsx.load()` accepts Node Buffers and `Uint8Array`, and
+`Image.buffer` accepts Node Buffers, with TypeScript 5.7+ typed arrays.
 
 `index.d.ts` now starts with `/// <reference types="node" />`, so that it works with TypeScript 6 and 7, which no longer load `@types/*`
 packages automatically. Install `@types/node` as a dev dependency (also in browser projects), or enable `skipLibCheck`. As a consequence,

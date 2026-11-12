@@ -33,6 +33,14 @@ async function binaryInputs(): Promise<void> {
     wb.addImage({ buffer: fs.readFileSync("image.png"), extension: "png" });
     const output = await wb.xlsx.writeBuffer();
     fs.writeFileSync("out.xlsx", Buffer.from(output));
+    // a Node Buffer at run time (the Buffer polyfill, a Uint8Array, in the browser bundle)
+    const nodeBuffer: Buffer = await wb.xlsx.writeBuffer();
+    const cast = (await wb.xlsx.writeBuffer()) as Buffer;
+    fs.writeFileSync("out.xlsx", output);
+    const csv: Buffer = await wb.csv.writeBuffer();
+    // browsers: a Blob part (TypeScript 5.7+ DOM typings want an ArrayBuffer-backed view)
+    const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    void [nodeBuffer, cast, csv, blob];
 }
 
 // --- Address.col / Address.row are numbers (upstream #2720) -----------------------------------
@@ -129,6 +137,15 @@ function dataValidation(): void {
     // @ts-expect-error unknown validation type
     const bad: ExcelJS.DataValidationType = "integer";
     void bad;
+
+    // worksheet.dataValidations (upgrade guide: read range keys from its model)
+    const dataValidations: ExcelJS.DataValidations = worksheet.dataValidations;
+    const added: ExcelJS.DataValidation = dataValidations.add("B1:B10", { type: "list", formulae: ['"a,b"'] });
+    const found: ExcelJS.DataValidation | undefined = dataValidations.find("B5");
+    dataValidations.remove("B5");
+    const model: { [address: string]: ExcelJS.DataValidation | undefined } = dataValidations.model;
+    dataValidations.model["C1:C10"] = { type: "whole", operator: "greaterThan", formulae: [0] };
+    void [added, found, model];
 }
 
 // --- tables: theme may be null for "no style" (upstream #2061) ---------------------------------
