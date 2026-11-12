@@ -53,7 +53,7 @@ class Image {
 
     /**
      * The model of the image (new objects; `ext` and `hyperlinks` are shared).
-     * @throws Error when the type is neither "image" nor "background"
+     * @throws Error when the type is neither "image" nor "background", or for an image without range
      */
     get model(): WorksheetMediumModel {
         switch (this.type) {
@@ -63,8 +63,11 @@ class Image {
                     imageId: this.imageId,
                 };
             case "image": {
-                // the model setter sets the range of an image
-                const range = this.range!;
+                // the model setter sets the range of an image (getImages() gives it: it may be removed)
+                const { range } = this;
+                if (!range) {
+                    throw new Error(`The image ${this.imageId} has no range`);
+                }
                 return {
                     type: this.type,
                     imageId: this.imageId,

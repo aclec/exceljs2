@@ -81,16 +81,6 @@ class Anchor {
         }
     }
 
-    /**
-     * The model as an Anchor: an Anchor, `null` and `undefined` are returned as they are.
-     *
-     * NB: any other value is passed as the worksheet of a new Anchor (as the JavaScript version did), which gives an
-     * anchor at A1: the method is not used by the library.
-     */
-    static asInstance(model: unknown): Anchor | null | undefined {
-        return model instanceof Anchor || model == null ? model : new Anchor(model as AnchorWorksheet);
-    }
-
     /** The fractional 0-based column: `nativeCol` plus the offset relative to the width of the column. */
     get col(): number {
         return this.nativeCol + Math.min(this.colWidth - 1, this.nativeColOff) / this.colWidth;

@@ -40,6 +40,11 @@ export type RangeArgs =
     | [tl: string, br: string, sheetName?: string]
     | [top: number, left: number, bottom: number, right: number, sheetName?: string];
 
+/** The arguments of `setTLBR(tl, br, sheetName?)` (or else of `setTLBR(top, left, bottom, right, sheetName?)`). */
+function isAddressArgs(args: [string, string, string?] | [number, number, number, number, string?]): args is [string, string, string?] {
+    return typeof args[0] === "string";
+}
+
 /** The sheet names written without quotes in a reference. Anchored: linear. */
 const plainSheetNameRegex = /^[a-zA-Z0-9]*$/;
 
@@ -64,23 +69,24 @@ class Range {
     setTLBR(tl: string, br: string, sheetName?: string): void;
     setTLBR(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
     setTLBR(...args: [string, string, string?] | [number, number, number, number, string?]): void {
-        if (args.length < 4) {
+        if (isAddressArgs(args)) {
             // setTLBR(tl, br, s)
-            const tl = colCache.decodeAddress(args[0] as string);
-            const br = colCache.decodeAddress(args[1] as string);
+            const [tlAddress, brAddress, sheetName] = args;
+            const tl = colCache.decodeAddress(tlAddress);
+            const br = colCache.decodeAddress(brAddress);
             this.model = {
                 top: Math.min(tl.row, br.row),
                 left: Math.min(tl.col, br.col),
                 bottom: Math.max(tl.row, br.row),
                 right: Math.max(tl.col, br.col),
-                sheetName: args[2] as string | undefined,
+                sheetName,
             };
 
             // NB: replaces the model above, without the sheet name
             this.setTLBR(tl.row, tl.col, br.row, br.col, undefined);
         } else {
             // setTLBR(t, l, b, r, s)
-            const [t, l, b, r, s] = args as [number, number, number, number, string?];
+            const [t, l, b, r, s] = args;
             this.model = {
                 top: Math.min(t, b),
                 left: Math.min(l, r),
@@ -134,9 +140,12 @@ class Range {
                         right: value.right,
                         sheetName: value.sheetName,
                     };
+                } else if (typeof value === "object") {
+                    // a location with a bound that is not 1-based
+                    throw new Error(`Invalid range: top ${value.top}, left ${value.left}, bottom ${value.bottom}, right ${value.right}`);
                 } else {
                     // [sheetName!]tl:br
-                    const tlbr = colCache.decodeEx(value as string);
+                    const tlbr = colCache.decodeEx(value);
                     if ("top" in tlbr && tlbr.top) {
                         this.model = {
                             top: tlbr.top,
@@ -249,10 +258,12 @@ class Range {
         }
     }
 
-    /** Grows the range to include a cell (`"B2"`, `"Sheet1!B2"`). */
+    /** Grows the range to include a cell (`"B2"`, `"Sheet1!B2"`); a reference that is not a cell changes nothing. */
     expandToAddress(addressStr: string): void {
-        const address = colCache.decodeEx(addressStr) as { row: number; col: number };
-        this.expand(address.row, address.col, address.row, address.col);
+        const address = colCache.decodeEx(addressStr);
+        if ("row" in address) {
+            this.expand(address.row, address.col, address.row, address.col);
+        }
     }
 
     /** The top-left address (`"A1"`). */
@@ -315,10 +326,10 @@ class Range {
         return true;
     }
 
-    /** Whether the range contains a cell (`"B2"`, `"Sheet1!B2"`). */
+    /** Whether the range contains a cell (`"B2"`, `"Sheet1!B2"`; false for a reference that is not a cell). */
     contains(addressStr: string): boolean {
-        const address = colCache.decodeEx(addressStr) as { row: number; col: number; sheetName?: string | undefined };
-        return this.containsEx(address);
+        const address = colCache.decodeEx(addressStr);
+        return "row" in address && this.containsEx(address);
     }
 
     /** Whether the range contains a cell (a cell of another named sheet is not contained). */

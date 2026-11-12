@@ -1,6 +1,6 @@
 // Pivot tables (experimental): `worksheet.addPivotTable(...)`. One pivot table per workbook, summing one value field.
 
-import { objectFromProps, range, toSortedArray } from "../utils/utils";
+import { range, toSortedArray } from "../utils/utils";
 import type { CellValue } from "./cell";
 import type Worksheet from "./worksheet";
 
@@ -54,6 +54,20 @@ export interface PivotTable {
 }
 
 /**
+ * The field name of a header value (row 1 of the source worksheet): a string, or the text of a number or a boolean;
+ * undefined for another value (an empty cell, a date, a rich text...), which no field name designates.
+ */
+function fieldName(value: CellValue | undefined): string | undefined {
+    if (typeof value === "string") {
+        return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    return undefined;
+}
+
+/**
  * Creates a pivot table.
  * @throws Error when the workbook has one already, for another metric than "sum", for a field name that is not in row 1
  *   of the source worksheet, without rows or columns, or without exactly one value
@@ -67,17 +81,21 @@ function makePivotTable(worksheet: Worksheet, model: PivotTableInput): PivotTabl
 
     // let {rows, columns, values} use indices instead of names;
     // names can then be accessed via `pivotTable.cacheFields[index].name`.
-    // no prototype: the names come from the data (see objectFromProps)
-    const nameToIndex = cacheFields.reduce<Record<string, number>>(
-        (result, cacheField, index) => {
-            // a name is a property key (coerced to a string)
-            result[cacheField.name as string] = index;
-            return result;
-        },
-        Object.create(null) as Record<string, number>
-    );
-    // validate() checked that the names are those of the cache fields
-    const indexOf = (name: string): number => nameToIndex[name]!;
+    const nameToIndex = new Map<string, number>();
+    cacheFields.forEach((cacheField, index) => {
+        const name = fieldName(cacheField.name);
+        if (name !== undefined) {
+            nameToIndex.set(name, index);
+        }
+    });
+    const indexOf = (name: string): number => {
+        const index = nameToIndex.get(name);
+        if (index === undefined) {
+            // validate() checked that the names are those of the cache fields
+            throw new Error(`The header name "${name}" was not found in ${sourceSheet.name}.`);
+        }
+        return index;
+    };
 
     // form pivot table object
     return {
@@ -103,11 +121,18 @@ function validate(worksheet: Worksheet, model: PivotTableInput): void {
         throw new Error('Only the "sum" metric is supported at this time.');
     }
 
-    // the header names are property keys (coerced to strings)
-    const headerNames = model.sourceSheet.getRow(1).values.slice(1) as string[];
-    const isInHeaderNames = objectFromProps(headerNames, true);
+    const headerNames = new Set<string>();
+    model.sourceSheet
+        .getRow(1)
+        .values.slice(1)
+        .forEach((value) => {
+            const name = fieldName(value);
+            if (name !== undefined) {
+                headerNames.add(name);
+            }
+        });
     for (const name of [...model.rows, ...model.columns, ...model.values]) {
-        if (!isInHeaderNames[name]) {
+        if (!headerNames.has(name)) {
             throw new Error(`The header name "${name}" was not found in ${model.sourceSheet.name}.`);
         }
     }
@@ -151,11 +176,10 @@ function validate(worksheet: Worksheet, model: PivotTableInput): void {
 function makeCacheFields(worksheet: Worksheet, fieldNamesWithSharedItems: readonly string[]): PivotCacheField[] {
     // Cache fields are used in pivot tables to reference source data.
     const names = worksheet.getRow(1).values;
-    const nameToHasSharedItems = objectFromProps(fieldNamesWithSharedItems, true);
+    const withSharedItems = new Set(fieldNamesWithSharedItems);
 
     const aggregate = (columnIndex: number): CellValue[] => {
-        // the column always exists: columnIndex >= 1
-        const columnValues = worksheet.getColumn(columnIndex)!.values.splice(2);
+        const columnValues = worksheet._getColumnEx(columnIndex).values.splice(2);
         const columnValuesAsSet = new Set(columnValues);
         return toSortedArray(columnValuesAsSet);
     };
@@ -164,8 +188,8 @@ function makeCacheFields(worksheet: Worksheet, fieldNamesWithSharedItems: readon
     const result: PivotCacheField[] = [];
     for (const columnIndex of range(1, names.length)) {
         const name = names[columnIndex];
-        // a name is a property key (coerced to a string)
-        const sharedItems = nameToHasSharedItems[name as string] ? aggregate(columnIndex) : null;
+        const key = fieldName(name);
+        const sharedItems = key !== undefined && withSharedItems.has(key) ? aggregate(columnIndex) : null;
         result.push({ name, sharedItems });
     }
     return result;

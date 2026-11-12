@@ -1,6 +1,6 @@
 // The data validations of a worksheet (`worksheet.dataValidations`), keyed by cell address or by range.
 
-import colCache, { type DecodedRange } from "../utils/col-cache";
+import colCache from "../utils/col-cache";
 import RangeIndex from "../utils/range-index";
 import type { DataValidationModel, DataValidationsModel } from "../types";
 
@@ -20,19 +20,22 @@ const isRow = (number: number): boolean => number >= 1 && number <= colCache.MAX
  *   unchanged
  */
 export function wholeRangeAddress(address: string): string | null {
-    let match = wholeColumnsRegex.exec(address);
-    if (match) {
-        // both groups are not optional
-        const [first, last] = [match[1]!, match[2]!];
+    const columns = wholeColumnsRegex.exec(address);
+    // both groups are not optional: a match has them
+    const [, first, last] = columns || [];
+    if (first !== undefined && last !== undefined) {
         if (!isColumn(first) || !isColumn(last)) {
             return null;
         }
-        const [left, right] = [colCache.l2n(first), colCache.l2n(last)].sort((a, b) => a - b) as [number, number];
-        return colCache.encode(1, left, colCache.MAX_ROWS, right);
+        const [a, b] = [colCache.l2n(first), colCache.l2n(last)];
+        return colCache.encode(1, Math.min(a, b), colCache.MAX_ROWS, Math.max(a, b));
     }
-    match = wholeRowsRegex.exec(address);
-    if (match) {
-        const [top, bottom] = [parseInt(match[1]!, 10), parseInt(match[2]!, 10)].sort((a, b) => a - b) as [number, number];
+    const rows = wholeRowsRegex.exec(address);
+    const [, from, to] = rows || [];
+    if (from !== undefined && to !== undefined) {
+        const [a, b] = [parseInt(from, 10), parseInt(to, 10)];
+        const top = Math.min(a, b);
+        const bottom = Math.max(a, b);
         if (!isRow(top) || !isRow(bottom)) {
             return null;
         }
@@ -198,8 +201,10 @@ class DataValidations {
     _setRange(key: string, validation: DataValidationModel | undefined): void {
         const index = this._getIndex();
         const { ranges, rangeIndex, order } = index;
-        if (!order.has(key)) {
-            order.set(key, index.nextOrder++);
+        let orderNo = order.get(key);
+        if (orderNo === undefined) {
+            orderNo = index.nextOrder++;
+            order.set(key, orderNo);
         }
         const existing = ranges.get(key);
         if (existing) {
@@ -207,10 +212,13 @@ class DataValidations {
             ranges.delete(key);
         }
         if (validation) {
-            // a range key: it has a colon
-            const { top, left, bottom, right } = colCache.decode(key) as DecodedRange;
-            const range = { key, top, left, bottom, right };
-            rangeIndex.add(range, order.get(key)!);
+            // a range key (it has a colon); one of a single cell (`A1:A1`) is the rectangle of that cell
+            const decoded = colCache.decode(key);
+            const range =
+                "top" in decoded
+                    ? { key, top: decoded.top, left: decoded.left, bottom: decoded.bottom, right: decoded.right }
+                    : { key, top: decoded.row, left: decoded.col, bottom: decoded.row, right: decoded.col };
+            rangeIndex.add(range, orderNo);
             ranges.set(key, range);
         }
     }
