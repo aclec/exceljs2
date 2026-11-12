@@ -127,10 +127,13 @@ class StyleXform extends BaseXform<XfModel> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // the children are inside <xf>, which created the model
-                if (this.map.protection === this.parser) {
-                    this.model!.protection = this.map.protection.model;
+                const { model } = this;
+                if (!model) {
+                    // outside <xf>
+                } else if (this.map.protection === this.parser) {
+                    model.protection = this.map.protection.model;
                 } else {
-                    this.model!.alignment = this.map.alignment.model;
+                    model.alignment = this.map.alignment.model;
                 }
                 this.parser = undefined;
             }

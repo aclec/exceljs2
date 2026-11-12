@@ -43,8 +43,12 @@ class SharedStringXform extends BaseXform<SharedStringValue> {
     /** @param model - `null` / `undefined` render an empty `<si/>` */
     override render(xmlStream: XmlStream, model: SharedStringValue | null | undefined): void {
         xmlStream.openNode(this.tag);
-        if (model && typeof model === "object" && Object.hasOwn(model, "richText") && model.richText) {
-            const runs = model.richText.filter((run) => !RichTextXform.isEmpty(run));
+        if (typeof model === "string") {
+            this.map.t.render(xmlStream, model);
+        } else if (model) {
+            // a rich text object without runs (or whose runs have no text) is an empty string
+            const runs =
+                Object.hasOwn(model, "richText") && model.richText ? model.richText.filter((run) => !RichTextXform.isEmpty(run)) : [];
             if (runs.length) {
                 const { r } = this.map;
                 for (const run of runs) {
@@ -53,9 +57,6 @@ class SharedStringXform extends BaseXform<SharedStringValue> {
             } else {
                 this.map.t.render(xmlStream, "");
             }
-        } else if (model !== undefined && model !== null) {
-            // a string; an object without runs is written as its string, as it always was
-            this.map.t.render(xmlStream, model as string);
         }
         xmlStream.closeNode();
     }
@@ -91,8 +92,9 @@ class SharedStringXform extends BaseXform<SharedStringValue> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // a child closed (its model is complete)
-                if (name === "r" && this.parser === this.map.r) {
-                    const run = this.map.r.model!;
+                const run = this.map.r.model;
+                const text = this.map.t.model;
+                if (name === "r" && this.parser === this.map.r && run) {
                     const { model } = this;
                     if (typeof model === "string") {
                         // CT_Rst is <t>?<r>*: a leading <t> is an unformatted first run
@@ -102,8 +104,8 @@ class SharedStringXform extends BaseXform<SharedStringValue> {
                     } else {
                         this.model = { richText: [run] };
                     }
-                } else if (name === "t" && this.parser === this.map.t) {
-                    this.model = this.map.t.model!;
+                } else if (name === "t" && this.parser === this.map.t && typeof text === "string") {
+                    this.model = text;
                 }
                 this.parser = undefined;
             }

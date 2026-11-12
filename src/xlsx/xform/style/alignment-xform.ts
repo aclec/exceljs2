@@ -4,19 +4,35 @@ import type { Alignment } from "../../../../index";
 import type { AlignmentModel } from "../../../types";
 import { ReadingOrder } from "../../../doc/enums";
 import { parseBoolean, validInt } from "../../../utils/utils";
-import BaseXform from "../base-xform";
+import BaseXform, { isOneOf } from "../base-xform";
 
-const horizontalValues: ReadonlySet<unknown> = new Set(["left", "center", "right", "fill", "centerContinuous", "distributed", "justify"]);
-const verticalValues: ReadonlySet<unknown> = new Set(["top", "middle", "bottom", "distributed", "justify"]);
+// ECMA-376 ST_HorizontalAlignment, but general (the default: no alignment)
+const HORIZONTAL_VALUES: Readonly<Record<Alignment["horizontal"], true>> = {
+    left: true,
+    center: true,
+    right: true,
+    fill: true,
+    centerContinuous: true,
+    distributed: true,
+    justify: true,
+};
+// ECMA-376 ST_VerticalAlignment, with middle for center
+const VERTICAL_VALUES: Readonly<Record<Alignment["vertical"], true>> = {
+    top: true,
+    middle: true,
+    bottom: true,
+    distributed: true,
+    justify: true,
+};
 
 // model value -> attribute value (undefined: not written)
 const validation = {
     horizontal(value: string | undefined): string | undefined {
-        return horizontalValues.has(value) ? value : undefined;
+        return isOneOf(HORIZONTAL_VALUES, value) ? value : undefined;
     },
     vertical(value: string | undefined): string | undefined {
         if (value === "middle") return "center";
-        return verticalValues.has(value) ? value : undefined;
+        return isOneOf(VERTICAL_VALUES, value) ? value : undefined;
     },
     textRotation(value: number | string | undefined): number | "vertical" | undefined {
         if (value === "vertical") {
@@ -73,7 +89,8 @@ const textRotationXform = {
 /**
  * The alignment of a cell format, `<alignment>`. Invalid values are not written, and nothing is written when no value is
  * valid. The XML `center` vertical alignment is `"middle"` in the model. Parsing gives `null` when no attribute is set;
- * the values are not validated (except `textRotation`, which may parse as `undefined`).
+ * a `horizontal` / `vertical` that is not one of the model (`general`, the default, or an invalid value) is absent; the
+ * other values are not validated (except `textRotation`, which may parse as `undefined`).
  */
 class AlignmentXform extends BaseXform<AlignmentModel> {
     get tag(): string {
@@ -109,13 +126,14 @@ class AlignmentXform extends BaseXform<AlignmentModel> {
         const model: AlignmentModel = {};
 
         let valid = false;
-        // the values of the file are not validated: the literal unions of the model are the API contract
-        if (horizontal) {
-            model.horizontal = horizontal as Alignment["horizontal"];
+        // a value that is not one of the model (general, an invalid one) is absent
+        if (isOneOf(HORIZONTAL_VALUES, horizontal)) {
+            model.horizontal = horizontal;
             valid = true;
         }
-        if (vertical) {
-            model.vertical = (vertical === "center" ? "middle" : vertical) as Alignment["vertical"];
+        const verticalValue = vertical === "center" ? "middle" : vertical;
+        if (isOneOf(VERTICAL_VALUES, verticalValue)) {
+            model.vertical = verticalValue;
             valid = true;
         }
         // "0"/"false" is the default: treat it as absent, as rendering does

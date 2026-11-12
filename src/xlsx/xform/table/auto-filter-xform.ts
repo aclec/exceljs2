@@ -94,7 +94,10 @@ class AutoFilterXform extends BaseXform<TableAutoFilterModel> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // the filter columns are inside <autoFilter>, which created the model
-                this.model!.columns.push(this.map.filterColumn.model!);
+                const column = this.map.filterColumn.model;
+                if (this.model && column) {
+                    this.model.columns.push(column);
+                }
                 this.parser = undefined;
             }
             return true;

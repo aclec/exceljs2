@@ -46,17 +46,22 @@ export interface StylesJsonModel {
     dxfs?: DxfModel[];
 }
 
-/** The model of a {@link StylesXform}: its style manager state, or a plain JSON model. */
-export type StylesModel = StylesManagerModel | StylesJsonModel;
+/** The state of the style manager role ({@link StylesXform.init}): its model, its index and the ids of the styles seen. */
+interface StylesManager {
+    readonly model: StylesManagerModel;
+    readonly index: StylesManagerIndex;
+    /** The cell format id of each style object already registered. */
+    readonly weakMap: WeakMap<StyleModel, number>;
+}
 
 /**
  * The index of the style manager role: the id of each registered part by its XML (number formats by format code).
- * The keys are built by the xforms (XML starting with `<`), the number format codes by the application: `numFmt` has no
- * prototype.
+ * The keys are built by the xforms (XML starting with `<`), the number format codes by the application: `numFmt` is a
+ * `Map`.
  */
 export interface StylesManagerIndex {
     style: Record<string, number>;
-    numFmt: Record<string, number>;
+    numFmt: Map<string, number>;
     /** Unused. */
     numFmtNextId: number;
     font: Record<string, number>;
@@ -85,12 +90,13 @@ export interface StylesLookupIndex {
  * - Writing (style manager role, `new StylesXform(true)` or {@link init}): the worksheets register the style of each
  *   cell, row and column with {@link addStyleModel} (and the differential formats with {@link addDxfStyle}); each part
  *   (number format, font, fill, border, cell format) is rendered to XML once and deduplicated by its XML. Then
- *   {@link render} (or `xml`) writes the part from these XML fragments.
- * - Reading: parsing builds a {@link StylesJsonModel}; {@link getStyleModel} and {@link getDxfStyle} give the style of a
- *   cell format id and of a differential format index.
+ *   {@link render} (or {@link xml}) writes the part from these XML fragments. The state of this role is private: the
+ *   {@link model} of the xform is then `undefined`.
+ * - Reading: parsing builds a {@link StylesJsonModel} (the {@link model}, and the end of the style manager role);
+ *   {@link getStyleModel} and {@link getDxfStyle} give the style of a cell format id and of a differential format index.
  * - Without the style manager role, render writes a plain {@link StylesJsonModel}.
  */
-class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, StyleLookup {
+class StylesXform extends BaseXform<StylesJsonModel> implements StyleRegistry, StyleLookup {
     /** The namespaces of `<styleSheet>`. */
     static readonly STYLESHEET_ATTRIBUTES: XmlAttributes = {
         xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
@@ -159,11 +165,11 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         readonly extLst: StaticXform;
     };
 
-    /** The index of the style manager role (set by {@link init}), or of a parsed part (set by the parse). */
-    declare index?: StylesManagerIndex | StylesLookupIndex;
+    /** The state of the style manager role (set by {@link init}, ended by a parse). */
+    declare private manager?: StylesManager;
 
-    /** Style manager role: the cell format id of each style object already registered. */
-    declare weakMap?: WeakMap<StyleModel, number>;
+    /** The index of a parsed part (set by the parse). */
+    declare private lookup?: StylesLookupIndex;
 
     /** @param initialise - take the style manager role ({@link init}) */
     constructor(initialise?: boolean) {
@@ -205,32 +211,31 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         }
     }
 
-    /** Resets the index of the style manager role. */
-    initIndex(): void {
-        this.index = {
-            style: {},
-            numFmt: Object.create(null) as Record<string, number>, // by format code, which may be "constructor"
-            numFmtNextId: 164, // start custom format ids here
-            font: {},
-            border: {},
-            fill: {},
-            numFmtStyle: new Map(),
-        };
-    }
-
     /** Takes the style manager role: an empty model with the default border, cell format and fills. */
     init(): void {
         // Prepare for Style Manager role
-        this.model = {
-            styles: [],
-            numFmts: [],
-            fonts: [],
-            borders: [],
-            fills: [],
-            dxfs: [],
+        this.model = undefined;
+        this.lookup = undefined;
+        this.manager = {
+            model: {
+                styles: [],
+                numFmts: [],
+                fonts: [],
+                borders: [],
+                fills: [],
+                dxfs: [],
+            },
+            index: {
+                style: {},
+                numFmt: new Map(), // by format code, which may be "constructor"
+                numFmtNextId: 164, // start custom format ids here
+                font: {},
+                border: {},
+                fill: {},
+                numFmtStyle: new Map(),
+            },
+            weakMap: new WeakMap(),
         };
-
-        this.initIndex();
 
         // default (zero) border
         this._addBorder({});
@@ -241,38 +246,44 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         // add default fills
         this._addFill({ type: "pattern", pattern: "none" });
         this._addFill({ type: "pattern", pattern: "gray125" });
-
-        this.weakMap = new WeakMap();
     }
 
-    /** The model in the style manager role (built by {@link init}). */
-    private get managerModel(): StylesManagerModel {
-        return this.model as StylesManagerModel;
+    /**
+     * The state of the style manager role.
+     *
+     * @throws Error when this xform does not have the role ({@link init})
+     */
+    private get styleManager(): StylesManager {
+        const { manager } = this;
+        if (!manager) {
+            throw new Error("StylesXform is not a style manager: call init() first");
+        }
+        return manager;
     }
 
-    /** The index in the style manager role (built by {@link init}). */
-    private get managerIndex(): StylesManagerIndex {
-        return this.index as StylesManagerIndex;
+    /** The XML of the styles part: {@link render} of the styles registered (style manager role), or of {@link model}. */
+    get xml(): string {
+        return this.toXml(this.model);
     }
 
     /**
      * Writes the styles part.
      *
-     * @param model - default: the model of this xform. In the style manager role (or once parsed), it is read as a
-     *   {@link StylesManagerModel}; otherwise as a {@link StylesJsonModel}.
+     * @param model - in the style manager role: ignored (the part of the styles registered is written); otherwise the
+     *   model written (default: the model of this xform)
      */
-    override render(xmlStream: XmlStream, model?: StylesModel | null): void {
-        const styles = model || this.model;
+    override render(xmlStream: XmlStream, model?: StylesJsonModel | null): void {
         //
         //   <fonts count="2" x14ac:knownFonts="1">
         xmlStream.openXml(XmlStream.StdDocAttributes);
 
         xmlStream.openNode("styleSheet", StylesXform.STYLESHEET_ATTRIBUTES);
 
-        if (this.index) {
+        let dxfs: DxfModel[] | undefined;
+        if (this.manager) {
             // model has been built by style manager role (contains xml)
-            const manager = styles as StylesManagerModel;
-            if (manager.numFmts && manager.numFmts.length) {
+            const manager = this.manager.model;
+            if (manager.numFmts.length) {
                 xmlStream.openNode("numFmts", { count: manager.numFmts.length });
                 writeAllXml(xmlStream, manager.numFmts);
                 xmlStream.closeNode();
@@ -299,20 +310,22 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
             xmlStream.openNode("cellXfs", { count: manager.styles.length });
             writeAllXml(xmlStream, manager.styles);
             xmlStream.closeNode();
+            ({ dxfs } = manager);
         } else {
             // model is plain JSON and needs to be xformed
-            const json = styles as StylesJsonModel;
+            const json = model || this.model || {};
             this.map.numFmts.render(xmlStream, json.numFmts);
             this.map.fonts.render(xmlStream, json.fonts);
             this.map.fills.render(xmlStream, json.fills);
             this.map.borders.render(xmlStream, json.borders);
             this.map.cellStyleXfs.render(xmlStream, [{ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0, xfId: 0 }]);
             this.map.cellXfs.render(xmlStream, json.styles);
+            ({ dxfs } = json);
         }
 
         StylesXform.STATIC_XFORMS.cellStyles.render(xmlStream);
 
-        this.map.dxfs.render(xmlStream, styles!.dxfs);
+        this.map.dxfs.render(xmlStream, dxfs);
 
         StylesXform.STATIC_XFORMS.tableStyles.render(xmlStream);
         StylesXform.STATIC_XFORMS.extLst.render(xmlStream);
@@ -328,7 +341,9 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         }
         switch (node.name) {
             case "styleSheet":
-                this.initIndex();
+                // the parsed part ends the style manager role
+                this.manager = undefined;
+                this.lookup = undefined;
                 return true;
             default: {
                 const parser = ownEntry(this.map, node.name);
@@ -378,7 +393,7 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
                         numFmtIndex[numFmt.id] = numFmt.formatCode;
                     }
                 }
-                this.index = index;
+                this.lookup = index;
 
                 return false;
             }
@@ -400,20 +415,19 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         if (!model) {
             return 0;
         }
+        const manager = this.styleManager;
 
         // if we have no default font, add it here now
-        if (!this.managerModel.fonts.length) {
+        if (!manager.model.fonts.length) {
             // default (zero) font
             this._addFont(DEFAULT_FONT);
         }
 
         // if we have seen this style object before, assume it has the same styleId
-        const { weakMap } = this;
-        if (weakMap) {
-            const id = weakMap.get(model);
-            if (id !== undefined) {
-                return id;
-            }
+        const { weakMap } = manager;
+        const knownId = weakMap.get(model);
+        if (knownId !== undefined) {
+            return knownId;
         }
 
         const style: XfModel = {};
@@ -430,15 +444,13 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         const { font, border, fill, alignment, protection } = model;
         if (!font && !border && !fill && !alignment && !protection) {
             // the format of a style with only a number format depends on it only: skip rendering its <xf>
-            const index = this.managerIndex.numFmtStyle;
+            const index = manager.index.numFmtStyle;
             let styleId = index.get(style.numFmtId);
             if (styleId === undefined) {
                 styleId = this._addStyle(style);
                 index.set(style.numFmtId, styleId);
             }
-            if (weakMap) {
-                weakMap.set(model, styleId);
-            }
+            weakMap.set(model, styleId);
             return styleId;
         }
 
@@ -463,9 +475,7 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         }
 
         const styleId = this._addStyle(style);
-        if (weakMap) {
-            weakMap.set(model, styleId);
-        }
+        weakMap.set(model, styleId);
         return styleId;
     }
 
@@ -476,11 +486,9 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
      * @returns `null` when the id is not a cell format of the part (or the part was not parsed)
      */
     getStyleModel(id: number): StyleModel | null {
-        // only a parsed part has a lookup index (the style manager role has its own index)
-        const { index } = this;
-        if (!index || !("model" in index)) return null;
-        // the model of a parsed part is its JSON model
-        const json = this.model as StylesJsonModel;
+        // only a parsed part has a lookup index (and its JSON model)
+        const { lookup: index, model: json } = this;
+        if (!index || !json) return null;
 
         // if the style doesn't exist return null
         const style = json.styles?.[id];
@@ -506,9 +514,8 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         if (font) result.font = font;
         const border = part(json.borders, style.borderId);
         if (border) result.border = border;
-        const fill = part(json.fills, style.fillId);
-        // a parsed fill may lack the parts that index.d.ts Fill requires (see FillModel)
-        if (fill) result.fill = fill as Fill;
+        const fill = cellFill(part(json.fills, style.fillId));
+        if (fill) result.fill = fill;
 
         // -------------------------------------------------------
         // alignment
@@ -537,8 +544,7 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
             style.numFmtId = this._addNumFmtStr(style.numFmt);
         }
 
-        // the model of the style manager role and the Mock's have a dxfs list
-        const { dxfs } = this.model as { dxfs: DxfModel[] };
+        const dxfs = this.registeredDxfs();
         dxfs.push(style);
         return dxfs.length - 1;
     }
@@ -549,14 +555,20 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         return this.model?.dxfs?.[id];
     }
 
+    /** The list of the differential formats registered by {@link addDxfStyle}: the style manager's (the Mock has its own). */
+    protected registeredDxfs(): DxfModel[] {
+        return this.styleManager.model.dxfs;
+    }
+
     // =========================================================================
     // Private Interface
     _addStyle(style: XfModel): number {
         const xml = this.map.style.toXml(style);
-        const index = this.managerIndex.style;
+        const manager = this.styleManager;
+        const index = manager.index.style;
         let id = index[xml];
         if (id === undefined) {
-            const { styles } = this.managerModel;
+            const { styles } = manager.model;
             id = index[xml] = styles.length;
             styles.push(xml);
         }
@@ -572,12 +584,14 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
         if (defaultId !== undefined) return defaultId;
 
         // check if already in
-        const index = this.managerIndex.numFmt;
-        let id = index[formatCode];
-        if (id !== undefined) return id;
+        const manager = this.styleManager;
+        const index = manager.index.numFmt;
+        const knownId = index.get(formatCode);
+        if (knownId !== undefined) return knownId;
 
-        const { numFmts } = this.managerModel;
-        id = index[formatCode] = NUMFMT_BASE + numFmts.length;
+        const { numFmts } = manager.model;
+        const id = NUMFMT_BASE + numFmts.length;
+        index.set(formatCode, id);
         const xml = this.map.numFmt.toXml({ id, formatCode });
         numFmts.push(xml);
         return id;
@@ -587,10 +601,11 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
     // Fonts
     _addFont(font: FontModel): number {
         const xml = this.map.font.toXml(font);
-        const index = this.managerIndex.font;
+        const manager = this.styleManager;
+        const index = manager.index.font;
         let id = index[xml];
         if (id === undefined) {
-            const { fonts } = this.managerModel;
+            const { fonts } = manager.model;
             id = index[xml] = fonts.length;
             fonts.push(xml);
         }
@@ -601,10 +616,11 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
     // Borders
     _addBorder(border: BorderModel): number {
         const xml = this.map.border.toXml(border);
-        const index = this.managerIndex.border;
+        const manager = this.styleManager;
+        const index = manager.index.border;
         let id = index[xml];
         if (id === undefined) {
-            const { borders } = this.managerModel;
+            const { borders } = manager.model;
             id = index[xml] = borders.length;
             borders.push(xml);
         }
@@ -615,10 +631,11 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
     // Fills
     _addFill(fill: FillXformModel): number {
         const xml = this.map.fill.toXml(fill);
-        const index = this.managerIndex.fill;
+        const manager = this.styleManager;
+        const index = manager.index.fill;
         let id = index[xml];
         if (id === undefined) {
-            const { fills } = this.managerModel;
+            const { fills } = manager.model;
             id = index[xml] = fills.length;
             fills.push(xml);
         }
@@ -630,9 +647,23 @@ class StylesXform extends BaseXform<StylesModel> implements StyleRegistry, Style
 
 // writes XML fragments built by the xforms
 function writeAllXml(xmlStream: XmlStream, fragments: readonly string[]): void {
-    for (let i = 0; i < fragments.length; i++) {
-        xmlStream.writeXml(fragments[i]!);
+    for (const fragment of fragments) {
+        xmlStream.writeXml(fragment);
     }
+}
+
+// a parsed fill that is a complete Fill (shared by the styles that use it)
+function isFill(fill: FillXformModel): fill is Fill {
+    return fill.type === "gradient" || (fill.type === "pattern" && fill.pattern !== undefined);
+}
+
+// the fill of a cell format: a <patternFill> without (valid) patternType is no fill ("none"); a <fill> without a known
+// child gives none
+function cellFill(fill: FillXformModel | undefined): Fill | undefined {
+    if (!fill || isFill(fill)) {
+        return fill;
+    }
+    return fill.type === "pattern" ? { ...fill, pattern: "none" } : undefined;
 }
 
 // the part of a parsed list at an id, if any (ids come from the file)
@@ -652,7 +683,8 @@ type StylesMockModel = Required<StylesJsonModel>;
  * them by index). It renders a plain JSON model, and does not parse.
  */
 class StylesXformMock extends StylesXform {
-    declare model: StylesMockModel | null | undefined;
+    /** The model rendered (also {@link model}). */
+    private readonly mock: StylesMockModel;
 
     /** The cell format id of the date style, once registered. */
     declare private _dateStyleId?: number;
@@ -661,7 +693,7 @@ class StylesXformMock extends StylesXform {
     constructor(initialise?: boolean) {
         super();
 
-        this.model = {
+        this.mock = {
             styles: [{ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0, xfId: 0 }],
             numFmts: [],
             fonts: [{ size: 11, color: { theme: 1 }, name: "Calibri", family: 2, scheme: "minor" }],
@@ -674,6 +706,7 @@ class StylesXformMock extends StylesXform {
             // written even without useStyles
             dxfs: [],
         };
+        this.model = this.mock;
     }
 
     // =========================================================================
@@ -696,8 +729,7 @@ class StylesXformMock extends StylesXform {
             const dateStyle: XfModel = {
                 numFmtId: NumFmtXform.getDefaultFmtId("mm-dd-yy"),
             };
-            // the mock has its model from its constructor
-            const { styles } = this.model!;
+            const { styles } = this.mock;
             this._dateStyleId = styles.length;
             styles.push(dateStyle);
         }
@@ -715,13 +747,18 @@ class StylesXformMock extends StylesXform {
         const defaultId = NumFmtXform.getDefaultFmtId(formatCode);
         if (defaultId !== undefined) return defaultId;
 
-        const { numFmts } = this.model!;
+        const { numFmts } = this.mock;
         let numFmt = numFmts.find((candidate) => candidate.formatCode === formatCode);
         if (!numFmt) {
             numFmt = { id: NUMFMT_BASE + numFmts.length, formatCode };
             numFmts.push(numFmt);
         }
         return numFmt.id;
+    }
+
+    /** @returns the differential formats of the mock */
+    protected override registeredDxfs(): DxfModel[] {
+        return this.mock.dxfs;
     }
 }
 

@@ -1,12 +1,14 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { ColorModel } from "../../../types";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /**
  * A color element (CT_Color, `<color>` by default; `<fgColor>`, `<bgColor>`, `<tabColor>`... with another name):
- * `rgb`, `theme` (with `tint`), `indexed` or `auto`. A model without `argb`, `theme` and `indexed` renders `auto="1"`;
- * an `auto` color parses as `{ auto: true }`, an element without any of them as `undefined`.
+ * `rgb`, `theme`, `indexed` or `auto`, each with an optional `tint`. A model without `argb`, `theme` and `indexed` renders
+ * `auto="1"`; an `auto` color parses as `{ auto: true }`, an element without any of them as `undefined` (its `tint` alone
+ * is no color).
  */
 class ColorXform extends BaseXform<ColorModel> {
     /** The name of the element. */
@@ -32,14 +34,15 @@ class ColorXform extends BaseXform<ColorModel> {
                 xmlStream.addAttribute("rgb", model.argb);
             } else if (model.theme !== undefined) {
                 xmlStream.addAttribute("theme", model.theme);
-                if (model.tint !== undefined) {
-                    xmlStream.addAttribute("tint", model.tint);
-                }
             } else if (model.indexed !== undefined) {
                 xmlStream.addAttribute("indexed", model.indexed);
             } else {
                 // `auto: true`, or a color without any (CT_Color would mean no color)
                 xmlStream.addAttribute("auto", "1");
+            }
+            // CT_Color: tint applies to any of them
+            if (model.tint !== undefined) {
+                xmlStream.addAttribute("tint", model.tint);
             }
             xmlStream.closeNode();
             return true;
@@ -50,23 +53,21 @@ class ColorXform extends BaseXform<ColorModel> {
     /** @returns `true` for its element */
     override parseOpen(node: SaxTag): boolean {
         if (node.name === this.name) {
-            const { rgb, theme, tint, indexed } = node.attributes;
+            const { rgb, theme, tint, indexed, auto } = node.attributes;
+            let model: ColorModel | undefined;
             if (rgb) {
-                this.model = { argb: rgb };
+                model = { argb: rgb };
             } else if (theme) {
-                const model: ColorModel = { theme: parseInt(theme, 10) };
-                if (tint) {
-                    model.tint = parseFloat(tint);
-                }
-                this.model = model;
+                model = { theme: parseInt(theme, 10) };
             } else if (indexed) {
-                this.model = { indexed: parseInt(indexed, 10) };
-            } else if (node.attributes.auto === "1" || node.attributes.auto === "true") {
-                // xsd:boolean
-                this.model = { auto: true };
-            } else {
-                this.model = undefined;
+                model = { indexed: parseInt(indexed, 10) };
+            } else if (parseBoolean(auto)) {
+                model = { auto: true };
             }
+            if (model && tint !== undefined) {
+                model.tint = parseFloat(tint);
+            }
+            this.model = model;
             return true;
         }
         return false;

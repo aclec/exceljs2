@@ -1,6 +1,7 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { TableStyleProperties } from "../../../../index";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /**
@@ -27,12 +28,12 @@ class TableStyleInfoXform extends BaseXform<TableStyleProperties> {
         if (node.name === this.tag) {
             const { attributes } = node;
             this.model = {
-                // unvalidated
-                theme: attributes.name ? (attributes.name as TableStyleProperties["theme"]) : null,
-                showFirstColumn: attributes.showFirstColumn === "1",
-                showLastColumn: attributes.showLastColumn === "1",
-                showRowStripes: attributes.showRowStripes === "1",
-                showColumnStripes: attributes.showColumnStripes === "1",
+                // a built-in or a custom table style (of the styles part)
+                theme: attributes.name || null,
+                showFirstColumn: parseBoolean(attributes.showFirstColumn),
+                showLastColumn: parseBoolean(attributes.showLastColumn),
+                showRowStripes: parseBoolean(attributes.showRowStripes),
+                showColumnStripes: parseBoolean(attributes.showColumnStripes),
             };
             return true;
         }

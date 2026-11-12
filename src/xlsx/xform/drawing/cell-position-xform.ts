@@ -5,10 +5,15 @@ import BaseXform, { ownEntry } from "../base-xform";
 import IntegerXform from "../simple/integer-xform";
 import colCache from "../../../utils/col-cache";
 
-// the cell of an anchor is in the worksheet grid (0-based): a huge index from the file would make readers of
-// the anchor (Anchor col/row) work up to it
-function clamp(value: number | null | undefined, max: number): number | null | undefined {
-    return typeof value === "number" ? Math.min(Math.max(value, 0), max) : value;
+// a value of a corner: 0 when its element is absent or not a number (CT_Marker requires the four)
+function coordinate(value: number | null | undefined): number {
+    return typeof value === "number" && !Number.isNaN(value) ? value : 0;
+}
+
+// the cell of an anchor is in the worksheet grid (0-based): a huge index from the file would make readers of the anchor
+// (Anchor col/row) work up to it
+function cell(value: number | null | undefined, max: number): number {
+    return Math.min(Math.max(coordinate(value), 0), max);
 }
 
 /** The options of a {@link CellPositionXform}. */
@@ -19,7 +24,7 @@ export interface CellPositionXformOptions {
 
 /**
  * A corner of an anchor, `<xdr:from>` / `<xdr:to>`: its 0-based column and row, and its offsets in EMU, in this order
- * (CT_Marker). Parsing clamps the column and row to the grid; a value whose element is absent is `null`.
+ * (CT_Marker). Parsing clamps the column and row to the grid; a value whose element is absent (or not a number) is 0.
  */
 class CellPositionXform extends BaseXform<AnchorModel> {
     /** The element. */
@@ -94,13 +99,12 @@ class CellPositionXform extends BaseXform<AnchorModel> {
         switch (name) {
             case this.tag: {
                 const { map } = this;
-                // the children were reset when the element opened: a value whose element is absent stays null
-                // (unvalidated, see DrawingAnchorModel)
+                // the children were reset when the element opened: a value whose element is absent is null
                 this.model = {
-                    nativeCol: clamp(map["xdr:col"].model, colCache.MAX_COLS - 1) as number,
-                    nativeColOff: map["xdr:colOff"].model as number,
-                    nativeRow: clamp(map["xdr:row"].model, colCache.MAX_ROWS - 1) as number,
-                    nativeRowOff: map["xdr:rowOff"].model as number,
+                    nativeCol: cell(map["xdr:col"].model, colCache.MAX_COLS - 1),
+                    nativeColOff: coordinate(map["xdr:colOff"].model),
+                    nativeRow: cell(map["xdr:row"].model, colCache.MAX_ROWS - 1),
+                    nativeRowOff: coordinate(map["xdr:rowOff"].model),
                 };
                 return false;
             }

@@ -2,36 +2,32 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { BorderEdgeModel, BorderModel, ColorModel } from "../../../types";
 import type { BorderStyle } from "../../../../index";
-import BaseXform, { ownEntry } from "../base-xform";
+import BaseXform, { isOneOf, ownEntry } from "../base-xform";
 import { parseBoolean } from "../../../utils/utils";
 
 import ColorXform from "./color-xform";
 
 // the border styles of ECMA-376 ST_BorderStyle (except none), as a set of keys
-const VALID_STYLE_VALUES: Readonly<Record<string, true>> = Object.assign(
-    Object.create(null) as Record<string, true>,
-    Object.fromEntries(
-        [
-            "thin",
-            "dashed",
-            "dotted",
-            "dashDot",
-            "hair",
-            "dashDotDot",
-            "slantDashDot",
-            "mediumDashed",
-            "mediumDashDotDot",
-            "mediumDashDot",
-            "medium",
-            "double",
-            "thick",
-        ].map((v) => [v, true] as const)
-    )
-);
+const VALID_STYLE_VALUES: Readonly<Record<BorderStyle, true>> = {
+    thin: true,
+    dashed: true,
+    dotted: true,
+    dashDot: true,
+    hair: true,
+    dashDotDot: true,
+    slantDashDot: true,
+    mediumDashed: true,
+    mediumDashDotDot: true,
+    mediumDashDot: true,
+    medium: true,
+    double: true,
+    thick: true,
+};
 
 /**
  * One edge of a border (`<left>`, `<right>`, `<top>`, `<bottom>`, `<diagonal>`): its style attribute and its color.
- * The color is written only with a style. Parsing gives `undefined` for an edge with neither style nor color.
+ * The color is written only with a style. Parsing gives `undefined` for an edge with neither style nor color (a style
+ * `none` or not one of ST_BorderStyle is no style).
  */
 class EdgeXform extends BaseXform<BorderEdgeModel> {
     /** The border styles of ST_BorderStyle, as a set of keys. Unused by the library. */
@@ -78,15 +74,9 @@ class EdgeXform extends BaseXform<BorderEdgeModel> {
         }
         switch (node.name) {
             case this.name: {
+                // none (the default) or an invalid style: no style
                 const { style } = node.attributes;
-                if (style) {
-                    this.model = {
-                        // unvalidated
-                        style: style as BorderStyle,
-                    };
-                } else {
-                    this.model = undefined;
-                }
+                this.model = isOneOf(VALID_STYLE_VALUES, style) ? { style } : undefined;
                 return true;
             }
             case "color":
@@ -125,7 +115,7 @@ class EdgeXform extends BaseXform<BorderEdgeModel> {
 
     /** @returns `true` for a style of ST_BorderStyle, else `undefined`. Unused by the library. */
     validStyle(value: string): true | undefined {
-        return VALID_STYLE_VALUES[value];
+        return isOneOf(VALID_STYLE_VALUES, value) ? true : undefined;
     }
 }
 

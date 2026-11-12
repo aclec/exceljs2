@@ -16,6 +16,9 @@ class VmlShapeXform extends BaseXform<VmlNoteShapeModel | VmlClientDataRenderMod
 
     declare map: { readonly "v:textbox": VmlTextboxXform; readonly "x:ClientData": VmlClientDataXform };
 
+    /** While parsing: the `o:insetmode` of the shape. */
+    private insetmode: string | undefined;
+
     constructor() {
         super();
         this.map = {
@@ -50,15 +53,9 @@ class VmlShapeXform extends BaseXform<VmlNoteShapeModel | VmlClientDataRenderMod
 
         switch (node.name) {
             case this.tag:
+                // the model is built when the element closes
                 this.reset();
-                this.model = {
-                    margins: {
-                        insetmode: node.attributes["o:insetmode"],
-                    },
-                    anchor: "",
-                    editAs: "",
-                    protection: {},
-                };
+                this.insetmode = node.attributes["o:insetmode"];
                 break;
             default: {
                 const parser = ownEntry(this.map, node.name);
@@ -87,14 +84,18 @@ class VmlShapeXform extends BaseXform<VmlNoteShapeModel | VmlClientDataRenderMod
         }
         switch (name) {
             case this.tag: {
-                // the model was created when the element opened; the children were reset then (null when absent)
-                const model = this.model!;
+                // the children were reset when the element opened (null when absent)
                 const textbox = this.map["v:textbox"].model;
                 const clientData = this.map["x:ClientData"].model;
-                model.margins.inset = textbox && textbox.inset;
-                model.protection = clientData && clientData.protection;
-                model.anchor = clientData && clientData.anchor;
-                model.editAs = clientData && clientData.editAs;
+                this.model = {
+                    margins: {
+                        insetmode: this.insetmode,
+                        inset: textbox && textbox.inset,
+                    },
+                    anchor: clientData && clientData.anchor,
+                    editAs: clientData && clientData.editAs,
+                    protection: clientData && clientData.protection,
+                };
                 return false;
             }
             default:

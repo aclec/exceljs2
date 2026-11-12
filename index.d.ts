@@ -324,7 +324,8 @@ export interface Font {
     italic: boolean;
     /** `true` is a single underline; read from a file, `true` or the underline style of the file. */
     underline: boolean | "none" | "single" | "double" | "singleAccounting" | "doubleAccounting";
-    vertAlign: "superscript" | "subscript";
+    /** `"baseline"` (the default) is read from a file that sets it. */
+    vertAlign: "superscript" | "subscript" | "baseline";
     strike: boolean;
     outline: boolean;
     /** Condensed text (a legacy Macintosh setting, read and written). */
@@ -352,8 +353,9 @@ export type BorderStyle =
     | "mediumDashDot";
 
 /**
- * A color: `argb`, `theme` (with an optional `tint`) or `indexed`; when several are set, only the first of them in this
- * order is written; a color with none of them (`{ auto: true }`, or `{}`) is written as the automatic color.
+ * A color: `argb`, `theme` or `indexed`, each with an optional `tint`; when several are set, only the first of them in this
+ * order is written; a color with none of them (`{ auto: true }`, or `{}`) is written as the automatic color (with its
+ * `tint`, if any).
  */
 export interface Color {
     /**
@@ -366,7 +368,7 @@ export interface Color {
      */
     theme: number;
 
-    /** With `theme`: lightens (0 to 1) or darkens (-1 to 0) the theme color. */
+    /** Lightens (0 to 1) or darkens (-1 to 0) the color (`argb`, `theme`, `indexed` or `auto`). */
     tint: number;
 
     /** A color of the legacy indexed palette (64 is the system foreground color). */
@@ -3032,11 +3034,13 @@ export class ModelContainer {
 /** The style of a table (`TableProperties.style`). */
 export interface TableStyleProperties {
     /**
-     * The colour theme of the table, or null for no table style
+     * The table style: a built-in one (listed), or the name of a custom table style of the workbook (a table read from a
+     * file keeps it; the custom styles themselves are not written back). `null` for no table style.
      * @default 'TableStyleMedium2'
      */
     theme?:
         | null
+        | (string & Record<never, never>)
         | "TableStyleDark1"
         | "TableStyleDark10"
         | "TableStyleDark11"

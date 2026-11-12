@@ -42,7 +42,7 @@ function runSteps(steps: Steps): void {
  *
  * `prepare`, `render` and `reconcile` process the items one at a time and have generator versions (`prepareSteps`,
  * `renderSteps`, `reconcileSteps`) that yield after each item, so that a caller can pause between them (utils/pacer).
- * Holes of a sparse array are skipped.
+ * Holes of a sparse array are skipped. Parsing skips an item whose xform gives no model (`null` / `undefined`).
  *
  * @typeParam TItem - the model of one item
  */
@@ -86,13 +86,16 @@ class ListXform<TItem> extends BaseXform<TItem[]> {
     *prepareSteps(model: readonly TItem[] | undefined, options: ListItemOptions): Steps {
         const { childXform } = this;
         if (model) {
-            for (let index = 0; index < model.length; index++) {
+            // for-of with a counter: as fast as an index loop, and typed (entries() allocates a pair per item)
+            let index = 0;
+            for (const item of model) {
                 // `in`: holes of a sparse array are skipped (an item that is present may still be undefined)
                 if (index in model) {
                     options.index = index;
-                    childXform.prepare(model[index] as TItem, options);
+                    childXform.prepare(item, options);
                     yield;
                 }
+                index++;
             }
         }
     }
@@ -112,11 +115,13 @@ class ListXform<TItem> extends BaseXform<TItem[]> {
 
             const { childXform } = this;
             const items = model || [];
-            for (let index = 0; index < items.length; index++) {
+            let index = 0;
+            for (const item of items) {
                 if (index in items) {
-                    childXform.render(xmlStream, items[index] as TItem, index);
+                    childXform.render(xmlStream, item, index);
                     yield;
                 }
+                index++;
             }
 
             xmlStream.closeNode();
@@ -157,13 +162,16 @@ class ListXform<TItem> extends BaseXform<TItem[]> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // the list element was opened before its items (this.model = []); the item xform has its model once its
-                // element is closed
-                this.model!.push(this.childXform.model as TItem);
                 this.parser = undefined;
-
-                if (this.maxItems && this.model!.length > this.maxItems) {
-                    throw new Error(`Max ${String(this.childXform.tag)} count (${this.maxItems}) exceeded`);
+                // the item xform has its model once its element is closed; an item without model (an invalid element the
+                // item xform gives none for) is skipped. An item outside the list element (no model) is ignored
+                const items = this.model;
+                const item = this.childXform.model;
+                if (items && item !== null && item !== undefined) {
+                    items.push(item);
+                    if (this.maxItems && items.length > this.maxItems) {
+                        throw new Error(`Max ${String(this.childXform.tag)} count (${this.maxItems}) exceeded`);
+                    }
                 }
             }
             return true;
@@ -181,11 +189,13 @@ class ListXform<TItem> extends BaseXform<TItem[]> {
     *reconcileSteps(model: readonly TItem[] | undefined, options?: unknown): Steps {
         if (model) {
             const { childXform } = this;
-            for (let index = 0; index < model.length; index++) {
+            let index = 0;
+            for (const item of model) {
                 if (index in model) {
-                    childXform.reconcile(model[index] as TItem, options);
+                    childXform.reconcile(item, options);
                     yield;
                 }
+                index++;
             }
         }
     }

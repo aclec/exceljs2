@@ -48,6 +48,20 @@ const expectations = [
         },
         tests: ["render", "renderIn", "parse"],
     },
+    {
+        title: "Unlocked and Hidden (xsd:boolean true / false)",
+        create: () => new ProtectionXform(),
+        xml: '<protection locked="false" hidden="true"/>',
+        parsedModel: { locked: false, hidden: true },
+        tests: ["parse"],
+    },
+    {
+        title: "Locked and not Hidden (xsd:boolean true / false)",
+        create: () => new ProtectionXform(),
+        xml: '<protection locked="true" hidden="false"/>',
+        parsedModel: null,
+        tests: ["parse"],
+    },
 ];
 
 describe("ProtectionXform", () => {

@@ -18,10 +18,10 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
     // set by the constructor, never reset
     declare model: SharedStringsModel;
 
-    /** Index of each plain string already added (keys are cell values: no prototype). */
-    hash: Record<string, number>;
+    /** Index of each plain string already added (keys are cell values: a Map). */
+    hash: Map<string, number>;
     /** Index of each rich text already added, by its XML. */
-    rich: Record<string, number>;
+    rich: Map<string, number>;
     /**
      * Index of each rich text object already added: the cells of a loaded workbook that reference the same shared string
      * share its object, and serialising it again for each of them was O(cells x runs).
@@ -37,14 +37,19 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
             values: [],
             count: 0,
         };
-        this.hash = Object.create(null) as Record<string, number>;
-        this.rich = Object.create(null) as Record<string, number>;
+        this.hash = new Map();
+        this.rich = new Map();
         this.richIndexes = new WeakMap();
     }
 
     /** The xform of one shared string (created on first use). */
     get sharedStringXform(): SharedStringXform {
         return this._sharedStringXform || (this._sharedStringXform = new SharedStringXform());
+    }
+
+    /** The XML of the shared strings part ({@link render} of {@link model}). */
+    get xml(): string {
+        return this.toXml(this.model);
     }
 
     /** The unique strings. */
@@ -73,7 +78,7 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
      * @returns its index in the table
      */
     add(value: SharedStringValue): number {
-        return typeof value !== "string" && value.richText ? this.addRichText(value) : this.addText(value as string);
+        return typeof value === "string" ? this.addText(value) : this.addRichText(value);
     }
 
     /**
@@ -82,9 +87,10 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
      * @returns its index in the table
      */
     addText(value: string): number {
-        let index = this.hash[value];
+        let index = this.hash.get(value);
         if (index === undefined) {
-            index = this.hash[value] = this.model.values.length;
+            index = this.model.values.length;
+            this.hash.set(value, index);
             this.model.values.push(value);
         }
         this.model.count++;
@@ -100,9 +106,10 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
         let index = this.richIndexes.get(value);
         if (index === undefined) {
             const xml = this.sharedStringXform.toXml(value);
-            index = this.rich[xml];
+            index = this.rich.get(xml);
             if (index === undefined) {
-                index = this.rich[xml] = this.model.values.length;
+                index = this.model.values.length;
+                this.rich.set(xml, index);
                 this.model.values.push(value);
             }
             this.richIndexes.set(value, index);
@@ -127,9 +134,8 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
         });
 
         const sx = this.sharedStringXform;
-        const { values } = model;
-        for (let i = 0; i < values.length; i++) {
-            sx.render(xmlStream, values[i]);
+        for (const value of model.values) {
+            sx.render(xmlStream, value);
         }
         xmlStream.closeNode();
     }
@@ -165,9 +171,12 @@ class SharedStringsXform extends BaseXform<SharedStringsModel> implements Shared
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // the shared string closed: its model is complete
-                this.model.values.push(this.sharedStringXform.model!);
-                this.model.count++;
+                // the shared string closed: its model is complete (at least "")
+                const value = this.sharedStringXform.model;
+                if (value !== null && value !== undefined) {
+                    this.model.values.push(value);
+                    this.model.count++;
+                }
                 this.parser = undefined;
             }
             return true;

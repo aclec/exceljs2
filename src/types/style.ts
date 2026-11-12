@@ -24,9 +24,9 @@ import type {
 import type { ValueType } from "../doc/enums";
 
 /**
- * A color (color-xform): index.d.ts `Color`, all parts optional: `{ argb }`, `{ theme, tint? }`, `{ indexed }` or
- * `{ auto: true }`. A color without `argb`, `theme` and `indexed` (e.g. `{}`) renders `auto="1"`; an element without any
- * color attribute parses as `undefined`.
+ * A color (color-xform): index.d.ts `Color`, all parts optional: `{ argb }`, `{ theme }`, `{ indexed }` or `{ auto: true }`,
+ * each with an optional `tint`. A color without `argb`, `theme` and `indexed` (e.g. `{}`) renders `auto="1"`; an element
+ * without any color attribute parses as `undefined`.
  *
  * Producer: color-xform parse, the application. Consumer: color-xform render.
  */

@@ -45,8 +45,8 @@ class DrawingXform extends BaseXform<DrawingModel> {
     /** Sets the `anchorType` of each anchor and prepares its picture (index and creation id). */
     override prepare(model: DrawingModel): void {
         // drawings are named drawingN with N unique in the workbook
-        const match = /(\d+)$/.exec(model.name || "");
-        const drawingNumber = match ? parseInt(match[1]!, 10) : 0;
+        const match = /\d+$/.exec(model.name || "");
+        const drawingNumber = match ? parseInt(match[0], 10) : 0;
         model.anchors.forEach((item, index) => {
             const anchorType = getAnchorType(item);
             item.anchorType = anchorType;
@@ -59,13 +59,13 @@ class DrawingXform extends BaseXform<DrawingModel> {
         return "xdr:wsDr";
     }
 
-    /** @param model - prepared: each anchor has its `anchorType` */
+    /** @param model - prepared: each anchor has its `anchorType` (else it is chosen by its range) */
     override render(xmlStream: XmlStream, model: DrawingModel): void {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode(this.tag, DrawingXform.DRAWING_ATTRIBUTES);
 
         for (const item of model.anchors) {
-            const anchor = this.map[item.anchorType!];
+            const anchor = this.map[item.anchorType ?? getAnchorType(item)];
             anchor.render(xmlStream, item);
         }
 
@@ -106,12 +106,13 @@ class DrawingXform extends BaseXform<DrawingModel> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // an anchor outside <xdr:wsDr> (no model) is ignored
-                if (this.model) {
-                    const anchor =
-                        this.parser === this.map["xdr:twoCellAnchor"] ? this.map["xdr:twoCellAnchor"] : this.map["xdr:oneCellAnchor"];
-                    // the anchor has its model: its element was closed
-                    this.model.anchors.push(anchor.model!);
+                // an anchor outside <xdr:wsDr> (no model), or invalid (no model of the anchor), is ignored
+                const anchor =
+                    this.parser === this.map["xdr:twoCellAnchor"]
+                        ? this.map["xdr:twoCellAnchor"].model
+                        : this.map["xdr:oneCellAnchor"].model;
+                if (this.model && anchor) {
+                    this.model.anchors.push(anchor);
                 }
                 this.parser = undefined;
             }

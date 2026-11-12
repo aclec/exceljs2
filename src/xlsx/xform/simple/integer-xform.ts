@@ -37,19 +37,22 @@ class IntegerXform extends BaseXform<number> {
         this.zero = options.zero;
     }
 
-    /** @throws TypeError in text mode with the `zero` option when the model is `undefined` */
+    /** @throws Error in text mode with the `zero` option when the model is `undefined` (the callers always pass a number) */
     override render(xmlStream: XmlStream, model: number | undefined): void {
         // int is different to float in that zero is not rendered
         if (model || this.zero) {
+            const { attr } = this;
+            if (!attr && model === undefined) {
+                throw new Error(`No integer to write in <${this.tag}>`);
+            }
             xmlStream.openNode(this.tag);
             if (this.attrs) {
                 xmlStream.addAttributes(this.attrs);
             }
-            if (this.attr) {
-                xmlStream.addAttribute(this.attr, model);
-            } else {
-                // with the zero option, an undefined model throws here (the callers always pass a number)
-                xmlStream.writeText(model!);
+            if (attr) {
+                xmlStream.addAttribute(attr, model);
+            } else if (model !== undefined) {
+                xmlStream.writeText(model);
             }
             xmlStream.closeNode();
         }

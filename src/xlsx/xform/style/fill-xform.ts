@@ -2,25 +2,37 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { FillGradientPath, FillPatterns } from "../../../../index";
 import type { FillModel, GradientStopModel } from "../../../types";
-import BaseXform, { ownEntry } from "../base-xform";
+import BaseXform, { isOneOf, ownEntry } from "../base-xform";
 
 import ColorXform from "./color-xform";
 
 /** A pattern fill model. */
 type PatternFillModel = Extract<FillModel, { type: "pattern" }>;
-/** A gradient fill model. */
+/** A gradient fill model: `degree` with `gradient: "angle"`, `center` with `gradient: "path"`. */
 type GradientFillModel = Extract<FillModel, { type: "gradient" }>;
-/**
- * A gradient fill model as GradientFillXform parses it: without `type`, which FillXform adds; `degree` is set with
- * `gradient: "angle"`, `center` with `gradient: "path"`.
- */
-interface ParsedGradientFillModel {
-    type?: "gradient";
-    gradient?: "angle" | "path";
-    degree?: number;
-    center?: FillGradientPath["center"];
-    stops: GradientStopModel[];
-}
+
+// the pattern types of ECMA-376 ST_PatternType
+const PATTERN_TYPES: Readonly<Record<FillPatterns, true>> = {
+    none: true,
+    solid: true,
+    darkVertical: true,
+    darkHorizontal: true,
+    darkGrid: true,
+    darkTrellis: true,
+    darkDown: true,
+    darkUp: true,
+    lightVertical: true,
+    lightHorizontal: true,
+    lightGrid: true,
+    lightTrellis: true,
+    lightDown: true,
+    lightUp: true,
+    darkGray: true,
+    mediumGray: true,
+    lightGray: true,
+    gray125: true,
+    gray0625: true,
+};
 
 /**
  * The model of a {@link FillXform}: a fill, or `{}` (a `<fill>` without a known child parses as `{}`; rendering a model
@@ -81,7 +93,9 @@ class StopXform extends BaseXform<GradientStopModel> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // <color> is inside <stop>, which created the model; undefined for a <color> without color attribute
-                this.model!.color = this.map.color.model ?? undefined;
+                if (this.model) {
+                    this.model.color = this.map.color.model ?? undefined;
+                }
                 this.parser = undefined;
             }
             return true;
@@ -90,7 +104,10 @@ class StopXform extends BaseXform<GradientStopModel> {
     }
 }
 
-/** A pattern fill, `<patternFill patternType>` with its `<fgColor>` / `<bgColor>`. */
+/**
+ * A pattern fill, `<patternFill patternType>` with its `<fgColor>` / `<bgColor>`. A `patternType` that is not one of
+ * ST_PatternType parses as absent (`undefined`).
+ */
 class PatternFillXform extends BaseXform<PatternFillModel> {
     declare map: { readonly fgColor: ColorXform; readonly bgColor: ColorXform };
 
@@ -131,13 +148,15 @@ class PatternFillXform extends BaseXform<PatternFillModel> {
             return true;
         }
         switch (node.name) {
-            case "patternFill":
+            case "patternFill": {
+                const { patternType } = node.attributes;
                 this.model = {
                     type: "pattern",
-                    // unvalidated (and undefined when the attribute is absent)
-                    pattern: node.attributes.patternType as FillPatterns,
+                    // undefined when the attribute is absent (or invalid)
+                    pattern: isOneOf(PATTERN_TYPES, patternType) ? patternType : undefined,
                 };
                 return true;
+            }
             default: {
                 const parser = ownEntry(this.map, node.name);
                 this.parser = parser;
@@ -161,8 +180,8 @@ class PatternFillXform extends BaseXform<PatternFillModel> {
             if (!this.parser.parseClose(name)) {
                 // the colors are inside <patternFill>, which created the model
                 const color = this.parser === this.map.fgColor ? this.map.fgColor.model : this.map.bgColor.model;
-                if (color) {
-                    this.model![this.parser === this.map.fgColor ? "fgColor" : "bgColor"] = color;
+                if (color && this.model) {
+                    this.model[this.parser === this.map.fgColor ? "fgColor" : "bgColor"] = color;
                 }
                 this.parser = undefined;
             }
@@ -173,7 +192,7 @@ class PatternFillXform extends BaseXform<PatternFillModel> {
 }
 
 /** A gradient fill, `<gradientFill degree | type="path" left right top bottom>` with its `<stop>`s. */
-class GradientFillXform extends BaseXform<ParsedGradientFillModel> {
+class GradientFillXform extends BaseXform<GradientFillModel> {
     declare map: { readonly stop: StopXform };
 
     constructor() {
@@ -247,14 +266,9 @@ class GradientFillXform extends BaseXform<ParsedGradientFillModel> {
         switch (node.name) {
             case "gradientFill": {
                 const { degree, type, left, right, top, bottom } = node.attributes;
-                const model: ParsedGradientFillModel = {
-                    stops: [],
-                };
                 if (degree) {
-                    model.gradient = "angle";
-                    model.degree = parseInt(degree, 10);
+                    this.model = { type: "gradient", gradient: "angle", degree: parseInt(degree, 10), stops: [] };
                 } else if (type === "path") {
-                    model.gradient = "path";
                     const center: FillGradientPath["center"] = {
                         left: left ? parseFloat(left) : 0,
                         top: top ? parseFloat(top) : 0,
@@ -265,9 +279,10 @@ class GradientFillXform extends BaseXform<ParsedGradientFillModel> {
                     if (bottom !== top) {
                         center.bottom = bottom ? parseFloat(bottom) : 0;
                     }
-                    model.center = center;
+                    this.model = { type: "gradient", gradient: "path", center, stops: [] };
+                } else {
+                    this.model = { type: "gradient", stops: [] };
                 }
-                this.model = model;
                 return true;
             }
 
@@ -291,7 +306,10 @@ class GradientFillXform extends BaseXform<ParsedGradientFillModel> {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // <stop> is inside <gradientFill>, which created the model
-                this.model!.stops.push(this.map.stop.model!);
+                const stop = this.map.stop.model;
+                if (this.model && stop) {
+                    this.model.stops.push(stop);
+                }
                 this.parser = undefined;
             }
             return true;
@@ -300,43 +318,13 @@ class GradientFillXform extends BaseXform<ParsedGradientFillModel> {
     }
 }
 
-// the pattern types of ECMA-376 ST_PatternType (as in the original list, with its duplicates)
-const VALID_PATTERN_VALUES: Readonly<Record<string, true>> = Object.assign(
-    Object.create(null) as Record<string, true>,
-    Object.fromEntries(
-        [
-            "none",
-            "solid",
-            "darkVertical",
-            "darkGray",
-            "mediumGray",
-            "lightGray",
-            "gray125",
-            "gray0625",
-            "darkHorizontal",
-            "darkVertical",
-            "darkDown",
-            "darkUp",
-            "darkGrid",
-            "darkTrellis",
-            "lightHorizontal",
-            "lightVertical",
-            "lightDown",
-            "lightUp",
-            "lightGrid",
-            "lightTrellis",
-            "lightGrid",
-        ].map((v) => [v, true] as const)
-    )
-);
-
 /**
  * A fill of the styles part, `<fill>` with a `<patternFill>` or a `<gradientFill>` (see {@link FillModel}). A model
  * without a known `type` renders nothing.
  */
 class FillXform extends BaseXform<FillXformModel> {
     /** The pattern types (ST_PatternType), as a set of keys. Unused by the library. */
-    static readonly validPatternValues = VALID_PATTERN_VALUES;
+    static readonly validPatternValues = PATTERN_TYPES;
 
     /** The xform of a gradient stop. */
     static readonly StopXform = StopXform;
@@ -410,13 +398,10 @@ class FillXform extends BaseXform<FillXformModel> {
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                // the fill is the model of its child, with the type of the child
-                // (its model was created when its element opened)
-                if (this.parser === this.map.patternFill) {
-                    this.model = Object.assign(this.map.patternFill.model!, { type: this.map.patternFill.name });
-                } else {
-                    // a parsed path gradient has its center (see ParsedGradientFillModel)
-                    this.model = Object.assign(this.map.gradientFill.model!, { type: this.map.gradientFill.name }) as GradientFillModel;
+                // the fill is the model of its child (created when its element opened)
+                const child = this.parser === this.map.patternFill ? this.map.patternFill.model : this.map.gradientFill.model;
+                if (child) {
+                    this.model = child;
                 }
                 this.parser = undefined;
             }
@@ -427,7 +412,7 @@ class FillXform extends BaseXform<FillXformModel> {
 
     /** @returns `true` for a pattern type of ST_PatternType, else `undefined`. Unused by the library. */
     validStyle(value: string): true | undefined {
-        return VALID_PATTERN_VALUES[value];
+        return isOneOf(PATTERN_TYPES, value) ? true : undefined;
     }
 }
 

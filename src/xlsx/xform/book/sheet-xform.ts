@@ -1,12 +1,16 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
+import type { WorksheetState } from "../../../../index";
 import type { SheetDefModel } from "../../../types";
 import { xmlDecode } from "../../../utils/utils";
-import BaseXform from "../base-xform";
+import BaseXform, { isOneOf } from "../base-xform";
+
+// ECMA-376 ST_SheetState
+const SHEET_STATES: Readonly<Record<WorksheetState, true>> = { visible: true, hidden: true, veryHidden: true };
 
 /**
  * A `<sheet sheetId name state r:id>` of `xl/workbook.xml` (see {@link SheetDefModel}). The name is XML-decoded when
- * parsed.
+ * parsed; a `state` that is not one of ST_SheetState is dropped (visible).
  */
 class WorksheetXform extends BaseXform<SheetDefModel> {
     override render(xmlStream: XmlStream, model: SheetDefModel): void {
@@ -18,16 +22,21 @@ class WorksheetXform extends BaseXform<SheetDefModel> {
         });
     }
 
-    /** @returns `true` for `<sheet>` */
+    /**
+     * @returns `true` for `<sheet>`
+     * @throws Error for a sheet without name (CT_Sheet requires it)
+     */
     override parseOpen(node: SaxTag): boolean {
         if (node.name === "sheet") {
-            const { attributes } = node;
+            const { name, sheetId, state } = node.attributes;
+            if (name === undefined) {
+                throw new Error("Invalid xl/workbook.xml: <sheet> without name");
+            }
             this.model = {
-                // name is required (CT_Sheet): without it, xmlDecode throws (the load fails)
-                name: xmlDecode(attributes.name!),
-                id: BaseXform.toIntValue(attributes.sheetId, NaN),
-                state: attributes.state,
-                rId: attributes["r:id"],
+                name: xmlDecode(name),
+                id: BaseXform.toIntValue(sheetId, NaN),
+                state: isOneOf(SHEET_STATES, state) ? state : undefined,
+                rId: node.attributes["r:id"],
             };
             return true;
         }

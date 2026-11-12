@@ -4,7 +4,7 @@
 // PARTIAL: the read model accumulated by xlsx.ts holds the part models typed in ./sheet.ts at the level xlsx.ts uses
 // them; pivot tables are left `unknown`.
 
-import type { CalculationProperties, WorkbookProperties } from "../../index";
+import type { CalculationProperties, WorkbookProperties, WorksheetState } from "../../index";
 import type { DrawingModel, NoteModel, TableModel, VmlNotesModel, WorksheetModel, ParsedWorksheetModel } from "./sheet";
 import type { SharedStringValue } from "./strings";
 import type { PivotTable } from "../doc/pivot-table";
@@ -21,7 +21,8 @@ export interface RelationshipModel {
     Id: string;
     Type: string;
     Target: string;
-    TargetMode?: "External";
+    /** `External`: `Target` is outside the package (a URL); default `Internal`. */
+    TargetMode?: "External" | "Internal";
     /** Parse: any other attribute of the element, as written. */
     [attribute: string]: string | undefined;
 }
@@ -107,7 +108,8 @@ export interface CommentRefsEntry {
 export interface SheetDefModel {
     id: number;
     name: string;
-    state?: string;
+    /** Parse: absent for a `state` that is not one of ST_SheetState (the default: visible). */
+    state?: WorksheetState;
     rId?: string;
 }
 

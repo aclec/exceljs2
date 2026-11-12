@@ -1,6 +1,7 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { ProtectionModel } from "../../../types";
+import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
 
 /**
@@ -26,8 +27,9 @@ class ProtectionXform extends BaseXform<ProtectionModel> {
     /** Reads `<protection>` (returns nothing: the parent decides when to delegate to this xform). */
     override parseOpen(node: SaxTag): void {
         const model = {
-            locked: !(node.attributes.locked === "0"),
-            hidden: node.attributes.hidden === "1",
+            // xsd:boolean, defaults: locked, not hidden
+            locked: parseBoolean(node.attributes.locked, true),
+            hidden: parseBoolean(node.attributes.hidden),
         };
 
         // only want to record models that differ from defaults
