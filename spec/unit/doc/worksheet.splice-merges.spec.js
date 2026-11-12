@@ -219,6 +219,25 @@ describe("Worksheet merges after splicing", () => {
             expectUnchanged(ws);
         });
 
+        it("resolves column keys as row.values does", () => {
+            // keys of columns that were replaced stay in use: row.values writes them, so the check must see them
+            let ws = buildSheet(ROW_MERGES);
+            ws.columns = [{ key: "a" }, { key: "b" }, { key: "c" }];
+            ws.columns = [{ key: "x" }, { key: "y" }, { key: "z" }];
+            expect(() => ws.insertRow(3, { b: "lost" })).to.throw(/B3.*B2:C4/);
+            expectUnchanged(ws);
+
+            // a key moved to another column is written to that column only
+            ws = buildSheet(ROW_MERGES);
+            ws.getColumn(2).key = "k";
+            ws.getColumn(4).key = "k";
+            ws.insertRow(3, { k: "v" });
+            expect(ws.getCell("D3").value).to.equal("v");
+            expect(ws.getCell("B3").isMergedTo(ws.getCell("B2"))).to.equal(true);
+            expect(ws.getCell("C3").isMergedTo(ws.getCell("B2"))).to.equal(true);
+            checkConsistency(ws);
+        });
+
         it("spliceRows refuses values that replace rows inside a merge", () => {
             const ws = buildSheet(ROW_MERGES);
             expect(() => ws.spliceRows(6, 1, row(1), ["x", "y", "z", "w", "lost"])).to.throw(/E7.*E5:E9/);
