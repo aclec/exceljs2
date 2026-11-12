@@ -70,6 +70,15 @@ describe("Worksheet column ranges", () => {
         expect(ws.columns[1].number).to.equal(2);
     });
 
+    it("keeps the columns array returned earlier", () => {
+        const ws = new ExcelJS.Workbook().addWorksheet("s");
+        ws.columns = [{ key: "a", width: 10 }, { key: "b" }];
+        const { columns } = ws;
+        ws.getCell("E1").value = 1;
+        expect(ws.columns).to.equal(columns);
+        expect(columns.map((c) => c.number)).to.deep.equal([1, 2, 3, 4, 5]);
+    });
+
     it("splices columns loaded as a range", () => {
         const ws = sheetFromCols([{ min: 1, max: 3, width: 20 }]);
         ws.spliceColumns(2, 1);
