@@ -136,6 +136,34 @@ describe('xlsx read robustness', function() {
     });
   });
 
+  describe('worksheet names', () => {
+    it('loads a sheet whose name is longer than 31 characters', async () => {
+      const longName = 'A sheet name that is much longer than Excel allows';
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'xl/workbook.xml': xml => xml.replace('name="Sheet1"', `name="${longName}"`),
+      });
+      const {warn} = console;
+      const warnings = [];
+      console.warn = message => warnings.push(message);
+      let wb;
+      try {
+        wb = await load(buffer);
+      } finally {
+        console.warn = warn;
+      }
+      expect(wb.worksheets.map(ws => ws.name)).to.deep.equal([longName.substring(0, 31)]);
+      expect(warnings).to.not.be.empty();
+    });
+
+    it('allows renaming a sheet to a different case of its own name', () => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Sheet1');
+      ws.name = 'SHEET1';
+      expect(ws.name).to.equal('SHEET1');
+      expect(() => wb.addWorksheet('sheet1')).to.throw(/already exists/);
+    });
+  });
+
   describe('cell values', () => {
     it('reads ISO 8601 date cells (t="d") as UTC dates', async () => {
       const buffer = await tamper(await baseWorkbookBuffer(), {
