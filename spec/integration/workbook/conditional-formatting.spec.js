@@ -53,6 +53,64 @@ describe("conditional formatting", () => {
         expect([...xml.matchAll(/priority="(\d+)"/g)].map(([, priority]) => priority)).to.deep.equal(["3", "4"]);
     });
 
+    it("keep the formula and reference values of their thresholds", async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("Sheet1");
+        const rules = [
+            {
+                type: "colorScale",
+                cfvo: [
+                    { type: "num", value: "$A$1" },
+                    { type: "percentile", value: 50 },
+                    { type: "formula", value: "AVERAGE(A:A)" },
+                ],
+                color: [{ argb: "FFFF0000" }, { argb: "FFFFFF00" }, { argb: "FF00FF00" }],
+            },
+            // written in both sections
+            {
+                type: "dataBar",
+                cfvo: [
+                    { type: "formula", value: "$B$1*2" },
+                    { type: "percent", value: 75.5 },
+                ],
+            },
+            {
+                type: "iconSet",
+                iconSet: "3Arrows",
+                cfvo: [
+                    { type: "percent", value: 0 },
+                    { type: "formula", value: "$C$1" },
+                    { type: "num", value: -1.5 },
+                ],
+            },
+            // written in the extension only
+            {
+                type: "iconSet",
+                iconSet: "3Triangles",
+                cfvo: [
+                    { type: "percent", value: 0 },
+                    { type: "num", value: "Other!$A$1" },
+                    { type: "percentile", value: 1e3 },
+                ],
+            },
+        ];
+        rules.forEach((rule, index) => ws.addConditionalFormatting({ ref: `${"ABCD"[index]}1:${"ABCD"[index]}5`, rules: [rule] }));
+
+        const buffer = await wb.xlsx.writeBuffer();
+        const xml = await readPart(buffer, SHEET);
+        expect(mainSection(xml)).to.include(
+            '<cfvo type="num" val="$A$1"/><cfvo type="percentile" val="50"/><cfvo type="formula" val="AVERAGE(A:A)"/>'
+        );
+        expect(mainSection(xml)).to.include('<cfvo type="formula" val="$B$1*2"/><cfvo type="percent" val="75.5"/>');
+        expect(extSection(xml)).to.include(
+            '<x14:cfvo type="formula"><xm:f>$B$1*2</xm:f></x14:cfvo><x14:cfvo type="percent"><xm:f>75.5</xm:f></x14:cfvo>'
+        );
+        expect(extSection(xml)).to.include('<x14:cfvo type="num"><xm:f>Other!$A$1</xm:f></x14:cfvo>');
+
+        const cfs = (await load(buffer)).getWorksheet("Sheet1").conditionalFormattings;
+        expect(cfs.map((cf) => cf.rules[0].cfvo.map(({ type, value }) => ({ type, value })))).to.deep.equal(rules.map((rule) => rule.cfvo));
+    });
+
     describe("dataBar x14 extension", () => {
         // as written by Excel: the main rule references its x14 counterpart by id
         const mainDataBar = (id, priority) =>

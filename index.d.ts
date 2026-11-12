@@ -1088,7 +1088,10 @@ export type CfvoTypes = "percentile" | "percent" | "num" | "min" | "max" | "form
 
 export interface Cvfo {
     type: CfvoTypes;
-    value?: number;
+    /**
+     * A number, or a formula or cell reference such as "$A$1" (type formula, or num / percent / percentile)
+     */
+    value?: number | string;
 }
 export interface ConditionalFormattingBaseRule {
     /**
