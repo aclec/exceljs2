@@ -100,7 +100,9 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
  `worksheet.dataValidations.model` until 100,000 cells have been expanded for the workbook. Ranges
  that do not fit (for example a whole column) are kept as a single range key such as `'B1:B1048576'`.
  `sqref` tokens that are not cell references are ignored.
- `cell.dataValidation` resolves both forms and both are written back to the file.
+ `cell.dataValidation` resolves both forms (range keys through an index, not a scan of every key)
+ and both are written back to the file. To add a range key directly, write it through a fresh
+ `worksheet.dataValidations.model` (or call `dataValidations.add('B1:B10', validation)`).
 * **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
  once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row

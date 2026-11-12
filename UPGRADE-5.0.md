@@ -120,7 +120,10 @@ worksheet.dataValidations.model;
 
 `cell.dataValidation` resolves both kinds of keys and both are written back to the file, so code that goes through cells is not affected:
 setting or removing the validation of a cell inside a range key replaces that key by the rectangles around the cell. Code that reads
-`dataValidations.model` directly must handle keys of the form `'A1:B2'`.
+`dataValidations.model` directly must handle keys of the form `'A1:B2'`. Range keys are looked up through an index (a lookup does not scan
+every key). Range keys may also be written to the model directly: write through a fresh `worksheet.dataValidations.model` (reading the
+property refreshes the index), or use `dataValidations.add(range, validation)`; a reference to the model kept across lookups is not
+re-indexed.
 
 Also:
 

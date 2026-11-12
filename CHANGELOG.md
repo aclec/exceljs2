@@ -60,6 +60,8 @@ All fixes have regression tests in `spec/integration/security`.
   or names; they are now shared by the whole workbook being loaded.
 - Shared-formula translation was quadratic per clone; `DataValidations.find` and `DefinedNames.model` / `cell.names` were quadratic in the
   number of validations or names. All are linear.
+- Data validations: every `cell.dataValidation` lookup scanned all the range keys (an unbounded number once 100,000 cells are expanded: 0.75
+  ms per lookup with 250,000 keys). Range keys are indexed by position and size; a lookup no longer depends on their number.
 
 ### Dependencies
 
@@ -127,6 +129,7 @@ upstream PR code was merged) and has a regression test.
     - Streaming readers: optional `WorkbookReader` options (#1922), `WorksheetReader` properties and getters (#1901, #3097), EventEmitter
       methods.
     - The `csv.createInputStream()` typing was removed (it has thrown since 4.0). Comment typos (#3003, #3081).
+- Data validations: a range key written directly into `dataValidations.model` after a lookup was ignored by later lookups.
 - Data validations on whole columns or rows (`dataValidations.add("A:A", ...)`, `"1:3"`, `sqref="D:E"` in a file) crashed the writers, were
   ignored by `find()` and were dropped on read; they are kept as the rectangle they cover (`A1:A1048576`), never expanded per cell.
 - Merged cells after `spliceRows` / `insertRow(s)` / `duplicateRow` / `spliceColumns`: the merge index used by the writers was not moved
