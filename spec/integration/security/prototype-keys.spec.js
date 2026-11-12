@@ -1,0 +1,228 @@
+// Every id, name, rId, ref... read from an xlsx part may be used as an object key. Feeding the
+// names of Object.prototype members must neither pollute the global prototypes nor leave the
+// library in a state where a later, unrelated write fails.
+const { Readable } = require("stream");
+const JSZip = require("jszip");
+const { baseWorkbookBuffer, tamper } = require("../../utils/xlsx-tamper");
+
+const ExcelJS = verquire("exceljs");
+
+const KEYS = ["__proto__", "constructor", "prototype", "toString"];
+const PROTOTYPES = [Object.prototype, Array.prototype, Function.prototype, String.prototype];
+
+function snapshotPrototypes() {
+    return PROTOTYPES.map((proto) => Object.getOwnPropertyNames(proto).sort().join(","));
+}
+const PRISTINE = snapshotPrototypes();
+
+// removes polluted members, so that one finding does not mask the others
+function restorePrototypes() {
+    PROTOTYPES.forEach((proto, i) => {
+        const known = new Set(PRISTINE[i].split(","));
+        Object.getOwnPropertyNames(proto)
+            .filter((name) => !known.has(name))
+            .forEach((name) => delete proto[name]);
+    });
+}
+
+// A workbook that uses as many id/name/rId keyed parts as possible.
+function buildRichWorkbook(wb, ws) {
+    ws.columns = [
+        { header: "A", key: "a", width: 10 },
+        { header: "B", key: "b" },
+    ];
+    for (let i = 0; i < 5; i++) {
+        ws.addRow({ a: i, b: `x${i}` });
+    }
+    ws.getCell("C1").value = { formula: "A1*2", result: 0, shareType: "shared", ref: "C1:C3" };
+    ws.getCell("C2").value = { sharedFormula: "C1", result: 0 };
+    ws.getCell("D1").value = { text: "link", hyperlink: "http://example.com/" };
+    ws.getCell("D2").value = { richText: [{ text: "r", font: { bold: true } }, { text: "s" }] };
+    ws.getCell("D3").note = "hello";
+    ws.getCell("A3").numFmt = "yyyy-mm-dd";
+    ws.mergeCells("E1:F2");
+    ws.getCell("A2").dataValidation = { type: "list", formulae: ['"a,b"'] };
+    ws.addConditionalFormatting({
+        ref: "A1:A5",
+        rules: [
+            {
+                type: "expression",
+                formulae: ["A1>2"],
+                style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFFF0000" } } },
+            },
+            { type: "dataBar", cfvo: [{ type: "min" }, { type: "max" }], color: { argb: "FF00FF00" } },
+        ],
+    });
+    ws.autoFilter = "A1:B5";
+    const ws2 = wb.addWorksheet("T");
+    ws2.addTable({
+        name: "Tbl",
+        ref: "A1",
+        headerRow: true,
+        columns: [{ name: "x", filterButton: true }, { name: "y" }],
+        rows: [
+            [1, 2],
+            [3, 4],
+        ],
+    });
+    ws2.getCell("D1").value = { text: "internal", hyperlink: "#Sheet1!A1" };
+    wb.definedNames.add("Sheet1!$A$1:$B$3", "nm");
+    const imageId = wb.addImage({ filename: "./spec/integration/data/image.png", extension: "png" });
+    ws.addImage(imageId, "H2:I4");
+    ws2.addBackgroundImage(imageId);
+}
+
+async function partsOf(buffer) {
+    const zip = await JSZip.loadAsync(buffer);
+    const names = Object.keys(zip.files).filter((name) => /\.(xml|rels|vml)$/.test(name));
+    const texts = {};
+    for (const name of names) {
+        texts[name] = await zip.file(name).async("string");
+    }
+    return texts;
+}
+
+// [part, attribute] pairs: every attribute name used in every part (namespaces excluded)
+function attributeCases(texts) {
+    const cases = [];
+    for (const [part, xml] of Object.entries(texts)) {
+        const attributes = new Set([...xml.matchAll(/\s([\w:]+)="[^"]*"/g)].map((m) => m[1]).filter((n) => !n.startsWith("xmlns")));
+        for (const attribute of attributes) {
+            cases.push([part, attribute]);
+        }
+    }
+    return cases;
+}
+
+const replaceAttribute = (attribute, value) => (xml) => xml.replace(new RegExp(`(\\s${attribute}=")[^"]*(")`, "g"), `$1${value}$2`);
+
+// Resolves with "rejected" instead of throwing: hostile input may be refused, but must settle.
+const settle = (promise) =>
+    promise.then(
+        () => "resolved",
+        () => "rejected"
+    );
+
+function attempt(fn) {
+    try {
+        return fn();
+    } catch (error) {
+        return error;
+    }
+}
+
+function isPolluted() {
+    return snapshotPrototypes().join("|") !== PRISTINE.join("|");
+}
+
+// Loads (or rejects), reads every cell, then writes (or rejects). Returns the step after which
+// the prototypes were polluted, checked before the next step can be affected by the pollution.
+async function readAll(buffer) {
+    const wb = new ExcelJS.Workbook();
+    const loaded = await settle(wb.xlsx.load(buffer));
+    if (isPolluted()) {
+        return "load";
+    }
+    if (loaded === "rejected") {
+        return undefined;
+    }
+    wb.eachSheet((ws) =>
+        ws.eachRow((row) =>
+            row.eachCell((cell) => {
+                for (const getter of ["value", "formula", "dataValidation", "names", "text"]) {
+                    // a getter may throw on inconsistent input: that is caught by the caller,
+                    // only pollution and unsettled promises matter here
+                    attempt(() => cell[getter]);
+                }
+            })
+        )
+    );
+    if (isPolluted()) {
+        return "cell getters";
+    }
+    await settle(wb.xlsx.writeBuffer());
+    return isPolluted() ? "write" : undefined;
+}
+
+async function streamAll(buffer) {
+    const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), {
+        sharedStrings: "cache",
+        hyperlinks: "cache",
+        styles: "cache",
+    });
+    const iterate = async () => {
+        for await (const ws of reader) {
+            for await (const row of ws) {
+                row.eachCell((cell) => [attempt(() => cell.value), attempt(() => cell.text)]);
+            }
+        }
+    };
+    await settle(iterate());
+    return isPolluted() ? "stream" : undefined;
+}
+
+async function writeUnrelatedWorkbook() {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("ok").getCell("A1").value = "hello";
+    const back = new ExcelJS.Workbook();
+    await back.xlsx.load(await wb.xlsx.writeBuffer());
+    return back.getWorksheet("ok").getCell("A1").value;
+}
+
+describe("prototype-named keys in xlsx parts", function () {
+    this.timeout(120000);
+
+    let base;
+    let texts;
+    before(async () => {
+        base = await baseWorkbookBuffer(buildRichWorkbook);
+        texts = await partsOf(base);
+    });
+    afterEach(restorePrototypes);
+
+    it('does not pollute Object.prototype through an x14 conditional formatting rule id="__proto__"', async () => {
+        const ext =
+            '<extLst><ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">' +
+            '<x14:conditionalFormattings><x14:conditionalFormatting xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">' +
+            '<x14:cfRule type="attacker-type" priority="7" id="__proto__" operator="attacker-op"><xm:f>attacker-formula</xm:f></x14:cfRule>' +
+            "<xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
+        const buffer = await tamper(await baseWorkbookBuffer(), {
+            "xl/worksheets/sheet1.xml": (xml) =>
+                xml
+                    .replace(
+                        "</sheetData>",
+                        '</sheetData><conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>1</formula></cfRule></conditionalFormatting>'
+                    )
+                    .replace("</worksheet>", `${ext}</worksheet>`),
+        });
+        const before = snapshotPrototypes();
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        expect(snapshotPrototypes()).to.deep.equal(before);
+        expect({}.type).to.equal(undefined);
+        // the x14 rule is kept as a rule of its own
+        const rules = wb.getWorksheet("Sheet1").conditionalFormattings.flatMap((cf) => cf.rules);
+        expect(rules.map((rule) => rule.type)).to.deep.equal(["expression", "attacker-type"]);
+        expect(await writeUnrelatedWorkbook()).to.equal("hello");
+    });
+
+    it("leaves the global prototypes untouched for every attribute of every part (document and streaming readers)", async () => {
+        const cases = attributeCases(texts);
+        expect(cases.length).to.be.above(200);
+        const polluted = [];
+        for (const [part, attribute] of cases) {
+            for (const key of KEYS) {
+                const buffer = await tamper(base, { [part]: replaceAttribute(attribute, key) });
+                for (const run of [readAll, streamAll]) {
+                    const step = await run(buffer);
+                    if (step) {
+                        polluted.push(`${part} ${attribute}="${key}" (${step})`);
+                        restorePrototypes();
+                    }
+                }
+            }
+        }
+        expect(polluted).to.deep.equal([]);
+        expect(await writeUnrelatedWorkbook()).to.equal("hello");
+    });
+});
