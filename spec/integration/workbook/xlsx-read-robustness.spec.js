@@ -172,6 +172,7 @@ describe('xlsx read robustness', function() {
         ws.getCell('C1').value = {text: 'external', hyperlink: 'https://example.com/page'};
         ws.getCell('D1').value = {text: 'anchor', hyperlink: 'https://example.com/doc'};
         ws.getCell('E1').value = {text: 'location only', hyperlink: 'https://example.com/x'};
+        ws.getCell('F1').value = {text: 'no hash', hyperlink: 'Sheet2!D3'};
       });
     // what Excel writes: an anchor in an external target, and an internal link without r:id
     const excelStyle = xml =>
@@ -184,6 +185,7 @@ describe('xlsx read robustness', function() {
       expect(ws.getCell('D1').hyperlink).to.equal('https://example.com/doc#part2');
       expect(ws.getCell('E1').hyperlink).to.equal('#Sheet2!B3');
       expect(ws.getCell('E1').text).to.equal('location only');
+      expect(ws.getCell('F1').hyperlink).to.equal('Sheet2!D3');
     };
 
     it('reads the location of internal and external links', async () => {
