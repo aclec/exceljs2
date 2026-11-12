@@ -3011,6 +3011,23 @@ sudo apt-get install libfontconfig
 
 Fixed in 5.0: merged cells move with the rows and columns that splices move, see [Merged Cells](#merged-cells).
 
+## Fake timers[⬆](#contents)<!-- Link generated with jump2header -->
+
+`xlsx.load` / `read` / `readFile` and `xlsx.write` / `writeBuffer` / `writeFile` give the event loop a turn (`setImmediate`, or a
+`MessageChannel` message in browsers) after every 25 ms of work, measured with `Date.now()`, so that a server stays responsive during a
+large read or write. Fake timers (`vi.useFakeTimers()`, `jest.useFakeTimers()`, sinon's `useFakeTimers()`) queue `setImmediate` until the
+test advances them:
+
+- `load` and `writeBuffer` settle as usual when the fake timers also fake `Date` (their default: the clock does not move, so no turn is
+  taken), and with a real `Date` for workbooks read or written in less than 25 ms;
+- with a real `Date`, larger workbooks wait for a turn every 25 ms;
+- `write(stream)` to a stream (anything with an `on` method, as `writeFile` uses) waits for one turn before completing the archive, so that
+  a failed write of the stream is reported.
+
+In the last two cases the promise settles only once the test advances the timers (`await vi.runAllTimersAsync()`,
+`await jest.runAllTimersAsync()`, `await clock.runAllAsync()`); or run that code with real timers, or fake only the timers the test needs
+(for example `vi.useFakeTimers({ toFake: ["setTimeout", "Date"] })`).
+
 # Release History[⬆](#contents)<!-- Link generated with jump2header -->
 
 | Version | Changes |
