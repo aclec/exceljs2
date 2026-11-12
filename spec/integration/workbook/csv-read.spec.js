@@ -80,6 +80,22 @@ describe("CSV read", () => {
             expect(error.message).to.equal("bad value");
         });
 
+        it("rejects with an Error when a custom map throws something else", async () => {
+            const error = await readCsv("a\n", {
+                map: () => {
+                    throw "bad value";
+                },
+            }).catch((e) => e);
+            expect(error).to.be.an.instanceOf(Error);
+            expect(error.message).to.equal("bad value");
+        });
+
+        it("writeFile throws a clear TypeError for an unknown encoding", () => {
+            const wb = new ExcelJS.Workbook();
+            wb.addWorksheet("s");
+            expect(() => wb.csv.writeFile("spec/out/never.csv", { encoding: "bogus" })).to.throw(TypeError, 'Invalid encoding: "bogus"');
+        });
+
         it("rejects when the input stream fails", async () => {
             const input = new Readable({ read() {} });
             const promise = new ExcelJS.Workbook().csv.read(input);

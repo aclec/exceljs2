@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import { EventEmitter } from "events";
-import { PassThrough, Readable, pipeline } from "stream";
-import type { ReadableStream as WebReadableStream } from "stream/web";
+import { PassThrough, Readable } from "stream";
+import { ReadableStream as WebReadableStream } from "stream/web";
 import * as os from "os";
 import * as path from "path";
 import { parseZipStream, type ZipReadOptions, type ZipStreamEntry } from "../../utils/zip-reader";
@@ -11,7 +11,9 @@ import StylesXform from "../../xlsx/xform/style/styles-xform";
 import WorkbookXform from "../../xlsx/xform/book/workbook-xform";
 import RelationshipsXform from "../../xlsx/xform/core/relationships-xform";
 import SharedStringXform from "../../xlsx/xform/strings/shared-string-xform";
-import type { WorkbookProperties, stream as publicStream } from "../../../index";
+import type DefinedNames from "../../doc/defined-names";
+import type { WorkbookProperties, WorksheetState, stream as publicStream } from "../../../index";
+import { isOneOf } from "../../utils/utils";
 import type { RelationshipModel, SharedStringValue, SheetDefModel, WorkbookPartModel } from "../../types";
 
 import WorksheetReader, { type WorksheetHyperlink } from "./worksheet-reader";
@@ -211,8 +213,14 @@ const WORKSHEET_RELS_PART = /xl\/worksheets\/_rels\/sheet(\d+)[.]xml.rels/;
 // the byte chunks of the file (Buffers, Uint8Arrays...)
 type ByteChunks = AsyncIterable<unknown, unknown, undefined>;
 
-// a loosely typed input, to tell its kind
-type InputCandidate = Partial<ByteChunks & { getReader: unknown; pipe: unknown }> | null | undefined;
+// an input that has an async iterator: a Node.js Readable, a web ReadableStream (in Node.js), an async generator... The
+// zip reader checks its chunks.
+function isAsyncIterable(input: object): input is ByteChunks {
+    return Symbol.asyncIterator in input && typeof input[Symbol.asyncIterator] === "function";
+}
+
+/** Whether a sheet state from xl/workbook.xml is one of {@link WorksheetState}. */
+const isWorksheetState = isOneOf(["visible", "hidden", "veryHidden"] as const satisfies readonly WorksheetState[]);
 
 /**
  * The streaming reader of an xlsx file: reads the parts as they come out of the zip, in one pass, holding only the
@@ -249,6 +257,16 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
     /** The workbook properties (`date1904`), as the workbookPr xform holds them. */
     properties?: { readonly model?: Partial<WorkbookProperties> | null };
 
+    /**
+     * Not available: the streaming reader does not read the defined names (the cells of a read row reach them only to
+     * look up or change their names).
+     *
+     * @throws Error always
+     */
+    get definedNames(): DefinedNames {
+        throw new Error("Invalid Operation: definedNames (the streaming reader does not read the defined names)");
+    }
+
     private _sheetIndex?: Map<string | undefined, SheetDefModel | undefined> | null;
     private _stylesParsed?: boolean;
     /** `hyperlinks: "cache"`: the hyperlink relationships of the worksheet parts read, by part number (`sheet3.xml`: "3"). */
@@ -278,16 +296,19 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         if (typeof input === "string") {
             return fs.createReadStream(input);
         }
-        const candidate = input as InputCandidate;
-        if (candidate && typeof candidate[Symbol.asyncIterator] === "function") {
-            return candidate as ByteChunks;
-        }
-        if (candidate && typeof candidate.getReader === "function") {
-            return Readable.fromWeb(candidate as WebReadableStream);
-        }
-        if (candidate && typeof candidate.pipe === "function") {
-            // pipeline (unlike pipe) forwards the errors of the input
-            return pipeline(candidate as NodeJS.ReadableStream, new PassThrough(), () => {});
+        if (typeof input === "object" && input !== null) {
+            if (isAsyncIterable(input)) {
+                return input;
+            }
+            if (input instanceof WebReadableStream) {
+                return Readable.fromWeb(input);
+            }
+            if (typeof input.pipe === "function") {
+                // an old-style stream (pipe and events only): piped, with its errors forwarded (pipe alone drops them)
+                const output = new PassThrough();
+                input.on("error", (error: Error) => output.destroy(error));
+                return input.pipe(output);
+            }
         }
         // eslint-disable-next-line @typescript-eslint/no-base-to-string -- the input as it always was in this message
         throw new Error(`Could not recognise input: ${String(input)}`);
@@ -356,7 +377,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         this._relationshipsRead = false;
 
         // worksheets, deferred for parsing after shared strings reading
-        const waitingWorkSheets: { sheetNo: string; range: SpoolRange }[] = [];
+        const waitingWorkSheets: { sheetNo: string; spool: SheetSpool; range: SpoolRange }[] = [];
         let completed = false;
         let tmpDir: string | null = null;
         let spool: SheetSpool | null = null;
@@ -380,9 +401,9 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
                         await this._parseStyles(entry);
                         break;
                     default: {
-                        let match = WORKSHEET_PART.exec(entry.path);
-                        if (match) {
-                            const sheetNo = match[1]!;
+                        const sheetNo = WORKSHEET_PART.exec(entry.path)?.[1];
+                        const relsSheetNo = sheetNo === undefined ? WORKSHEET_RELS_PART.exec(entry.path)?.[1] : undefined;
+                        if (sheetNo !== undefined) {
                             if (this._worksheetDependenciesParsed() || this.options.worksheets !== "emit") {
                                 // ignored worksheets are not read: nothing to spool
                                 yield* this._parseWorksheet(entry, sheetNo);
@@ -393,10 +414,10 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
                                     spool = await SheetSpool.create(tmpDir);
                                 }
                                 // rejects on entry errors too (truncated or corrupt zip data)
-                                waitingWorkSheets.push({ sheetNo, range: await spool.append(entry) });
+                                waitingWorkSheets.push({ sheetNo, spool, range: await spool.append(entry) });
                             }
-                        } else if ((match = WORKSHEET_RELS_PART.exec(entry.path))) {
-                            yield* this._parseHyperlinks(entry, match[1]!);
+                        } else if (relsSheetNo !== undefined) {
+                            yield* this._parseHyperlinks(entry, relsSheetNo);
                         }
                         break;
                     }
@@ -406,9 +427,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
             this._relationshipsRead = true;
             this._unresolvedHyperlinks.clear();
 
-            for (const { sheetNo, range } of waitingWorkSheets) {
-                // a range was spooled: the spool exists
-                const sheetSpool = spool!;
+            for (const { sheetNo, spool: sheetSpool, range } of waitingWorkSheets) {
                 // read when the consumer reads the worksheet, during or after the iteration
                 yield* this._parseWorksheet(sheetSpool.read(range), sheetNo, (reader) =>
                     spooledSheets.register(reader, { spool: sheetSpool, range })
@@ -513,7 +532,10 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
                 } else if (inString && !xform.parseClose(event.value.name)) {
                     inString = false;
                     // the <si> was opened: the xform has its model
-                    const text = xform.model!;
+                    const text = xform.model;
+                    if (text === undefined || text === null) {
+                        throw new Error("Invalid xl/sharedStrings.xml: a <si> without model");
+                    }
                     if (cache) {
                         cache.push(text);
                     } else {
@@ -553,7 +575,9 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         if (matchingSheet) {
             worksheetReader.id = matchingSheet.id;
             worksheetReader.name = matchingSheet.name;
-            worksheetReader.state = matchingSheet.state as WorksheetReader["state"];
+            // an unknown state from the file: none (the schema default is visible)
+            const { state } = matchingSheet;
+            worksheetReader.state = isWorksheetState(state) ? state : undefined;
         }
         if (this.options.worksheets === "emit") {
             yield { eventType: "worksheet", value: worksheetReader };

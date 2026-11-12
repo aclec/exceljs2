@@ -139,9 +139,17 @@ describe("utils", () => {
             const dictionary = utils.createDictionary();
             expect(Object.getPrototypeOf(dictionary)).to.equal(null);
             expect(Object.keys(dictionary)).to.deep.equal([]);
-            dictionary.__proto__ = 1;
-            expect(dictionary.__proto__).to.equal(1);
+            const key = "__proto__";
+            dictionary[key] = 1;
+            expect(dictionary[key]).to.equal(1);
             expect(Object.keys(dictionary)).to.deep.equal(["__proto__"]);
+        });
+    });
+
+    describe("isOneOf", () => {
+        it("is a type guard for a list of literals", () => {
+            const isState = utils.isOneOf(["visible", "hidden"]);
+            expect(["visible", "hidden", "bogus", undefined, 1].map(isState)).to.deep.equal([true, true, false, false, false]);
         });
     });
 

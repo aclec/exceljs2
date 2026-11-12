@@ -1,19 +1,21 @@
 import { EventEmitter } from "events";
 import parseSax, { type SaxInput } from "../../utils/parse-sax";
 
-import { excelToDate, isDateFmt, parseBoolean, xmlDecode } from "../../utils/utils";
+import { createDictionary, excelToDate, isDateFmt, parseBoolean, xmlDecode } from "../../utils/utils";
 import colCache from "../../utils/col-cache";
+import { slideFormula } from "../../utils/shared-formula";
 import { parseIsoDate as parseIsoDateOrUndefined } from "../../utils/iso-date";
 import Range from "../../doc/range";
 
 import Row, { type RowWorksheet } from "../../doc/row";
 import Column, { type ColumnRanges, type ColumnWorksheet } from "../../doc/column";
 import type { CellValue } from "../../doc/cell";
+import type DataValidations from "../../doc/data-validations";
 import ColXform from "../../xlsx/xform/sheet/col-xform";
 import RowXform from "../../xlsx/xform/sheet/row-xform";
 import SheetFormatPropertiesXform from "../../xlsx/xform/sheet/sheet-format-properties-xform";
 import type { CellFormulaValue, WorksheetProperties, WorksheetState } from "../../../index";
-import type { ColModel } from "../../types";
+import type { ColModel, RowBreakModel } from "../../types";
 import type WorkbookReader from "./workbook-reader";
 import type { WorkbookReaderOptions } from "./workbook-reader";
 
@@ -98,6 +100,15 @@ export interface WorksheetReaderEvents {
 /** The sheet format properties read from `<sheetFormatPr>` (SheetFormatPropertiesXform). */
 type SheetFormatProperties = Partial<WorksheetProperties> & { outlineLevelCol: number; outlineLevelRow: number };
 
+// the <f> of a <c> being parsed
+interface FormulaBeingParsed {
+    text: string;
+    /** `t="shared"`: the `si` of the shared formula (`"undefined"` when absent, as the document reader keys it) */
+    si?: string;
+    /** the `ref` of a shared formula master */
+    ref?: string;
+}
+
 // a <c> being parsed
 interface CellBeingParsed {
     ref: string;
@@ -105,8 +116,26 @@ interface CellBeingParsed {
     /** the style id (`NaN` when absent) */
     s: number;
     t: string | undefined;
-    f?: { text: string };
+    f?: FormulaBeingParsed;
     v?: { text: string };
+}
+
+/** The master of a shared formula: its formula and the address of its cell. */
+interface SharedFormulaMaster {
+    formula: string;
+    address: string;
+}
+
+/**
+ * The shared formula masters kept per worksheet (by `si`), for their clones: past this number, the oldest master is
+ * dropped (its later clones get no formula). Clones follow their master closely, so this only bounds the memory of a
+ * hostile file.
+ */
+const MAX_SHARED_FORMULA_MASTERS = 65536;
+
+/** The error raised by the members of the worksheet that a read row or column cannot use. */
+function readOnly(member: string): Error {
+    return new Error(`Invalid Operation: ${member} (the rows and columns of a streaming reader are read-only)`);
 }
 
 // the attributes of CT_Hyperlink that a WorksheetHyperlink keeps: [key, attribute name]
@@ -170,7 +199,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         this._columns = null;
         this._colRanges = null;
         this._columnsSparse = false;
-        this._keys = Object.create(null) as Record<string, Column>;
+        this._keys = createDictionary();
 
         // keep a record of dimensions
         this._dimensions = new Range();
@@ -188,14 +217,70 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         throw new Error("Invalid Operation: destroy");
     }
 
-    /** The dimensions of the rows read so far. */
+    // =========================================================================
+    // The members of a document worksheet that its rows, columns and cells use: a read row or column is read-only, so
+    // the Row / Column / Cell methods that reach them (to change or commit a row, to look up another cell, the data
+    // validations or the defined names) throw.
+
     /**
-     * This reader as the worksheet of its rows and columns. A read row or column is read-only: the members of a document
-     * worksheet that the reader lacks (`getCell`, `findCell`, `eachRow`, `dataValidations`, `rowBreaks`, `_commitRow`)
-     * are only reached by the Row / Column / Cell methods that change or commit them (and throw on a read one, as always).
+     * Not a valid operation for a read row or column.
+     *
+     * @throws Error always
      */
+    getCell(address: string): never;
+    getCell(row: number, col: number): never;
+    getCell(): never {
+        throw readOnly("getCell");
+    }
+
+    /**
+     * Not a valid operation for a read row or column.
+     *
+     * @throws Error always
+     */
+    findCell(): never {
+        throw readOnly("findCell");
+    }
+
+    /**
+     * Not a valid operation for a read row or column.
+     *
+     * @throws Error always
+     */
+    eachRow(): never {
+        throw readOnly("eachRow");
+    }
+
+    /**
+     * Not a valid operation for a read row.
+     *
+     * @throws Error always
+     */
+    _commitRow(): never {
+        throw readOnly("commit");
+    }
+
+    /**
+     * Not available for a read row or cell.
+     *
+     * @throws Error always
+     */
+    get dataValidations(): DataValidations {
+        throw readOnly("dataValidations");
+    }
+
+    /**
+     * Not available for a read row.
+     *
+     * @throws Error always
+     */
+    get rowBreaks(): RowBreakModel[] {
+        throw readOnly("rowBreaks");
+    }
+
+    /** This reader, as the worksheet of its rows and columns (see above). */
     private get _host(): RowWorksheet & ColumnWorksheet {
-        return this as unknown as RowWorksheet & ColumnWorksheet;
+        return this;
     }
 
     /** The range covering the rows read so far. */
@@ -274,8 +359,8 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
 
     /** Calls `f` for each keyed column. */
     eachColumnKey(f: (column: Column, key: string) => void): void {
-        for (const key of Object.keys(this._keys)) {
-            f(this._keys[key]!, key);
+        for (const [key, column] of Object.entries(this._keys)) {
+            f(column, key);
         }
     }
 
@@ -325,7 +410,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         let hyperlinks: Record<string, WorksheetHyperlink> | null = null;
         if (options.hyperlinks === "cache") {
             // keyed by cell references from the file
-            this.hyperlinks = hyperlinks = Object.create(null) as Record<string, WorksheetHyperlink>;
+            this.hyperlinks = hyperlinks = createDictionary();
         }
         if (!emitSheet && !emitHyperlinks && !hyperlinks) {
             return;
@@ -349,6 +434,8 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         let current: { text: string } | null = null;
         let rowNumber = 0;
         let colNumber = 0;
+        // the masters of the shared formulas seen, by si (no prototype: the keys come from the file)
+        const sharedFormulas = new Map<string, SharedFormulaMaster>();
         for await (const events of parseSax(iterator)) {
             const worksheetEvents: WorksheetReaderEvent[] = [];
             for (const event of events) {
@@ -374,9 +461,11 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                                     // same parsing (and grid clamping) as the document reader
                                     colXform.parseOpen(node);
                                     // set by parseOpen of a <col>
-                                    const col = colXform.model!;
-                                    colXform.reconcile(col, { styles });
-                                    cols.push(col);
+                                    const col = colXform.model;
+                                    if (col) {
+                                        colXform.reconcile(col, { styles });
+                                        cols.push(col);
+                                    }
                                 }
                                 break;
 
@@ -419,6 +508,11 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                             case "f":
                                 if (c) {
                                     current = c.f = { text: "" };
+                                    if (attributes.t === "shared") {
+                                        // as the document reader: a missing si is the key "undefined"
+                                        c.f.si = String(attributes.si);
+                                        c.f.ref = attributes.ref;
+                                    }
                                 }
                                 break;
                             case "v":
@@ -484,7 +578,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
 
                         case "c":
                             if (row && c) {
-                                this._reconcileCell(row, c, sharedStrings, styles, date1904);
+                                this._reconcileCell(row, c, sharedStrings, styles, date1904, sharedFormulas);
                                 c = null;
                             }
                             break;
@@ -510,7 +604,8 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         c: CellBeingParsed,
         sharedStrings: WorkbookReader["sharedStrings"],
         styles: WorkbookReader["styles"],
-        date1904: boolean
+        date1904: boolean,
+        sharedFormulas: Map<string, SharedFormulaMaster>
     ): void {
         const cell = row.getCell(c.col);
         if (c.s) {
@@ -523,7 +618,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         let value: CellValue;
         if (c.f) {
             const cellValue: CellFormulaValue = {
-                formula: c.f.text,
+                formula: sharedFormula(c.ref, c.f, sharedFormulas),
             };
             if (c.v) {
                 // as the document reader (CellXform)
@@ -532,6 +627,9 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                 } else if (c.t === "b") {
                     cellValue.result = parseInt(c.v.text, 10) !== 0;
                 } else if (c.t === "e") {
+                    // the error code of the file, kept as is (as CellXform does): Excel writes codes that the
+                    // CellErrorValue union of index.d.ts lacks (#SPILL!, #CALC!, #GETTING_DATA...)
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- see above: the union is to be widened in index.d.ts, for both readers at once
                     cellValue.result = { error: c.v.text } as CellFormulaValue["result"];
                 } else if (c.t === "d") {
                     cellValue.result = parseIsoDate(c.v.text);
@@ -576,6 +674,33 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         }
         cell.value = value;
     }
+}
+
+/**
+ * The formula of a `<c>`: its own text, or for a clone of a shared formula the formula of its master translated to the
+ * cell (as `cell.formula` gives it after `workbook.xlsx.load`). A master (an `<f t="shared">` with a `ref`) is kept by
+ * its si for its clones, which follow it in the worksheet; a clone whose master was not seen (or was dropped, see
+ * MAX_SHARED_FORMULA_MASTERS) keeps its own text: none.
+ * @throws Error when a translated reference is out of the grid, or the formula of the master is longer than the Excel
+ * limit (as `cell.formula` of the clone after a load)
+ */
+function sharedFormula(address: string, f: FormulaBeingParsed, masters: Map<string, SharedFormulaMaster>): string {
+    if (f.si === undefined) {
+        return f.text;
+    }
+    if (f.ref) {
+        if (!masters.has(f.si) && masters.size >= MAX_SHARED_FORMULA_MASTERS) {
+            // the oldest one (Map keeps the insertion order)
+            for (const si of masters.keys()) {
+                masters.delete(si);
+                break;
+            }
+        }
+        masters.set(f.si, { formula: f.text, address });
+        return f.text;
+    }
+    const master = masters.get(f.si);
+    return master ? slideFormula(master.formula, master.address, address) : f.text;
 }
 
 export default WorksheetReader;

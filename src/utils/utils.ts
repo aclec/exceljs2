@@ -322,6 +322,15 @@ function objectFromProps<V = null>(props: readonly string[], value: V | null = n
 }
 
 /**
+ * A type guard for a union of string literals: `isOneOf(["a", "b"] as const)(x)` is true when x is `"a"` or `"b"`
+ * (e.g. an attribute value read from a file).
+ */
+function isOneOf<T extends string>(values: readonly T[]): (value: unknown) => value is T {
+    const set = new Set<unknown>(values);
+    return (value: unknown): value is T => set.has(value);
+}
+
+/**
  * A new empty object without prototype, for keys that come from data (`"__proto__"`, `"constructor"`...), which a
  * plain `{}` would resolve on Object.prototype.
  */
@@ -350,6 +359,7 @@ const utils = {
     toSortedArray,
     objectFromProps,
     createDictionary,
+    isOneOf,
 };
 
 export {
@@ -372,6 +382,7 @@ export {
     toSortedArray,
     objectFromProps,
     createDictionary,
+    isOneOf,
 };
 
 export default utils;

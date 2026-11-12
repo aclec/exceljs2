@@ -180,7 +180,8 @@ class CSV {
                     try {
                         listener(arg);
                     } catch (error) {
-                        csvStream.destroy(error as Error);
+                        // something else than an Error (thrown by a user map) is wrapped in one
+                        csvStream.destroy(error instanceof Error ? error : new Error(String(error)));
                     }
                 };
             csvStream
@@ -188,20 +189,31 @@ class CSV {
                     "headers",
                     guard(() => {
                         // the header names become the first row, and the column keys (the parser emits 'headers' only
-                        // with the headers option, which setHeaders handles)
-                        // a null header name is kept as is (index.d.ts types Column.header as string)
-                        worksheet.columns = headers!.map((header) => (header ? { header: header[0] as string, key: header[1] } : {}));
+                        // with the headers option, which setHeaders handles: headers is set)
+                        worksheet.columns = (headers || []).map((header) =>
+                            header
+                                ? {
+                                      // a null header name (index.d.ts HeaderArray) is kept as is: the Column gets a
+                                      // null header and an empty header cell
+                                      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- documented above: ColumnDefn.header lacks null
+                                      header: header[0] as string,
+                                      key: header[1],
+                                  }
+                                : {}
+                        );
                     })
                 )
                 .on(
                     "data",
                     guard((data: Record<string, string> | string[]) => {
-                        if (headers) {
+                        if (Array.isArray(data)) {
+                            // without the headers option
+                            worksheet.addRow(data.map(map));
+                        } else if (headers) {
                             // the row is keyed by the column indexes (see setHeaders); fast-csv fills a missing field with ""
-                            const row = data as Record<string, string>;
-                            worksheet.addRow(headers.map((header, index) => (header ? map(row[index]!, index) : undefined)));
+                            worksheet.addRow(headers.map((header, index) => (header ? map(data[index] ?? "", index) : undefined)));
                         } else {
-                            worksheet.addRow((data as string[]).map(map));
+                            throw new Error("CSV: a row keyed by header names without the headers option");
                         }
                     })
                 )
@@ -243,10 +255,9 @@ class CSV {
 
             const worksheet = this.workbook.getWorksheet(writeOptions.sheetName || writeOptions.sheetId);
 
-            // index.d.ts FastCsvFormatterOptionsArgs.transform is typed apart from fast-csv's own
-            const csvStream = fastCsv.format(
-                writeOptions.formatterOptions as fastCsv.FormatterOptionsArgs<fastCsv.FormatterRow, fastCsv.FormatterRow>
-            );
+            // the rows written are arrays (the results of map, which fast-csv converts to text): FormatterRowArray as fast-csv
+            // types them, as the input of a transform of index.d.ts (RowArray)
+            const csvStream = fastCsv.format<fastCsv.FormatterRowArray, fastCsv.FormatterRow>(writeOptions.formatterOptions);
             stream.on("finish", () => {
                 resolve();
             });
@@ -256,24 +267,23 @@ class CSV {
             csvStream.pipe(stream);
 
             const { dateFormat, dateUTC } = writeOptions;
-            // index.d.ts types the values given to a user map as its CellValue
+            // index.d.ts types the values given to a user map as its CellValue: the values of the cells (the doc CellValue
+            // also admits any object, which no cell value is)
             const map: (value: DocCellValue, index: number) => unknown =
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- documented above
                 (writeOptions.map as ((value: DocCellValue, index: number) => unknown) | undefined) ||
                 ((value: DocCellValue): unknown => {
                     if (value && typeof value === "object") {
                         // the properties of the value objects of index.d.ts (hyperlink, formula, error)
-                        const object = value as {
-                            text?: unknown;
-                            hyperlink?: unknown;
-                            formula?: unknown;
-                            result?: unknown;
-                            error?: unknown;
-                        };
-                        if (object.text || object.hyperlink) {
-                            return object.hyperlink || object.text || "";
+                        const property = (key: string): unknown => Reflect.get(value, key);
+                        const text = property("text");
+                        const hyperlink = property("hyperlink");
+                        if (text || hyperlink) {
+                            return hyperlink || text || "";
                         }
-                        if (object.formula || object.result) {
-                            return object.result || "";
+                        const result = property("result");
+                        if (property("formula") || result) {
+                            return result || "";
                         }
                         if (value instanceof Date) {
                             if (dateFormat) {
@@ -281,8 +291,9 @@ class CSV {
                             }
                             return dateUTC ? dayjs.utc(value).format() : dayjs(value).format();
                         }
-                        if (object.error) {
-                            return object.error;
+                        const error = property("error");
+                        if (error) {
+                            return error;
                         }
                         return JSON.stringify(value);
                     }
@@ -316,10 +327,11 @@ class CSV {
     writeFile(filename: string, options?: Partial<CsvWriteOptions>): Promise<void> {
         options = options || {};
 
-        const streamOptions = {
-            encoding: (options.encoding || "utf8") as BufferEncoding,
-        };
-        const stream = fs.createWriteStream(filename, streamOptions);
+        const encoding = options.encoding || "utf8";
+        if (!Buffer.isEncoding(encoding)) {
+            throw new TypeError(`Invalid encoding: ${JSON.stringify(encoding)}`);
+        }
+        const stream = fs.createWriteStream(filename, { encoding });
 
         return this.write(stream, options);
     }
