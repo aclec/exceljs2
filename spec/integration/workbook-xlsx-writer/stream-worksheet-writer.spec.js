@@ -178,4 +178,23 @@ describe("WorkbookWriter (stream)", () => {
         await wb2.xlsx.load(buffer);
         expect(wb2.getWorksheet("Sheet3").getCell("B2").note).to.equal("note 3b");
     });
+
+    it("writes notes on cells without a value", async () => {
+        const buffer = await writeBuffer((wb) => {
+            const ws = wb.addWorksheet("Sheet");
+            ws.getCell("A1").value = "value";
+            ws.getCell("C1").note = "same row as a value";
+            ws.getCell("B3").note = "row without values";
+            ws.getRow(3).commit();
+            ws.commit();
+        });
+        const comments = await readPart(buffer, "xl/comments1.xml");
+        expect([...comments.matchAll(/<comment ref="([^"]+)"/g)].map((match) => match[1])).to.deep.equal(["C1", "B3"]);
+
+        const wb2 = new ExcelJS.Workbook();
+        await wb2.xlsx.load(buffer);
+        const ws = wb2.getWorksheet("Sheet");
+        expect(ws.getCell("C1").note).to.equal("same row as a value");
+        expect(ws.getCell("B3").note).to.equal("row without values");
+    });
 });
