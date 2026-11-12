@@ -1,5 +1,6 @@
 // Regression tests for hostile input that used to cost super-linear time or memory
 // (ReDoS, quadratic lookups, per-index traversals of sparse arrays).
+const { Writable } = require("stream");
 const { baseWorkbookBuffer, tamper, readPart, zipParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
@@ -264,6 +265,41 @@ describe("hostile input: algorithmic complexity", function () {
             expect(ws.getCell("XFC12").font).to.deep.equal({ name: "f10" });
             expect(ws.getCell("XFC3").font).to.deep.equal({ name: "f2" });
             expect(ws.getRow(12).cellCount).to.equal(16384);
+        });
+    });
+
+    describe("streaming writer", () => {
+        it("commits a far row in time proportional to the rows", async () => {
+            const FAR = 10000;
+            const chunks = [];
+            const stream = new Writable({
+                write(chunk, encoding, callback) {
+                    chunks.push(chunk);
+                    callback();
+                },
+            });
+            const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream });
+            const ws = wb.addWorksheet("s");
+            const { ms } = await timed(async () => {
+                ws.getCell("A1").value = "first";
+                await ws.getRow(1).commit();
+                ws.getCell(`A${FAR}`).value = "far";
+                ws.getCell(`XFD${FAR}`).value = "last";
+                ws.getCell(`A${FAR + 1}`).value = "next";
+                let rows = 0;
+                ws.eachRow(() => rows++);
+                expect(rows).to.equal(2);
+                // committing shifted the rows one index at a time out of an array with a hole of FAR indexes
+                await ws.getRow(FAR).commit();
+                expect(ws.findRow(FAR + 1).getCell(1).value).to.equal("next");
+                ws.getCell(`A${FAR + 2}`).value = "added";
+                await ws.commit();
+                await wb.commit();
+            });
+            expect(ms).to.be.below(500);
+            const read = (await load(Buffer.concat(chunks))).getWorksheet(1);
+            expect([1, FAR, FAR + 1, FAR + 2].map((r) => read.getCell(r, 1).value)).to.deep.equal(["first", "far", "next", "added"]);
+            expect(read.getCell(`XFD${FAR}`).value).to.equal("last");
         });
     });
 
