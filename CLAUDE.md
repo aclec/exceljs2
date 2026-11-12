@@ -2,35 +2,38 @@
 
 Published on npm as `@aclec/exceljs2` (`exceljs` on npm is the dead upstream). Read/write `.xlsx` and `.csv`. Fork of the unmaintained
 `exceljs/exceljs` (upstream frozen at `5bed18b`, 2024-01). Must run in **browsers** (bundled `dist/`), **Node >= 22.12** and **Bun >= 1.4**.
-CommonJS source, no transpilation of `lib/`.
+TypeScript sources in `src/`; `lib/` is build output (tsc → CommonJS + `.d.ts`, gitignored), never edit it.
 
 ## Commands (bun only — never npm/yarn; no lockfile other than `bun.lock`)
 
 | Task                   | Command                                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------------------------ |
 | install                | `bun install --frozen-lockfile` (set `HUSKY=0` in worktrees/CI)                                  |
+| compile src/ → lib/    | `bun run build:lib` (tsc -p tsconfig.build.json; `test`, `test:bun`, `test:typescript` run it)   |
 | tests, Node runtime    | `bun run test` (unit + integration + end-to-end)                                                 |
 | tests, Bun runtime     | `bun run test:bun`                                                                               |
-| single spec            | `bunx mocha --require spec/config/setup.js <file>`                                               |
+| single spec            | `bun run build:lib` then `bunx mocha --require spec/config/setup.js <file>`                      |
 | browser bundle / tests | `bun run build` then `bun run test:browser` (local Chrome, temp profile) and `bun run test:dist` |
-| types                  | `bun run test:types` (tsc on `index.d.ts` + `spec/typescript`) and `bun run test:typescript`     |
+| types                  | `bun run test:types` (tsc on `src/`, then `index.d.ts` + `spec/typescript`), `test:typescript`   |
+| performance            | `bun run benchmark:suite` (`--lib <other>/lib` to compare two builds)                            |
 | quality gates          | `bun run lint`, `bun run format:check`, `bun run audit`, `bun run check:install-scripts`         |
 
 Done = all of the above green. CI (`.github/workflows/tests.yml`) runs the same on Node 22/24/26, Bun, Chrome.
 
 ## Layout
 
-- `lib/doc/` — in-memory model: `workbook`, `worksheet`, `row`, `column`, `cell`, `range`, `table`, `defined-names`, `data-validations`.
-- `lib/xlsx/xform/**` — XML ⇄ model. Each xform: `prepare` → `render(xmlStream, model)` on write; `parseOpen/parseText/parseClose` (SAX) →
-  `reconcile` on read. `lib/xlsx/xlsx.js` orchestrates the zip parts. Element ORDER in rendered XML must follow ECMA-376 (e.g.
+- `src/doc/` — in-memory model: `workbook`, `worksheet`, `row`, `column`, `cell`, `range`, `table`, `defined-names`, `data-validations`.
+- `src/xlsx/xform/**` — XML ⇄ model. Each xform: `prepare` → `render(xmlStream, model)` on write; `parseOpen/parseText/parseClose` (SAX) →
+  `reconcile` on read. `src/xlsx/xlsx.ts` orchestrates the zip parts. Element ORDER in rendered XML must follow ECMA-376 (e.g.
   `CT_Worksheet`), otherwise Excel reports a corrupt file — tests assert raw string order (chai-xml ignores sibling order).
-- `lib/stream/xlsx/**` — streaming `WorkbookReader`/`WorkbookWriter`: **Node/Bun only** (fs). Its worksheet writer must keep the same
-  element order as `worksheet-xform.js` render.
-- `lib/csv/` (fast-csv), `lib/utils/` (col-cache, xml-stream, parse-sax with streaming `TextDecoder`, stream-buf, uuid).
-- Entry points: `lib/exceljs.nodejs.js` (Node/Bun), `lib/exceljs.browser.js` / `lib/exceljs.bare.js` (bundles via `scripts/build.mjs`,
-  esbuild + `scripts/browser-shims/`). Public types: `index.d.ts` (keep in sync with runtime).
+- `src/stream/xlsx/**` — streaming `WorkbookReader`/`WorkbookWriter`: **Node/Bun only** (fs). Its worksheet writer must keep the same
+  element order as `worksheet-xform.ts` render.
+- `src/csv/` (fast-csv), `src/utils/` (col-cache, xml-stream, parse-sax with streaming `TextDecoder`, stream-buf, uuid).
+- Entry points: `src/exceljs.nodejs.ts` (Node/Bun), `src/exceljs.browser.ts` / `src/exceljs.bare.ts` (bundled from `src/` by
+  `scripts/build.mjs`, esbuild + `scripts/browser-shims/`). Entry points use `export =` so `require()` keeps its CommonJS shape. Public
+  types: `index.d.ts` (hand written, the API contract; keep in sync with runtime). Internal shared types: `src/types/`.
 - `spec/unit`, `spec/integration` (incl. `security/` hostile-input regressions), `spec/end-to-end`, `spec/browser`, `spec/typescript`.
-- Code map (graphify, local and gitignored, scope = `lib/` via `.graphifyignore`): read `graphify-out/GRAPH_REPORT.md` before exploring
+- Code map (graphify, local and gitignored, scope = `src/` via `.graphifyignore`): read `graphify-out/GRAPH_REPORT.md` before exploring
   unfamiliar areas; `graphify query "<question>"`, `graphify path "A" "B"`, `graphify explain "X"` for targeted lookups.
   `.husky/post-commit`, `post-merge` and `post-checkout` rebuild it in the background. **Before relying on it, check freshness**: if
   `graphify-out/` is missing, or the report's "Built from commit" differs from `git rev-parse --short HEAD` (e.g. commits made with
@@ -43,7 +46,7 @@ Done = all of the above green. CI (`.github/workflows/tests.yml`) runs the same 
 - Objects keyed by file/CSV data use `Object.create(null)` or `Map`; never `obj[key] =` with a raw data key on `{}`.
 - XML built by string templates must go through `utils.xmlEncode` (strips chars invalid in XML 1.0). Prefer `xmlStream`.
 - No backtracking-prone regex on attacker-controlled strings (anchor, or use `indexOf`/`slice`).
-- Browser isolation: lib code outside `lib/stream/**` and the explicit exceptions in `eslint.config.js` must not require
+- Browser isolation: src code outside `src/stream/**` and the explicit exceptions in `eslint.config.js` must not require
   `fs`/`path`/`os`/`crypto`/`child_process`/network modules (lint-enforced).
 - Supply chain: no install lifecycle scripts, `trustedDependencies` stays `[]`, actions pinned by SHA, `bunfig.toml` minimumReleaseAge.
   Never add a dependency without asking the maintainer.
@@ -63,6 +66,15 @@ Upstream PR heads can be fetched as `upstream-pr/<N>` (`git fetch upstream '+ref
 reports only**: never merge, cherry-pick or `git apply` them, never copy their binary fixtures (several were hostile: package renames, fake
 metadata, SSRF, postinstall hooks). Re-implement the fix, write the regression test first (must fail before the fix), cite
 `Reported upstream: #N` in the commit body.
+
+## TypeScript
+
+- tsconfig.base.json: strict + noUncheckedIndexedAccess + noImplicitOverride + noImplicitReturns + noFallthroughCasesInSwitch, target and
+  lib ES2022 (no newer runtime APIs: the browser bundle has no polyfills). ESLint (typescript-eslint, type-aware) bans `any`.
+- Modules use `import`/`export` (compiled to CommonJS). Public types are imported from the root `index.d.ts`
+  (`import type { Style } from "../../index"`).
+- Class fields use [[Define]] semantics: for a property set by a base constructor use `declare foo: T`, not `foo: T`.
+- TSDoc on every exported symbol and public member. Performance changes are measured with `bun run benchmark:suite`.
 
 ## Conventions
 

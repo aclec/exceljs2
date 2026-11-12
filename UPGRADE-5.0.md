@@ -41,6 +41,11 @@ Applications that must run on an older Node.js or on Internet Explorer should st
   `exceljs/dist/...`, `exceljs/excel(.js)` and `exceljs/package.json`. Other paths (`exceljs/index.d.ts`, `exceljs/lib/doc/data/theme1`
   without `.json`, ...) no longer resolve. The internal modules `lib/csv/stream-converter.js`, `lib/utils/auto-drain`,
   `browser-buffer-encode`, `iterate-stream`, `stream-base64`, `string-builder`, `stuttered-pipe` and `typed-stack` were removed.
+- **Internal modules are compiled from TypeScript.** The library is written in TypeScript (`src/`) and `lib/` holds the compiled CommonJS
+  output with its `.d.ts` files. The package entry point is unchanged (`require('exceljs')` returns the same object), but a deep import of
+  an internal module that used to be `module.exports = X` now exposes `X` as its default export: use
+  `require('exceljs/lib/doc/workbook').default` (or `import Workbook from 'exceljs/lib/doc/workbook'` in ES modules / TypeScript). Internal
+  modules are not part of the public API and may change in any release.
 - **The `browser` condition** resolves the package to the browser bundle `dist/exceljs.min.js` (bundlers targeting browsers did so through
   the `browser` field already). The bundle has no `stream` namespace and no file APIs. Test runners that apply the `browser` condition in
   Node now load the bundle too: **Jest with the jsdom environment** does by default (`customExportConditions: ['browser']`). To test with

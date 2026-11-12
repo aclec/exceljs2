@@ -17,6 +17,9 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
   and per workbook (`maxMergedCells`, 1,048,576 by default, the same when building, streaming and loading a workbook), large data-validation
   and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#limits-when-reading-files).
+- The library is written in TypeScript: `src/**/*.ts` is compiled to CommonJS in `lib/` (with `.d.ts` and source maps). The package entry
+  point keeps its shape; deep imports of internal `lib/` modules now expose their main value as the default export. See
+  [UPGRADE-5.0.md](UPGRADE-5.0.md#package-exports).
 - TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers). See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#typescript).
 - Behaviour changes when reading and writing: internal hyperlinks are read as hyperlink cells and written as a `location`; style setters
@@ -104,6 +107,7 @@ All fixes have regression tests in `spec/integration/security`.
 - saxes ^5.0.1 → ^6.0.0
 - Removed `readable-stream` (replaced by `node:stream`), `tmp` (replaced by `fs.promises.mkdtemp`) and `uuid` (replaced by
   `crypto.randomUUID` / `crypto.getRandomValues`).
+- Development: typescript ^6.0.3 and typescript-eslint ^8.72.0 (type-aware lint of `src/`, `any` banned).
 - Development: bun is the package manager (`bun.lock`); mocha 12, chai 6 and tsx replace mocha 7, chai 4 and ts-node; `bun audit` reports no
   known vulnerability. No dependency runs install scripts.
 
