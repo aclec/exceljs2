@@ -869,10 +869,11 @@ export interface Row extends StyleProperties {
      */
     readonly dimensions: { min: number; max: number } | null;
     /**
-     * The model of the row; `null` for a row without height and without cell. Setting it replaces the cells, height,
-     * hidden state, outline level and style; it throws for the model of another row number.
+     * The model of the row (with its first and last columns, `min` / `max`); `null` for a row without height and without
+     * cell. Setting it replaces the cells, height, hidden state, outline level and style; it throws for the model of
+     * another row number, or whose first cell has no address.
      */
-    get model(): RowModel | null;
+    get model(): (RowModel & { min: number; max: number }) | null;
     set model(value: RowModel);
     /**
      * Set a specific row height; absent (`undefined`) when the row has the default height

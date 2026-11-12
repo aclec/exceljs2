@@ -61,7 +61,7 @@ export function rows(): void {
     row.hidden = undefined;
     type Hidden = Assert<Equals<typeof row.hidden, boolean>>;
 
-    type Model = Assert<Equals<typeof row.model, ExcelJS.RowModel | null>>;
+    type Model = Assert<Equals<typeof row.model, (ExcelJS.RowModel & { min: number; max: number }) | null>>;
     // @ts-expect-error setting a null model throws
     row.model = null;
 
