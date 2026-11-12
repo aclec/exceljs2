@@ -457,4 +457,24 @@ describe('WorkbookReader (stream)', () => {
     ]);
     expect(values.slice(4)).to.deep.equal(['2024-02-30', 'not a date']);
   });
+
+  it('merges options passed to read() with the defaults', async () => {
+    const buffer = await baseWorkbookBuffer();
+    const reader = new ExcelJS.stream.xlsx.WorkbookReader();
+    const events = [];
+    await new Promise((resolve, reject) => {
+      reader.on('worksheet', worksheet => {
+        events.push(`worksheet ${worksheet.name}`);
+        worksheet.on('row', row => events.push(`row ${JSON.stringify(row.values)}`));
+      });
+      reader.on('end', resolve);
+      reader.on('error', reject);
+      reader.read(chunkedStream(buffer), {sharedStrings: 'emit'});
+    });
+    expect(reader.options.worksheets).to.equal('emit');
+    expect(events).to.deep.equal([
+      'worksheet Sheet1',
+      'row [null,{"sharedString":0}]',
+    ]);
+  });
 });
