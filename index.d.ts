@@ -3018,6 +3018,10 @@ export interface TableColumnProperties {
      * Optional formula for custom functions
      */
     totalsRowFormula?: string;
+    /**
+     * The cached result of the totals row formula (`totalsRowFormula`), written as the result of the formula cell
+     */
+    totalsRowResult?: CellFormulaResult;
 
     /**
      * Styles applied to the column

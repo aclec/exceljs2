@@ -68,6 +68,7 @@
         "lint": "eslint .",
         "lint:fix": "eslint --fix .",
         "check:tsdoc": "node scripts/check-tsdoc.mjs",
+        "check:readme": "node scripts/check-readme-types.mjs",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "audit": "bun audit",
