@@ -231,6 +231,17 @@ describe("xlsx read robustness", function () {
             expect(ws.getColumn(2).width).to.equal(9);
         });
 
+        it("keeps a width of 9 assigned after the columns were defined without a width", async () => {
+            const buffer = await baseWorkbookBuffer((wb, ws) => {
+                ws.properties.defaultColWidth = 20;
+                ws.columns = [{ key: "a" }, { key: "b" }];
+                ws.getColumn("a").width = 9;
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            expect(ws.getColumn(1).width).to.equal(9);
+            expect(ws.getColumn(2).width).to.equal(undefined);
+        });
+
         it("keeps image anchors positioned as before", async () => {
             const wb = new ExcelJS.Workbook();
             const ws = wb.addWorksheet("Sheet1");
