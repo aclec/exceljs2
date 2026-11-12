@@ -392,6 +392,17 @@ describe("hostile input", function () {
             expect(wb.definedNames.model).to.deep.equal(["n0", "n1", "n2"].map((name) => ({ name, ranges: ["Sheet1!$A$1:$CV$1000"] })));
         });
 
+        it("lists the names of a workbook with many large ranges in linear time", async () => {
+            const names = Array.from({ length: 40000 }, (_, i) => `<definedName name="n${i}">Sheet1!$A$1:$A$1048576</definedName>`);
+            const wb = await load(await tamper(await baseWorkbookBuffer(), withDefinedNames(names.join(""))));
+            const { result: model, ms } = await timed(() => wb.definedNames.model);
+            expect(model).to.have.length(40000);
+            expect(ms).to.be.below(300); // was 640 ms: names.includes for every name
+            const { result: cellNames, ms: cellMs } = await timed(() => wb.getWorksheet("Sheet1").getCell("A5").names);
+            expect(cellNames).to.have.length(40000);
+            expect(cellMs).to.be.below(300);
+        });
+
         it("shifts and removes large ranges with row splices", () => {
             const wb = new ExcelJS.Workbook();
             const ws = wb.addWorksheet("s");
