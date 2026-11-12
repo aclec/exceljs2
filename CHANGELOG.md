@@ -286,6 +286,10 @@ Found while aligning the typings with the runtime (each with a regression test t
 - Streaming reader: shared-formula clones get the formula of their master, translated as `workbook.xlsx.load` does (they had an empty
   formula).
 - `spliceColumns` dropped the values inserted for rows past the last one, and inserted `0`, `false` and `""` as empty cells.
+- Data validations set cell by cell were written as overlapping ranges (`G2:G20` as `G10:G20` and `G2:G20`), and one on column `XFD` made
+  the writer throw. A cellIs rule lost the text operators of the schema; a two-cell image anchor without `editAs` was written back as
+  `oneCell`. A shared-formula reference translated beyond the grid is `#REF!` (it threw), and the streaming reader no longer aborts on a
+  malformed shared-formula master.
 - `xlsx.load(data, { base64: true })` decodes base64 text given as bytes (a `Uint8Array`, `ArrayBuffer`, `Blob`...), not only as a string or
   a Buffer. The streaming reader gives the numeric result of a formula in a date-formatted cell as a Date, and the `t="s"` cells of a
   workbook without shared strings part an empty value, as `xlsx.load` does. A hyperlink on a date is written as a date (it was written as

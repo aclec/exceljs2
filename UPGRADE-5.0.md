@@ -287,7 +287,8 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
   `undefined` in those cases. `fillFormula` stores its `ref` without sheet name or `$`, and fills a single cell (`"C3"`).
 - **Views and header/footer after a load.** `worksheet.views` and `workbook.views` are `[]`, and `worksheet.headerFooter` the default
   object, for a file without them (4.x: `null` / `undefined`, so `views.push(...)` threw).
-- **Page setup.** Row breaks are read (at most 1,023, Excel's limit; invalid `<brk>` attributes reject the load). `firstPageNumber` is not
+- **Page setup.** Row breaks are read (a value beyond the worksheet, such as the `max="16838"` that 4.x wrote, is read as its last row or
+  column; text that is not a number rejects the load), and writing more than 1,023 of them (Excel's limit) throws. `firstPageNumber` is not
   set when the file uses automatic numbering, and `useFirstPageNumber` is read and written as given (4.x read `firstPageNumber: 1`).
 - **Icon sets.** A rule read without `iconSet` has the schema default `"3TrafficLights1"` (4.x: `"3TrafficLights"`, which is not a valid
   value; it is still accepted on write, as the default). Custom icons are written with their `iconId`, which is required (except for
@@ -295,10 +296,12 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
   icon set, an `iconId` outside its set or a number of icons different from the number of thresholds throws on write.
 - **Colours and fonts.** An automatic colour (`auto="1"`) reads as `{ auto: true }` (4.x: `undefined`); font sizes keep their decimals.
 - **Data-validation formulas** that are not plain numbers or dates (`$B$1`, `TODAY()`, `A1+1`) are read and written as text (4.x: `NaN`). A
-  `date` rule takes a `Date`, an ISO 8601 date string or a formula string; an invalid date or a non-finite number throws on write.
+  `date` rule takes a `Date`, an ISO 8601 date string or a formula string; an invalid date, a non-finite number or a date written as text in
+  another way (`"2020/01/05"`, `"Jan 5, 2020"`, which 4.x converted with `new Date()`) throws on write.
 - **Cell value markers** are recognised by their type, not their truthiness: `{ text: "", hyperlink }`, `{ sharedString: 0 }`,
   `{ formula: "", result }` are hyperlink, shared string and formula values (4.x stored them as JSON text), and an object whose marker has
-  the wrong type (`{ formula: 1 }`, `{ richText: "x" }`) is a JSON value. `cell.text` is always a string.
+  the wrong type (`{ formula: 1 }`, `{ richText: "x" }`) is a JSON value. `{ hyperlink }` without text is a hyperlink on a cell without
+  value, as read from a file (4.x: a JSON value). `cell.text` is always a string.
 - **Defined names.** Removing a cell or a range from a range kept as a rectangle (more than 100,000 cells) keeps the rest of the range, cut
   into at most four rectangles (4.x removed the whole range). Invalid range bounds throw.
 - **Tables.** `addTable`, `table.addRow`, `addColumn` and `commit` validate the whole table first and throw a clear `Error` (a row with more
@@ -307,12 +310,15 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
 - **Streaming reader hyperlinks.** With `hyperlinks: "cache"`, `worksheetReader.hyperlinks` entries have their `target` and `targetMode`.
 - **Cell values are checked.** Setting `cell.value` to an object that is not a cell value of its kind throws a clear `Error` and leaves the
   cell unchanged: a hyperlink whose text is not a cell value or whose tooltip is not a string, a formula with a wrong-typed `formula`,
-  `sharedFormula`, `ref`, `shareType` or `result`, rich text runs that are not `{ text, font? }`, an `{ error }` that is not an error code,
-  a bigint, a symbol or a function. A `null` formula result or tooltip counts as absent. Other objects are still stored as JSON values.
+  `sharedFormula`, `ref`, `shareType` or `result`, rich text runs that are not `{ text, font? }`, a bigint, a symbol or a function.
+  `fillFormula` checks all its results before filling any cell. A `null` formula result or tooltip counts as absent. Other objects are still
+  stored as JSON values.
 - **Malformed files.** Invalid values of enumerated attributes read as the schema default (for example an unknown `orientation` is
-  `portrait`); conditional formatting rules of a type ExcelJS does not model are dropped; a table or sheet without name throws a clear
-  `Error`. Valid files read as before.
-- **Shared formulas in the streaming reader.** A clone has the formula of its master, translated to its cell (4.x: an empty formula).
+  `portrait`, a `<xdr:twoCellAnchor>` without `editAs` is `twoCell`); conditional formatting rules of a type ExcelJS does not model are
+  dropped; a table part without name or columns is skipped (as Excel repairs it), a sheet without name throws a clear `Error`. Valid files
+  read as before.
+- **Shared formulas.** In the streaming reader, a clone has the formula of its master, translated to its cell (4.x: an empty formula). In
+  both readers, a reference translated beyond the grid is `#REF!`, as in Excel (`cell.formula` threw).
 
 ## TypeScript
 
@@ -397,7 +403,9 @@ Corrected signatures:
 - `addRow` / `insertRow` / `addRows` take `RowValues` and a `RowStyleOption` (`"n" | "i" | "i+" | "o" | "o+"`); `row.splice()` takes
   `CellValue`s; `TableProperties.rows` is `CellValue[][]`; conditional-formatting `formulae` are `CfFormula[]`
   (`string | number | boolean`), and `colorScale` / `iconSet` rules require `cfvo` (writing threw without them).
-- `CellHyperlinkValue.text` may be a number, boolean, date, error or rich text (as read back).
+- `CellHyperlinkValue.text` may be a number, boolean, date, error or rich text (as read back), or absent (a hyperlink on a cell without
+  value).
+- `CellIsOperators` has the text operators of the schema (`containsText`, `notContains`, `beginsWith`, `endsWith`).
 - `removeConditionalFormatting(filter?)` takes an index or a filter function.
 - `Media` describes `workbook.media` (`type: "image"`, optional `name` / `buffer`, `base64`, `filename`); `WorkbookModel` and
   `WorksheetModel` describe the real models (`WorksheetModel.media` holds worksheet images, `revision` is a number, `themes` a record,
