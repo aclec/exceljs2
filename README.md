@@ -108,7 +108,9 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
  instead of being scanned with regular expressions.
 * **Decompressed size (zip bombs).** Both readers count the bytes they inflate and reject a file
  as soon as a part is larger than `maxEntrySize`, all parts together are larger than
- `maxUncompressedSize`, or a part over 10 MiB is compressed more than `maxCompressionRatio`:1.
+ `maxUncompressedSize`, or a part over 10 MiB, or all the parts read once they exceed 10 MiB together,
+ are compressed more than `maxCompressionRatio`:1. Archives whose entries share their data (overlapping
+ zip bombs) are rejected, and `xlsx.load` only inflates the parts it reads.
  Defaults: 1 GiB per part, 2 GiB in total for `xlsx.load` / `read` / `readFile` (which keep every
  part in memory; Node.js cannot parse a part over about 512 MiB anyway); 16 GiB per part and 32 GiB
  in total for the streaming `WorkbookReader` (which also bounds its temporary files); a ratio of
@@ -2551,7 +2553,7 @@ The constructor takes a required input argument and an optional options argument
 | options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.worksheets    | Specifies whether to emit worksheets (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
-| options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to temporary files, which these limits bound too. |
+| options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to a temporary file, which these limits bound too. |
 
 ```js
 const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader('./file.xlsx');
@@ -2564,9 +2566,13 @@ for await (const worksheetReader of workbookReader) {
 
 Iterating a `worksheetReader` yields one row at a time. For performance reasons (https://github.com/nodejs/node/issues/31979), `worksheetReader.parse()` yields arrays of `{eventType, value}` events instead.
 
-If worksheets come before the shared strings in the zip file, the reader spools them to temporary
- files in `os.tmpdir()` until the shared strings have been read. The temporary files are removed when
- the iteration ends, including when it is stopped early with `break` or an exception.
+If worksheets come before the shared strings in the zip file, the reader spools them to a temporary
+ file in `os.tmpdir()` until the shared strings have been read (not with `worksheets: 'ignore'`). All
+ of them share one file and one file descriptor, and a worksheet is only read back from it when it is
+ iterated. Their total size is bounded by `maxUncompressedSize`. The temporary file is removed when
+ the iteration ends, including when it is stopped early with `break` or an exception; it stays open
+ (but no longer visible) until the worksheets collected during the iteration have been read or
+ garbage collected.
 
 ###### Iterating over all events(#contents)<!-- Link generated with jump2header -->
 
