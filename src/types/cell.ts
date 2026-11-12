@@ -122,7 +122,7 @@ export interface FormulaCellModel extends CellModelBase {
  */
 export interface SharedStringCellModel extends CellModelBase {
     type: typeof ValueType.SharedString;
-    value: number | { readonly sharedString: unknown };
+    value: number | { readonly sharedString: number };
 }
 
 /** A boolean. */

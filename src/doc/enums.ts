@@ -71,6 +71,27 @@ export const ErrorValue = {
 /** An {@link ErrorValue} value. */
 export type ErrorValue = (typeof ErrorValue)[keyof typeof ErrorValue];
 
+/**
+ * Common paper sizes of `pageSetup.paperSize` (the ST_PaperSize numbers of ECMA-376; any other number of the standard is
+ * accepted too).
+ */
+export const PaperSize = {
+    Legal: 5,
+    Executive: 7,
+    A4: 9,
+    A5: 11,
+    B5: 13,
+    Envelope_10: 20,
+    Envelope_DL: 27,
+    Envelope_C5: 28,
+    Envelope_B5: 34,
+    Envelope_Monarch: 37,
+    Double_Japan_Postcard_Rotated: 82,
+    K16_197x273_mm: 119,
+} as const;
+/** A {@link PaperSize} value. */
+export type PaperSize = (typeof PaperSize)[keyof typeof PaperSize];
+
 /** All the enumerations, as one object (the package entry point spreads it into its exports). */
 const Enums = {
     ValueType,
@@ -79,6 +100,7 @@ const Enums = {
     DocumentType,
     ReadingOrder,
     ErrorValue,
+    PaperSize,
 };
 
 export default Enums;

@@ -24,7 +24,11 @@ export declare enum DocumentType {
     Xlsx = 1,
 }
 
-export const enum PaperSize {
+/**
+ * Common paper sizes of `pageSetup.paperSize`. A runtime object since 5.0 (it was a `const enum`, unusable with
+ * `isolatedModules`).
+ */
+export declare enum PaperSize {
     Legal = 5,
     Executive = 7,
     A4 = 9,
@@ -154,6 +158,20 @@ export interface WorksheetViewSplit {
 }
 
 export type WorksheetView = WorksheetViewCommon & (WorksheetViewNormal | WorksheetViewFrozen | WorksheetViewSplit);
+
+/**
+ * A view of `worksheet.views`: the fields of the normal, frozen and split views, all optional. A view read from a file
+ * is not narrowed to the variant of its `state`; a {@link WorksheetView} can be assigned.
+ */
+export type WorksheetViewModel = Partial<WorksheetViewCommon & Omit<WorksheetViewFrozen, "state"> & Omit<WorksheetViewSplit, "state">> & {
+    state?: WorksheetView["state"];
+};
+
+/**
+ * The style option of `addRow` / `insertRow` and their plural forms: `"i"` copies the style of the row above (`"i+"`:
+ * also its empty cells), `"o"` the style of the row below (`"o+"`, `insertRow` only), `"n"` (the default) none.
+ */
+export type RowStyleOption = "n" | "i" | "i+" | "o" | "o+";
 
 export interface WorkbookView {
     x: number;
@@ -337,7 +355,8 @@ export interface Style {
 export type DataValidationOperator =
     "between" | "notBetween" | "equal" | "notEqual" | "greaterThan" | "lessThan" | "greaterThanOrEqual" | "lessThanOrEqual";
 
-export type DataValidationType = "list" | "whole" | "decimal" | "date" | "textLength" | "custom";
+/** The kind of a data validation; `"any"` (any value: an input message only) is the default when reading a file. */
+export type DataValidationType = "any" | "list" | "whole" | "decimal" | "date" | "textLength" | "custom";
 
 /**
  * The data validations of a worksheet (`worksheet.dataValidations`).
@@ -365,7 +384,8 @@ export interface DataValidations {
 
 export interface DataValidation {
     type: DataValidationType;
-    formulae: any[];
+    /** The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`); absent for `"any"`. */
+    formulae?: (string | number | Date)[];
     allowBlank?: boolean;
     operator?: DataValidationOperator;
     error?: string;
@@ -406,9 +426,12 @@ export interface CellHyperlinkValue {
     tooltip?: string;
 }
 
+/** The cached result of a formula. */
+export type CellFormulaResult = number | string | boolean | Date | CellErrorValue;
+
 export interface CellFormulaValue {
     formula: string;
-    result?: number | string | boolean | Date | CellErrorValue;
+    result?: CellFormulaResult;
     date1904?: boolean;
 }
 
@@ -439,6 +462,14 @@ export declare enum FormulaType {
     Shared = 2,
 }
 
+/**
+ * The value of a cell read by the streaming reader when the shared strings are not cached (`sharedStrings: "emit"` or
+ * `"ignore"`): the index of the string in the shared strings table.
+ */
+export interface CellSharedStringValue {
+    readonly sharedString: number;
+}
+
 export type CellValue =
     | null
     | number
@@ -450,7 +481,8 @@ export type CellValue =
     | CellRichTextValue
     | CellHyperlinkValue
     | CellFormulaValue
-    | CellSharedFormulaValue;
+    | CellSharedFormulaValue
+    | CellSharedStringValue;
 
 export interface CommentMargins {
     insetmode: "auto" | "custom";
@@ -473,29 +505,66 @@ export interface Comment {
     editAs?: CommentEditAs;
 }
 
-export interface CellModel {
-    address: Address;
-    style: Style;
-    type: ValueType;
-    text?: string;
-    hyperlink?: string;
-    value?: CellValue;
-    master: string;
-    formula?: string;
-    sharedFormula?: string;
-    result?: string | number | any;
-    comment: Comment;
+/** The note of a cell in its model (`cellModel.comment`). */
+export interface CellNoteModel {
+    type: "note";
+    note: Comment;
 }
 
-export interface Cell extends Style, Address {
+/**
+ * The model of a cell (`cell.model`): its address, its value type and the fields of that type (`value`; `text` /
+ * `hyperlink` / `tooltip` of a hyperlink; `formula` / `sharedFormula` / `result` of a formula; `master` of a merged
+ * cell), its style and its note.
+ */
+export interface CellModel {
+    /** The cell reference (`"A1"`). */
+    address: string;
+    type: ValueType;
+    style?: Partial<Style>;
+    value?: number | string | boolean | Date | CellErrorValue | CellRichTextValue | CellSharedStringValue;
+    /** Hyperlink: the value shown (on read, the value of the cell, whatever its type). */
+    text?: number | string | boolean | Date | CellErrorValue | CellRichTextValue;
+    hyperlink?: string;
+    tooltip?: string;
+    /** Merged cell: the address of its master. */
+    master?: string;
+    formula?: string;
+    /** Clone of a shared formula: the address of its master. */
+    sharedFormula?: string;
+    /** Master of shared formulas (`"shared"`) or array formula (`"array"`). */
+    shareType?: "shared" | "array";
+    /** The range of a shared or array formula master. */
+    ref?: string;
+    result?: CellFormulaResult;
+    comment?: CellNoteModel;
+}
+
+/**
+ * The style properties of a cell, row or column (`cell.font`, `row.fill`...): `undefined` when the style does not set
+ * them. Setting one copies the style object (styles may be shared between cells); on a row or a column it also sets the
+ * property on the existing cells.
+ */
+export interface StyleProperties {
+    numFmt: string | undefined;
+    font: Partial<Font> | undefined;
+    alignment: Partial<Alignment> | undefined;
+    protection: Partial<Protection> | undefined;
+    border: Partial<Borders> | undefined;
+    fill: Fill | undefined;
+}
+
+/** A cell. Its address (`address`, `row`, `col`, `$col$row`) is read-only. */
+export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName">> {
     readonly worksheet: Worksheet;
     readonly workbook: Workbook;
 
     readonly effectiveType: ValueType;
     readonly isMerged: boolean;
+    /** The master of the merge this cell belongs to, or the cell itself. */
     readonly master: Cell;
     readonly isHyperlink: boolean;
-    readonly hyperlink: string; // todo
+    /** The target of a hyperlink cell, `undefined` for other cells. */
+    readonly hyperlink: string | undefined;
     readonly text: string;
     readonly fullAddress: {
         sheetName: string;
@@ -505,9 +574,10 @@ export interface Cell extends Style, Address {
     };
     model: CellModel;
     /**
-     * Assign (or get) a name for a cell (will overwrite any other names that cell had)
+     * Assign (or get) a name for a cell (will overwrite any other names that cell had); `undefined` when it has none.
      */
-    name: string;
+    get name(): string | undefined;
+    set name(value: string);
 
     /**
      * Assign (or get) an array of names for a cell (cells can have more than one name)
@@ -515,10 +585,11 @@ export interface Cell extends Style, Address {
     names: string[];
 
     /**
-     * Cells can define what values are valid or not and provide
-     * prompting to the user to help guide them.
+     * Cells can define what values are valid or not and provide prompting to the user to help guide them; `undefined`
+     * when the cell has no validation.
      */
-    dataValidation: DataValidation;
+    get dataValidation(): DataValidation | undefined;
+    set dataValidation(value: DataValidation);
 
     /**
      * Value of the cell
@@ -526,19 +597,20 @@ export interface Cell extends Style, Address {
     value: CellValue;
 
     /**
-     * comment of the cell
+     * comment of the cell, `undefined` when it has none
      */
-    note: string | Comment;
+    get note(): string | Comment | undefined;
+    set note(value: string | Comment);
 
     /**
-     * convenience getter to access the formula
+     * convenience getter to access the formula (`undefined` for a cell without formula)
      */
-    readonly formula: string;
+    readonly formula: string | undefined;
 
     /**
-     * convenience getter to access the formula result
+     * convenience getter to access the formula result (`undefined` for a cell without formula or without result)
      */
-    readonly result: number | string | Date;
+    readonly result: CellFormulaResult | undefined;
 
     /**
      * The type of the cell's value
@@ -546,9 +618,9 @@ export interface Cell extends Style, Address {
     readonly type: ValueType;
 
     /**
-     * The type of the cell's formula
+     * The type of the cell's formula: Master or Shared for a formula cell, `undefined` for other cells
      */
-    readonly formulaType: FormulaType;
+    readonly formulaType: FormulaType | undefined;
 
     /**
      * The styles of the cell
@@ -564,40 +636,41 @@ export interface Cell extends Style, Address {
     removeAllNames(): void;
 
     destroy(): void;
-    toCsvString(): string;
-    release(): void;
-    addMergeRef(): void;
-    releaseMergeRef(): void;
+    /** The value as written to CSV: a number for a boolean (1 / 0). */
+    toCsvString(): string | number;
     merge(master: Cell, ignoreStyle?: boolean): void;
     unmerge(ignoreStyle?: boolean): void;
     isMergedTo(master: Cell): boolean;
     toString(): string;
 }
 
+/** The model of a row (`row.model`): its number, its non-empty cells and its properties. */
 export interface RowModel {
     cells: CellModel[];
     number: number;
-    min: number;
-    max: number;
-    height: number;
-    style: Partial<Style>;
-    hidden: boolean;
-    outlineLevel: number;
-    collapsed: boolean;
+    /** The first / last column with a cell (0 for a row without cells). */
+    min?: number;
+    max?: number;
+    height?: number;
+    style?: Partial<Style> | null;
+    hidden?: boolean;
+    outlineLevel?: number;
+    collapsed?: boolean;
 }
 
-export interface Row extends Style {
+export interface Row extends StyleProperties {
     readonly worksheet: Worksheet;
     readonly hasValues: boolean;
     /**
      * The min and max column numbers of the non-empty cells, or null if the row is empty
      */
     readonly dimensions: { min: number; max: number } | null;
-    model: Partial<RowModel> | null;
+    /** The model of the row; `null` for a row without height and without cell. */
+    model: RowModel | null;
     /**
-     * Set a specific row height
+     * Set a specific row height; `undefined` when the row has the default height
      */
-    height: number;
+    height: number | undefined;
 
     /**
      * Make row hidden
@@ -716,7 +789,8 @@ export interface Column {
     readonly number: number;
     readonly worksheet: Worksheet;
     readonly isCustomWidth: boolean;
-    readonly headers: string[];
+    /** The header text of each header row (`undefined` for a row without header). */
+    readonly headers: readonly (string | undefined)[];
     readonly isDefault: boolean;
     readonly headerCount: number;
 
@@ -748,7 +822,23 @@ export interface Column {
      */
     eachCell(opt: { includeEmpty: boolean }, callback: (cell: Cell, rowNumber: number) => void): void;
 
-    defn: any; //todo
+    /**
+     * The definition of the column (what `worksheet.columns = [...]` sets): setting it sets the key, width (default 9),
+     * outline level, style, header and hidden state; `null` / `undefined` reset nothing.
+     */
+    get defn(): ColumnDefinition;
+    set defn(value: ColumnDefinition | null | undefined);
+}
+
+/** The definition of a column: an element of `worksheet.columns = [...]`, and `column.defn`. */
+export interface ColumnDefinition {
+    header?: string | string[];
+    key?: string;
+    width?: number;
+    /** `null`: no style. */
+    style?: Partial<Style> | null;
+    hidden?: boolean;
+    outlineLevel?: number;
 }
 export interface PageSetup {
     /**
@@ -973,23 +1063,38 @@ export interface IAnchor {
     nativeColOff: number;
     nativeRowOff: number;
 }
-export class Anchor implements IAnchor {
-    col: number;
-    nativeCol: number;
-    nativeColOff: number;
-    nativeRow: number;
-    nativeRowOff: number;
-    row: number;
-
-    private readonly colWidth: number;
-    private readonly rowHeight: number;
+/**
+ * The corner of an image (`tl` / `br` of `worksheet.getImages()` ranges): the anchor cell (`nativeCol` / `nativeRow`,
+ * 0-based) and the offset inside it (in EMU), or the same position as a fractional 0-based `col` / `row`. Not exported
+ * at runtime: use a plain {@link IAnchor} position to place an image.
+ */
+export interface Anchor extends IAnchor {
+    /** The width of the anchor column, in EMU (the default for a column without custom width). */
+    readonly colWidth: number;
+    /** The height of the anchor row, in EMU (the default for a row without height). */
+    readonly rowHeight: number;
+    /** The worksheet that gives the sizes of the cells. */
     worksheet: Worksheet;
-
-    constructor(model?: IAnchor | object);
 }
 export interface ImageRange {
     tl: Anchor;
     br: Anchor;
+}
+
+/** An image of a worksheet (`worksheet.getImages()`). */
+export interface WorksheetImage {
+    /** Always `"image"` for `getImages()` (`"background"` is the background image). */
+    type: "image" | "background";
+    /** The id given by `workbook.addImage`. */
+    imageId: number | string;
+    /** Where the image is: its top-left corner, and its bottom-right corner or its size. */
+    range?: {
+        tl: Anchor;
+        br?: Anchor;
+        ext?: { width: number; height: number };
+        editAs?: ImageEditAs;
+        hyperlinks?: ImageHyperlinkValue;
+    };
 }
 
 export interface ImagePosition {
@@ -1003,7 +1108,8 @@ export interface ImageHyperlinkValue {
 }
 
 export interface Range extends Location {
-    sheetName: string;
+    /** The worksheet name of a reference such as `Sheet1!A1:B2`, `undefined` without one. */
+    sheetName: string | undefined;
 
     tl: string;
     $t$l: string;
@@ -1019,16 +1125,11 @@ export interface Range extends Location {
 
     count: number;
 
-    decode(): void;
-    decode(v: Range): void;
-    decode(v: string): void;
-    decode(v: Location): void;
-    decode(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
-    decode(tl: string, br: string, sheetName?: string): void;
-    decode(v: [string, string]): void;
-    decode(v: [string, string, string]): void;
-    decode(v: [number, number, number, number]): void;
-    decode(v: [number, number, number, number, string]): void;
+    /**
+     * Sets the range from the list of arguments of a range (as `worksheet.mergeCells` takes them), given as ONE array:
+     * `decode(["A1:B2"])`, `decode(["A1", "B2"])`, `decode([1, 1, 2, 2])`.
+     */
+    decode(args: RangeArguments): void;
 
     expand(top: number, left: number, bottom: number, right: number): void;
 
@@ -1051,6 +1152,9 @@ export interface Range extends Location {
     ): boolean;
 }
 
+/** The header and footer of a worksheet: a {@link HeaderFooter} whose fields may also be `null` (the defaults). */
+export type WorksheetHeaderFooter = { [K in keyof HeaderFooter]?: HeaderFooter[K] | null };
+
 export interface RowBreak {
     id: number;
     max: number;
@@ -1062,9 +1166,10 @@ export interface WorksheetModel {
     id: number;
     name: string;
     // dataValidations: this.dataValidations.model,
-    properties: WorksheetProperties;
+    properties: Partial<WorksheetProperties>;
     pageSetup: Partial<PageSetup>;
-    headerFooter: Partial<HeaderFooter>;
+    /** Headers and footers of the printed pages (`null` texts by default). */
+    headerFooter: WorksheetHeaderFooter;
     rowBreaks: RowBreak[];
     views: WorksheetView[];
     autoFilter: AutoFilter;
@@ -1277,7 +1382,8 @@ export interface Worksheet {
     /**
      * Worksheet Header and Footer
      */
-    headerFooter: Partial<HeaderFooter>;
+    /** Headers and footers of the printed pages (`null` by default). */
+    headerFooter: WorksheetHeaderFooter;
 
     /**
      * Worksheet State
@@ -1287,17 +1393,18 @@ export interface Worksheet {
     /**
      * Worksheet Properties
      */
-    properties: WorksheetProperties;
+    properties: Partial<WorksheetProperties>;
 
     /**
      * Open panes representing the sheet
      */
-    views: Array<Partial<WorksheetView>>;
+    views: WorksheetViewModel[];
 
     /**
      * Apply an auto filter to your worksheet.
      */
-    autoFilter?: AutoFilter;
+    /** The auto filter, `null` or `undefined` when there is none. */
+    autoFilter?: AutoFilter | null;
 
     destroy(): void;
 
@@ -1321,13 +1428,15 @@ export interface Worksheet {
      */
     readonly actualColumnCount: number;
 
-    getColumnKey(key: string): Column;
+    /** The column of a key (`column.key`), `undefined` for an unknown key. */
+    getColumnKey(key: string): Column | undefined;
 
     setColumnKey(key: string, value: Column): void;
 
     deleteColumnKey(key: string): void;
 
-    eachColumnKey(callback: (col: Column, index: number) => void): void;
+    /** Calls `callback` with each keyed column and its key. */
+    eachColumnKey(callback: (col: Column, key: string) => void): void;
 
     /**
      * Access an individual columns by key, letter and 1-based column number
@@ -1345,7 +1454,7 @@ export interface Worksheet {
      * Also: If the worksheet has more rows than values in the colulmn inserts,
      * the rows will still be shifted as if the values existed
      */
-    spliceColumns(start: number, count: number, ...insert: any[][]): void;
+    spliceColumns(start: number, count: number, ...insert: CellValue[][]): void;
 
     /**
      * Add column headers and define column keys and widths.
@@ -1353,7 +1462,8 @@ export interface Worksheet {
      * Note: these column structures are a workbook-building convenience only,
      * apart from the column width, they will not be fully persisted.
      */
-    columns: Array<Partial<Column>>;
+    get columns(): Column[] | null;
+    set columns(value: ColumnDefinition[]);
 
     /**
      * The total row size of the document. Equal to the row number of the last row that has values.
@@ -1378,7 +1488,7 @@ export interface Worksheet {
      * @param start The 1-index starting row number
      * @param length The length of the expected array
      */
-    findRows(start: number, length: number): Row[] | undefined;
+    findRows(start: number, length: number): (Row | undefined)[];
 
     /**
      * Cut one or more rows (rows below are shifted up)
@@ -1386,30 +1496,30 @@ export interface Worksheet {
      *
      * Known Issue: If a splice causes any merged cells to move, the results may be unpredictable
      */
-    spliceRows(start: number, count: number, ...insert: any[][]): void;
+    spliceRows(start: number, count: number, ...insert: RowValues[]): void;
 
     /**
      * Add a row by key-value, after the last current row, using the column keys,
      * or add a row by contiguous Array (assign to columns A, B & C)
      */
-    addRow(data: any[] | any, style?: string): Row;
+    addRow(data: RowValues, style?: RowStyleOption): Row;
 
     /**
      * Add multiple rows by providing an array of arrays or key-value pairs
      */
-    addRows(rows: any[], style?: string): Row[];
+    addRows(rows: RowValues[], style?: RowStyleOption): Row[];
 
     /**
      * Insert a Row by key-value, at the position (shifiting down all rows from position),
      * using the column keys, or add a row by contiguous Array (assign to columns A, B & C)
      */
-    insertRow(pos: number, value: any[] | any, style?: string): Row;
+    insertRow(pos: number, value: RowValues, style?: RowStyleOption): Row;
 
     /**
      * Insert multiple rows at position (shifiting down all rows from position)
      * by providing an array of arrays or key-value pairs
      */
-    insertRows(pos: number, values: any[], style?: string): Row[];
+    insertRows(pos: number, values: RowValues[], style?: RowStyleOption): Row[] | undefined;
 
     /**
      * Duplicate rows and insert new rows
@@ -1439,7 +1549,8 @@ export interface Worksheet {
     /**
      * return all rows as sparse array
      */
-    getSheetValues(): RowValues[];
+    /** The values of the rows (sparse: indexed by row number, then by column number; index 0 unused). */
+    getSheetValues(): CellValue[][];
 
     /**
      * returns the cell at [r,c] or address given by r. If not found, return undefined
@@ -1506,7 +1617,7 @@ export interface Worksheet {
      */
     addBackgroundImage(imageId: number): void;
 
-    getBackgroundImageId(): string;
+    getBackgroundImageId(): number | string | undefined;
 
     /**
      * Using the image id from `Workbook.addImage`,
@@ -1520,17 +1631,8 @@ export interface Worksheet {
             | ({ editAs?: ImageEditAs } & ImagePosition & { hyperlinks?: ImageHyperlinkValue })
     ): void;
 
-    getImages(): Array<{
-        type: "image";
-        imageId: string;
-        range: ImageRange;
-    }>;
-
-    /**
-     * Streaming writer: writes the rest of the worksheet, and returns a promise that resolves once the output can take more
-     * data. No effect on a document worksheet.
-     */
-    commit(): void | Promise<void>;
+    /** The images of the worksheet (not the background image). */
+    getImages(): WorksheetImage[];
 
     model: WorksheetModel;
 
@@ -1547,7 +1649,7 @@ export interface Worksheet {
     /**
      * fetch table by name or id
      */
-    getTable(name: string): Table;
+    getTable(name: string): Table | undefined;
     /**
      * delete table by name or id
      */
@@ -1555,7 +1657,7 @@ export interface Worksheet {
     /**
      *  fetch table
      */
-    getTables(): [Table, void][];
+    getTables(): Table[];
     /**
      * add conditionalFormattingOptions
      */
@@ -1865,6 +1967,16 @@ export interface Address {
     $col$row: string;
 }
 
+/**
+ * The arguments that define a range: nothing (A1:A1), a range, a location or a reference (`"Sheet1!A1:B2"`), two
+ * addresses and a sheet name, or top, left, bottom, right (1-based) and a sheet name; or such a list as one array.
+ */
+export type RangeArguments =
+    | []
+    | [range: Range | Location | string | RangeArguments]
+    | [tl: string, br: string, sheetName?: string]
+    | [top: number, left: number, bottom: number, right: number, sheetName?: string];
+
 export interface Location {
     top: number;
     left: number;
@@ -1872,47 +1984,47 @@ export interface Location {
     right: number;
 }
 
-export interface CellMatrix {
-    addCell(addressStr: string): void;
-    getCell(addressStr: string): Cell;
-    findCell(addressStr: string): Cell | undefined;
-    findCellAt(sheetName: string, rowNumber: number, colNumber: number): Cell | undefined;
-    addCellEx(address: string | Location): void;
-    getCellEx(address: string | Location): Cell;
-    findCellEx(address: string | Location, create: boolean): Cell | undefined;
-    getCellAt(sheetName: string, rowNumber: number, colNumber: number): Cell;
-    removeCellEx(address: string | Location): void;
-    forEach(callback: (cell: Cell) => void): void;
-    map<T>(callback: (cell: Cell) => T): T[];
-    findSheet(address: string | Location, create: boolean): Cell[] | undefined;
-    findSheetRow(sheet: Cell[][], address: string | Location, create: boolean): Row | undefined;
-    findRowCell(row: any[], address: Address, create: boolean): Cell | undefined;
-}
-
 export interface DefinedNamesRanges {
     name: string;
     ranges: string[];
+    /** The 0-based index of the worksheet a name is local to (absent: a workbook-level name). */
+    localSheetId?: number;
 }
 
 export type DefinedNamesModel = DefinedNamesRanges[];
 
+/** A cell of a defined name: its worksheet and address (`row` / `col` 1-based, `address` without `$`). */
+export interface DefinedNameCell {
+    sheetName?: string;
+    address: string;
+    row: number;
+    col: number;
+    $col$row?: string;
+}
+
+/** The defined names of a workbook (`workbook.definedNames`). */
 export interface DefinedNames {
-    getMatrix(name: string): CellMatrix;
-    // add a name to a cell. locStr in the form SheetName!$col$row or SheetName!$c1$r1:$c2:$r2
-    add(locStr: string, name?: string): void;
-    addEx(location: string | Location, name: string): Cell;
+    /** Adds a name to a cell or a range, given as `"Sheet1!$A$1"` or `"Sheet1!$A$1:$B$2"`. */
+    add(locStr: string, name: string): void;
+    /** Adds a name to a cell, or to the cells of a range given by its bounds (`top`, `left`, `bottom`, `right`). */
+    addEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
 
-    remove(locStr: string | Location, name: string): void;
-    removeEx(location: string | Location, name: string): void;
-    removeAllNames(location: string | Location): void;
+    /** Removes a name from a cell or a range, given as a reference (`"Sheet1!$A$1"`). */
+    remove(locStr: string, name: string): void;
+    removeEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
+    /** Removes every name of a cell. */
+    removeAllNames(location: DefinedNameCell): void;
 
-    forEach(callback: (name: string, cell: Cell) => void): void;
+    /** Calls `callback` with each name and each of its cells (the cells of the very large ranges are not enumerated). */
+    forEach(callback: (name: string, cell: DefinedNameCell) => void): void;
 
-    // get all the names of a cell
+    /** The names of a cell, given as a reference (`"Sheet1!$A$1"`). */
     getNames(addressStr: string): string[];
-    getNamesEx(address: string): string[];
+    /** The names of a cell. */
+    getNamesEx(address: DefinedNameCell): string[];
 
-    getRanges(name: string, matrix?: CellMatrix): DefinedNamesRanges;
+    /** The ranges of a name, as references (`"Sheet1!$A$1:$B$2"`). */
+    getRanges(name: string): DefinedNamesRanges;
 
     model: DefinedNamesModel;
 }
@@ -2183,38 +2295,75 @@ export interface TableProperties {
     rows: any[][];
 }
 
-export type TableColumn = Required<TableColumnProperties>;
+/**
+ * The style of a table column as the table holds it: a differential format (the style parts it sets; `null` for a part a
+ * loaded file does not set, `numFmtId` once registered).
+ */
+export type TableColumnStyle = { [K in keyof Style]?: Partial<Style>[K] | null } & { numFmtId?: number };
 
-export interface Table extends Required<TableProperties> {
-    /**
-     * Commit changes
-     */
-    commit: () => void;
-    /**
-     * Remove a rows of data
-     */
-    removeRows: (rowIndex: number, count: number) => void;
-    /**
-     * Add a row of data, either insert at rowNumber or append
-     */
-    addRow: (values: any[], rowNumber?: number) => void;
-    /**
-     * Get column
-     */
-    getColumn: (colIndex: number) => TableColumn;
-    /**
-     * Add a new column, including column defn and values
-     * inserts at colNumber or adds to the right
-     */
-    addColumn: (column: TableColumnProperties, values: any[], colIndex: number) => void;
-    /**
-     * Remove a column with data
-     */
-    removeColumns: (colIndex: number, count: number) => void;
+/** A column of a table (`table.getColumn(i)`): changes to `name` and to the totals row need `table.commit()`. */
+export interface TableColumn {
+    name: string;
+    filterButton: boolean | undefined;
+    style: TableColumnStyle | undefined;
+    totalsRowLabel: string | undefined;
+    totalsRowFunction: TableColumnProperties["totalsRowFunction"];
+    /** The cached result of the totals row formula. */
+    totalsRowResult: CellFormulaResult | undefined;
+    totalsRowFormula: string | undefined;
 }
 
-export namespace config {
-    function setValue(key: "promise", promise: any): void;
+/**
+ * A table of a worksheet (`worksheet.addTable`, `worksheet.getTable`). Its rows and columns live in the cells of the
+ * worksheet: change them with the methods below, then `commit()`.
+ */
+export interface Table {
+    /** The table name (unique in the workbook, used in structured references). */
+    name: string;
+    /** The display name (the name when there is none). */
+    get displayName(): string;
+    set displayName(value: string | undefined);
+    /** The top-left cell of the table (`"A1"`); changing it moves the table on `commit()`. */
+    ref: string | undefined;
+    /** Whether the table has a header row; needs `commit()` once changed. */
+    headerRow: boolean | undefined;
+    /** Whether the table has a totals row; needs `commit()` once changed. */
+    totalsRow: boolean | undefined;
+    /** The table style (`"TableStyleMedium2"`), or `null` for none. */
+    theme: TableStyleProperties["theme"];
+    showFirstColumn: boolean | undefined;
+    showLastColumn: boolean | undefined;
+    showRowStripes: boolean | undefined;
+    showColumnStripes: boolean | undefined;
+    /** The number of columns. */
+    readonly width: number;
+    /** The number of data rows. */
+    readonly height: number;
+
+    /**
+     * Commit changes (writes the table to the cells of the worksheet)
+     */
+    commit(): void;
+    /**
+     * Remove rows of data (0-based index; 1 row by default)
+     */
+    removeRows(rowIndex: number, count?: number): void;
+    /**
+     * Add a row of data, either insert at rowNumber (0-based) or append
+     */
+    addRow(values: CellValue[], rowNumber?: number): void;
+    /**
+     * Get column (0-based index)
+     */
+    getColumn(colIndex: number): TableColumn;
+    /**
+     * Add a new column, including column defn and values; inserts at colIndex (0-based) or adds to the right
+     */
+    addColumn(column: TableColumnProperties, values: CellValue[], colIndex?: number): void;
+    /**
+     * Remove columns with their data (0-based index; 1 column by default)
+     */
+    removeColumns(colIndex: number, count?: number): void;
 }
 
 export namespace stream {

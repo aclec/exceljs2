@@ -112,14 +112,10 @@ export type DataValidationsModel = Record<string, DataValidationModel | undefine
 export type DataValidationFormula = string | number | Date;
 
 /**
- * One data validation (data-validations-xform). Differs from index.d.ts `DataValidation`: `type` may be `"any"` (the
- * default when parsing); `formulae` and `operator` are deleted when there is no formula. Parsed literal unions hold the
- * attribute strings of the file, unvalidated.
+ * One data validation (data-validations-xform): index.d.ts `DataValidation`. `formulae` and `operator` are deleted when
+ * there is no formula. Parsed literal unions hold the attribute strings of the file, unvalidated.
  */
-export type DataValidationModel = Omit<DataValidation, "type" | "formulae"> & {
-    type: DataValidation["type"] | "any";
-    formulae?: DataValidationFormula[];
-};
+export type DataValidationModel = DataValidation;
 
 /**
  * The budgets of one workbook load, shared by all its worksheets (WorksheetXform.createLoadBudget): the cells of the

@@ -1,8 +1,16 @@
 // Type-level checks (no runtime content): the classes of src/doc against the public API of index.d.ts.
 //
-// Each check fails to compile when a class does not conform to its public type, except for the members listed in its
-// Omit<>: the known mismatches, where index.d.ts does not describe the runtime (which wins) or where a member involves
-// another class that does not conform (Cell, Worksheet...). Fixing index.d.ts should shrink these lists.
+// Each check compiles only when every public member of the index.d.ts type, except the ones listed, conforms to the
+// runtime class (its type is assignable to the declared one). On failure the error names the members that do not
+// conform. The comparison goes through {@link Erase}:
+// - the back-references `worksheet`, `workbook` and `master` are not compared: a row or a cell of the streaming API
+//   belongs to a stream worksheet, which index.d.ts does not model as a Worksheet; the classes type them as the narrow
+//   interfaces they use (`CellWorksheet`, `RowWorksheet`...);
+// - members whose name starts with `_` (internal by convention) are dropped;
+// - methods are compared as TypeScript compares methods (bivariant parameters), to a depth of 3 levels.
+//
+// The lists of exceptions are the remaining known mismatches. Every entry must say why it stays; aligning index.d.ts
+// with the runtime removes entries.
 
 import type * as Public from "../../index";
 import type Anchor from "../doc/anchor";
@@ -16,160 +24,155 @@ import type Table from "../doc/table";
 import type Worksheet from "../doc/worksheet";
 import type Workbook from "../doc/workbook";
 
-/** Compiles only when `T` is assignable to `U`. */
-type Conforms<T extends U, U> = T;
+/** The back-references that are not compared (see the file comment). */
+type BackReference = "worksheet" | "workbook" | "master";
 
-/** Compiles only when the Anchor class of src/doc conforms to `Anchor` of index.d.ts, but for the members omitted (known mismatches). */
-export type AnchorConforms = Conforms<Anchor, Omit<Public.Anchor, "worksheet">>;
-/** Compiles only when the Cell class of src/doc conforms to `Cell` of index.d.ts, but for the members omitted (known mismatches). */
-export type CellConforms = Conforms<
-    Cell,
-    Omit<
+/** Depth counter of {@link Erase}. */
+type Previous = [never, 0, 1, 2, 3];
+
+/** A function type compared as a method (bivariant parameters). */
+type Method<A extends readonly unknown[], R> = { method(...args: A): R }["method"];
+
+/**
+ * The structure of a type as the checks compare it: without back-references nor `_` members, recursively to depth
+ * `D` (`unknown` beyond).
+ */
+type Erase<T, D extends number = 3> = [D] extends [never]
+    ? unknown
+    : T extends (...args: infer A) => infer R
+      ? Method<{ [I in keyof A]: Erase<A[I], Previous[D]> }, Erase<R, Previous[D]>>
+      : T extends Date | string | number | boolean | null | undefined
+        ? T
+        : T extends readonly (infer E)[]
+          ? Erase<E, Previous[D]>[]
+          : T extends object
+            ? { [K in keyof T as K extends BackReference | `_${string}` ? never : K]: Erase<T[K], Previous[D]> }
+            : T;
+
+/** The members of `P` that the runtime class `I` lacks (`missing:name`) or does not conform to. */
+type Mismatches<I, P> = {
+    [K in Exclude<keyof P, BackReference>]-?: K extends keyof I
+        ? [Erase<I[K]>] extends [Erase<P[K]>]
+            ? never
+            : K
+        : `missing:${K & string}`;
+}[Exclude<keyof P, BackReference>];
+
+/** `true` when `I` conforms to `P` but for the members `Except`; else the names of the other mismatches. */
+type Check<I, P, Except extends keyof P = never> = [Mismatches<I, Omit<P, Except>>] extends [never] ? true : Mismatches<I, Omit<P, Except>>;
+
+/** Compiles only for `true`: a failing check names its mismatches in the error. */
+type Assert<T extends true> = T;
+
+/** The runtime Anchor conforms to index.d.ts `Anchor`. */
+export type AnchorConforms = Assert<Check<Anchor, Public.Anchor>>;
+/** The runtime Range conforms to index.d.ts `Range`. */
+export type RangeConforms = Assert<Check<Range, Public.Range>>;
+/** The runtime DataValidations conforms to index.d.ts `DataValidations`. */
+export type DataValidationsConforms = Assert<Check<DataValidations, Public.DataValidations>>;
+
+/** The runtime Cell conforms to index.d.ts `Cell`, but for the known mismatches listed. */
+export type CellConforms = Assert<
+    Check<
+        Cell,
         Public.Cell,
-        | "worksheet"
-        | "workbook"
-        | "master"
-        | "hyperlink"
-        | "model"
-        | "name"
-        | "dataValidation"
-        | "value"
-        | "note"
-        | "formula"
-        | "result"
-        | "formulaType"
-        | "toCsvString"
-        | "release"
-        | "addMergeRef"
-        | "releaseMergeRef"
-        | "merge"
-        | "isMergedTo"
-        | "numFmt"
-        | "font"
-        | "alignment"
-        | "protection"
-        | "border"
-        | "fill"
-        | "sheetName"
+        // TODO(align)
+        "value" | "merge" | "isMergedTo"
     >
 >;
-/** Compiles only when the Row class of src/doc conforms to `Row` of index.d.ts, but for the members omitted (known mismatches). */
-export type RowConforms = Conforms<
-    Row,
-    Omit<
+/** The runtime Row conforms to index.d.ts `Row`, but for the known mismatches listed. */
+export type RowConforms = Assert<
+    Check<
+        Row,
         Public.Row,
-        | "worksheet"
-        | "model"
-        | "height"
-        | "values"
-        | "getCell"
-        | "findCell"
-        | "getCellEx"
-        | "eachCell"
-        | "numFmt"
-        | "font"
-        | "alignment"
-        | "protection"
-        | "border"
-        | "fill"
+        // TODO(align)
+        "values" | "findCell" | "getCellEx" | "getCell" | "eachCell"
     >
 >;
-/** Compiles only when the Column class of src/doc conforms to `Column` of index.d.ts, but for the members omitted (known mismatches). */
-export type ColumnConforms = Conforms<Column, Omit<Public.Column, "values" | "worksheet" | "headers" | "eachCell">>;
-/** Compiles only when the Range class of src/doc conforms to `Range` of index.d.ts, but for the members omitted (known mismatches). */
-export type RangeConforms = Conforms<Range, Omit<Public.Range, "sheetName" | "decode">>;
-/**
- * Compiles only when the DataValidations class of src/doc conforms to `DataValidations` of index.d.ts, but for the members omitted (known
- * mismatches).
- */
-export type DataValidationsConforms = Conforms<DataValidations, Omit<Public.DataValidations, "model" | "add" | "find">>;
-/**
- * Compiles only when the DefinedNames class of src/doc conforms to `DefinedNames` of index.d.ts, but for the members omitted (known
- * mismatches).
- */
-export type DefinedNamesConforms = Conforms<
-    DefinedNames,
-    Omit<Public.DefinedNames, "getMatrix" | "addEx" | "removeEx" | "removeAllNames" | "forEach" | "getNamesEx" | "getRanges">
+/** The runtime Column conforms to index.d.ts `Column`, but for the known mismatches listed. */
+export type ColumnConforms = Assert<
+    Check<
+        Column,
+        Public.Column,
+        // TODO(align)
+        "values" | "eachCell"
+    >
 >;
-/** Compiles only when the Table class of src/doc conforms to `Table` of index.d.ts, but for the members omitted (known mismatches). */
-export type TableConforms = Conforms<
-    Table,
-    Omit<Public.Table, "getColumn" | "ref" | "headerRow" | "totalsRow" | "style" | "columns" | "rows">
+/** The runtime DefinedNames conforms to index.d.ts `DefinedNames`, but for the known mismatches listed. */
+export type DefinedNamesConforms = Assert<
+    Check<
+        DefinedNames,
+        Public.DefinedNames,
+        // TODO(align)
+        "addEx" | "removeEx"
+    >
 >;
-/**
- * Compiles only when the Worksheet class of src/doc conforms to `Worksheet` of index.d.ts, but for the members omitted (known mismatches).
- */
-export type WorksheetConforms = Conforms<
-    Worksheet,
-    Omit<
+/** The runtime Table conforms to index.d.ts `Table`, but for the known mismatches listed. */
+export type TableConforms = Assert<
+    Check<
+        Table,
+        Public.Table,
+        // TODO(align)
+        "getColumn"
+    >
+>;
+/** The runtime Worksheet conforms to index.d.ts `Worksheet`, but for the known mismatches listed. */
+export type WorksheetConforms = Assert<
+    Check<
+        Worksheet,
         Public.Worksheet,
-        | "workbook"
-        // the views are the flat SheetViewModel (any field of the normal / frozen / split variants): a parsed view is not
-        // narrowed to the variant of its `state`
-        | "views"
-        // a parsed worksheet without <pageMargins> has `pageSetup.margins === null`
-        | "pageSetup"
-        | "dataValidations"
-        | "dimensions"
-        | "headerFooter"
+        // TODO(align) worksheet settings
         | "properties"
-        | "autoFilter"
+        | "views"
+        | "model"
+        | "pageSetup"
+        // TODO(align) rows, columns and cells
+        | "findCell"
+        | "getCell"
+        | "columns"
+        | "insertRows"
         | "lastColumn"
         | "getColumnKey"
         | "setColumnKey"
-        | "eachColumnKey"
         | "getColumn"
-        | "columns"
         | "lastRow"
         | "findRow"
         | "findRows"
         | "addRow"
         | "addRows"
         | "insertRow"
-        | "insertRows"
         | "getRow"
         | "getRows"
         | "eachRow"
         | "getSheetValues"
-        | "findCell"
-        | "getCell"
-        | "getBackgroundImageId"
-        | "getImages"
-        | "commit"
-        | "model"
-        | "addTable"
-        | "getTable"
-        | "getTables"
     >
 >;
-/**
- * Compiles only when the Workbook class of src/doc conforms to `Workbook` of index.d.ts, but for the members omitted (known mismatches).
- */
-export type WorkbookConforms = Conforms<
-    Workbook,
-    Omit<
+/** The runtime Workbook conforms to index.d.ts `Workbook`, but for the known mismatches listed. */
+export type WorkbookConforms = Assert<
+    Check<
+        Workbook,
         Public.Workbook,
-        | "category"
+        // TODO(align)
+        | "properties"
+        | "calcProperties"
+        | "worksheets"
+        | "definedNames"
+        | "views"
         | "company"
+        | "manager"
+        | "model"
         | "creator"
+        | "title"
+        | "subject"
         | "description"
         | "keywords"
+        | "category"
         | "lastModifiedBy"
-        | "created"
-        | "manager"
-        | "modified"
         | "lastPrinted"
-        | "properties"
-        | "subject"
-        | "title"
-        | "calcProperties"
-        // their read methods resolve with this Workbook, whose document properties may be undefined (see above)
+        | "created"
+        | "modified"
         | "xlsx"
         | "csv"
-        | "definedNames"
-        | "model"
-        | "views"
-        | "worksheets"
         | "addWorksheet"
         | "removeWorksheetEx"
         | "getWorksheet"

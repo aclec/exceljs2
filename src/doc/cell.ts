@@ -59,7 +59,7 @@ export interface FormulaValueObject {
 
 /** A shared string reference value (`{ sharedString }`, legacy: held as is, type SharedString). */
 export interface SharedStringRef {
-    readonly sharedString: unknown;
+    readonly sharedString: number;
 }
 
 /**
@@ -327,7 +327,7 @@ class Cell {
      * The value as CSV text (legacy, not used by the CSV writer): a quoted string, `1` / `0` for a boolean (a number),
      * the target of a hyperlink, the result of a formula, an ISO date...
      */
-    toCsvString(): string | number | undefined {
+    toCsvString(): string | number {
         return this._value.toCsvString();
     }
 
@@ -609,7 +609,7 @@ interface CellValueHolder {
     /** The address of the cell (`A1`); updated when rows or columns are spliced. */
     address: string;
     /** The value as written in a CSV file (a number for a boolean, as the JavaScript version always did). */
-    toCsvString(): string | number | undefined;
+    toCsvString(): string | number;
     /** Releases what the holder references before it is replaced (a merge unregisters itself from its master). */
     release(): void;
     /** The value as text (`cell.text`). */
