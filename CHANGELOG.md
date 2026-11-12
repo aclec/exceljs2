@@ -139,6 +139,10 @@ upstream PR code was merged) and has a regression test.
 - Streaming writer: notes on the cells of a row without values were dropped (the row was skipped).
 - Hyperlink tooltips were lost on read (document reader). The streaming reader's `hyperlink` events now carry `location`, `tooltip` and
   `display` too (an internal link was an event without target).
+- Streaming writer: memory grew with the number of rows (about 0.5 KB per row: 170 MB for 300,000 rows) because rows were committed faster
+  than they were compressed and written, with no way to wait. `row.commit()` and `worksheet.commit()` now return a promise that resolves
+  once the output has drained; awaiting it keeps memory bounded (about 7 MB of live memory whatever the number of rows). Not awaiting it
+  keeps the previous behaviour.
 
 ### Documentation
 
