@@ -77,7 +77,7 @@ export type WorksheetReaderEvent =
     { readonly eventType: "row"; readonly value: Row } | { readonly eventType: "hyperlink"; readonly value: WorksheetHyperlink };
 
 /** The events of a {@link WorksheetReader}. */
-interface WorksheetReaderEvents {
+export interface WorksheetReaderEvents {
     row: [row: Row];
     hyperlink: [hyperlink: WorksheetHyperlink];
     finished: [];

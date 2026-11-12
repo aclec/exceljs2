@@ -33,7 +33,7 @@ export interface HyperlinkReaderOptions {
 }
 
 /** The events of a {@link HyperlinkReader}. */
-interface HyperlinkReaderEvents {
+export interface HyperlinkReaderEvents {
     /** a hyperlink relationship (`hyperlinks: "emit"`) */
     hyperlink: [relationship: HyperlinkRelationship];
     /** the part was read */

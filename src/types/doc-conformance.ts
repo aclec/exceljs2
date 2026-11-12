@@ -7,7 +7,8 @@
 //   belongs to a stream worksheet, which index.d.ts does not model as a Worksheet; the classes type them as the narrow
 //   interfaces they use (`CellWorksheet`, `RowWorksheet`...);
 // - members whose name starts with `_` (internal by convention) are dropped;
-// - methods are compared as TypeScript compares methods (bivariant parameters), to a depth of 3 levels.
+// - methods are compared as TypeScript compares methods (bivariant parameters), to a depth of 3 levels; promises and
+//   async generators by what they resolve with / yield (see conformance-helpers.ts).
 //
 // The lists of exceptions are the remaining known mismatches. Every entry must say why it stays; aligning index.d.ts
 // with the runtime removes entries.
@@ -24,57 +25,7 @@ import type Table from "../doc/table";
 import type Worksheet from "../doc/worksheet";
 import type Workbook from "../doc/workbook";
 import type ModelContainer from "../doc/modelcontainer";
-
-/** The back-references that are not compared (see the file comment). */
-type BackReference = "worksheet" | "workbook" | "master";
-
-/** Depth counter of {@link Erase}. */
-type Previous = [never, 0, 1, 2, 3];
-
-/** A function type compared as a method (bivariant parameters). */
-type Method<A extends readonly unknown[], R> = { method(...args: A): R }["method"];
-
-/**
- * The structure of a type as the checks compare it: without back-references nor `_` members, recursively to depth
- * `D` (`unknown` beyond).
- */
-type Erase<T, D extends number = 3> = [D] extends [never]
-    ? unknown
-    : T extends (...args: infer A) => infer R
-      ? Method<{ [I in keyof A]: Erase<A[I], Previous[D]> }, Erase<R, Previous[D]>>
-      : T extends Date | string | number | boolean | null | undefined
-        ? T
-        : T extends readonly (infer E)[]
-          ? Erase<E, Previous[D]>[]
-          : T extends object
-            ? { [K in keyof T as K extends BackReference | `_${string}` ? never : K]: Erase<T[K], Previous[D]> }
-            : T;
-
-/**
- * The members of `P` that the runtime class `I` lacks (`missing:name`) or does not conform to (their type, or an
- * optional member where `P` declares a required one).
- */
-type Mismatches<I, P> = {
-    [K in Exclude<keyof P, BackReference>]-?: K extends keyof I
-        ? [Erase<Pick<I, K>>] extends [Erase<Pick<P, K>>]
-            ? never
-            : K
-        : `missing:${K & string}`;
-}[Exclude<keyof P, BackReference>];
-
-/**
- * `true` when `I` conforms to `P` but for the members `Except`, and every member of `Except` still mismatches; else
- * the names of the other mismatches, and `stale:name` for an exception that conforms now (remove it from the list).
- */
-type Check<I, P, Except extends keyof P = never> = [Mismatches<I, Omit<P, Except>> | Stale<I, P, Except>] extends [never]
-    ? true
-    : Mismatches<I, Omit<P, Except>> | Stale<I, P, Except>;
-
-/** The members of `Except` that conform (`stale:name`). */
-type Stale<I, P, Except extends keyof P> = `stale:${Exclude<Except, Mismatches<I, P>> & string}`;
-
-/** Compiles only for `true`: a failing check names its mismatches in the error. */
-type Assert<T extends true> = T;
+import type { Assert, Check } from "./conformance-helpers";
 
 /** The runtime Anchor conforms to index.d.ts `Anchor`. */
 export type AnchorConforms = Assert<Check<Anchor, Public.Anchor>>;
@@ -104,7 +55,7 @@ export type RowConforms = Assert<
         Row,
         Public.Row,
         // Only through `Cell.value` (see CellConforms): `values` holds cell values, the others give Cells.
-        "values" | "findCell" | "getCellEx" | "getCell"
+        "values" | "findCell" | "getCellEx" | "getCell" | "eachCell"
     >
 >;
 /** The runtime Column conforms to index.d.ts `Column`, but for the known mismatches listed. */
@@ -112,8 +63,8 @@ export type ColumnConforms = Assert<
     Check<
         Column,
         Public.Column,
-        // Only through `Cell.value` (see CellConforms): `values` holds cell values.
-        "values"
+        // Only through `Cell.value` (see CellConforms): `values` holds cell values, `eachCell` gives Cells.
+        "values" | "eachCell"
     >
 >;
 /** The runtime DefinedNames conforms to index.d.ts `DefinedNames`. */
@@ -133,10 +84,25 @@ export type WorksheetConforms = Assert<
         | "getCell"
         | "lastColumn"
         | "lastRow"
+        | "columns"
+        | "addRow"
+        | "getColumnKey"
+        | "setColumnKey"
+        | "findRow"
+        | "insertRow"
+        | "getRow"
+        | "getSheetValues"
     >
 >;
-/** The runtime Workbook conforms to index.d.ts `Workbook`. */
-export type WorkbookConforms = Assert<Check<Workbook, Public.Workbook>>;
+/** The runtime Workbook conforms to index.d.ts `Workbook`, but for the known mismatches listed. */
+export type WorkbookConforms = Assert<
+    Check<
+        Workbook,
+        Public.Workbook,
+        // Only through the Worksheet they give (see WorksheetConforms: `getColumn` and `Cell.value`)
+        "worksheets" | "addWorksheet" | "removeWorksheetEx" | "getWorksheet"
+    >
+>;
 /** The runtime ModelContainer conforms to index.d.ts `ModelContainer`, but for the known mismatches listed. */
 export type ModelContainerConforms = Assert<
     Check<
