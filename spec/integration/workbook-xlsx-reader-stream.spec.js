@@ -49,6 +49,15 @@ async function reorderZip(buffer, rank) {
   return target.generateAsync({type: 'nodebuffer', compression: 'DEFLATE'});
 }
 
+async function readError(input) {
+  try {
+    await readAll(input);
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+}
+
 const isWorksheet = name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name);
 
 // records every temp dir the reader creates (spy on the lookup done at call time)
@@ -68,9 +77,9 @@ function trackTempDirs() {
   };
 }
 
-async function bigSheetFirstBuffer() {
+async function bigSheetFirstBuffer(rows = 3000) {
   const buffer = await baseWorkbookBuffer((wb, ws) => {
-    for (let i = 2; i <= 3000; i++) {
+    for (let i = 2; i <= rows; i++) {
       ws.getCell(`A${i}`).value = `row ${i} ${(i * 7919) % 10007}`;
       ws.getCell(`B${i}`).value = i;
     }
@@ -132,15 +141,11 @@ describe('WorkbookReader (stream)', () => {
     });
 
     it('rejects and removes the temp dir on a truncated file', async function() {
-      this.timeout(5000);
-      const buffer = await bigSheetFirstBuffer();
-      const truncated = buffer.subarray(0, Math.floor(buffer.length * 0.9));
-      let error;
-      try {
-        await readAll(chunkedStream(truncated));
-      } catch (err) {
-        error = err;
-      }
+      this.timeout(10000);
+      // large enough for unzipper to stall inside the worksheet entry being spooled
+      const buffer = await bigSheetFirstBuffer(20000);
+      const truncated = buffer.subarray(0, Math.floor(buffer.length * 0.5));
+      const error = await readError(chunkedStream(truncated));
       expect(error).to.be.an.instanceOf(Error);
       expect(tracker.created).to.have.length(1);
       expect(fs.existsSync(tracker.created[0])).to.equal(false);
@@ -162,6 +167,37 @@ describe('WorkbookReader (stream)', () => {
       expect(error).to.be.an.instanceOf(Error);
       expect(tracker.created).to.have.length(1);
       expect(fs.existsSync(tracker.created[0])).to.equal(false);
+    });
+  });
+
+  describe('input ending or failing inside a worksheet read directly', () => {
+    let buffer;
+    before(async function() {
+      this.timeout(10000);
+      // shared strings, rels, workbook and styles first: the worksheet is not spooled
+      buffer = await reorderZip(await bigSheetFirstBuffer(20000), name => (isWorksheet(name) ? 1 : 0));
+    });
+
+    it('rejects when the input is truncated', async function() {
+      this.timeout(5000);
+      const error = await readError(chunkedStream(buffer.subarray(0, Math.floor(buffer.length * 0.8))));
+      expect(error && error.message).to.equal('FILE_ENDED');
+    });
+
+    it('rejects with the error of the input stream', async function() {
+      this.timeout(5000);
+      const cut = Math.floor(buffer.length * 0.8);
+      const input = Readable.from(
+        (function*() {
+          for (let i = 0; i < cut; i += 1024) {
+            yield buffer.subarray(i, Math.min(i + 1024, cut));
+          }
+          throw new Error('connection reset');
+        })(),
+        {objectMode: false}
+      );
+      const error = await readError(input);
+      expect(error && error.message).to.equal('connection reset');
     });
   });
 
