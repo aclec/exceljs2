@@ -81,10 +81,9 @@ export function notes(cell: ExcelJS.Cell, loaded: ExcelJS.Cell): void {
     note.editAs = "absolute";
 }
 
-// --- Headers and Footers: null for a worksheet read from a file without them ----------------------------------------
+// --- Headers and Footers: the default (null texts) also for a worksheet read from a file without them ---------------
 export function headersAndFooters(): void {
-    const headerFooter = worksheet.headerFooter;
-    if (!headerFooter) return;
+    const { headerFooter } = worksheet;
     headerFooter.oddFooter = "&Lexceljs&C&F&RPage &P";
     headerFooter.differentFirst = true;
     headerFooter.firstHeader = "Hello Exceljs";

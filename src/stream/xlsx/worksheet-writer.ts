@@ -56,7 +56,7 @@ import PrintOptionsXform from "../../xlsx/xform/sheet/print-options-xform";
 import AutoFilterXform from "../../xlsx/xform/sheet/auto-filter-xform";
 import PictureXform from "../../xlsx/xform/sheet/picture-xform";
 import ConditionalFormattingsXform from "../../xlsx/xform/sheet/cf/conditional-formattings-xform";
-import HeaderFooterXform from "../../xlsx/xform/sheet/header-footer-xform";
+import HeaderFooterXform, { defaultHeaderFooter } from "../../xlsx/xform/sheet/header-footer-xform";
 import RowBreaksXform from "../../xlsx/xform/sheet/row-breaks-xform";
 import ExtListXform from "../../xlsx/xform/sheet/ext-lst-xform";
 
@@ -248,20 +248,7 @@ class WorksheetWriter {
             options.properties
         );
 
-        this.headerFooter = Object.assign(
-            {},
-            {
-                differentFirst: false,
-                differentOddEven: false,
-                oddHeader: null,
-                oddFooter: null,
-                evenHeader: null,
-                evenFooter: null,
-                firstHeader: null,
-                firstFooter: null,
-            },
-            options.headerFooter
-        );
+        this.headerFooter = Object.assign(defaultHeaderFooter(), options.headerFooter);
 
         // for all things printing
         this.pageSetup = Object.assign(

@@ -21,6 +21,7 @@ import { makePivotTable, type PivotTable, type PivotTableInput } from "./pivot-t
 import Encryptor from "../utils/encryptor";
 import { copyStyle } from "../utils/copy-style";
 import { checkMergedCells } from "../utils/merge-limits";
+import { defaultHeaderFooter } from "../xlsx/xform/sheet/header-footer-xform";
 import { eachEntry, entryIndices, lastEntryIndex, shiftSteps } from "../utils/sparse-array";
 import type Cell from "./cell";
 import type { CellValue, FormulaValueObject } from "./cell";
@@ -181,12 +182,12 @@ class Worksheet {
     properties: WorksheetPropertiesModel;
     /** For all things printing. */
     pageSetup: PageSetupModel;
-    /** Headers and footers of the printed pages (`null` texts by default; `null` when read from a file without them). */
-    headerFooter: HeaderFooterModel | null;
+    /** Headers and footers of the printed pages (`null` texts by default, also when read from a file without them). */
+    headerFooter: HeaderFooterModel;
     /** The data validations of the cells. */
     dataValidations: DataValidations;
-    /** For freezepanes, split, zoom, gridlines, etc. (`null` when read from a file without `<sheetViews>`). */
-    views: SheetViewModel[] | null;
+    /** For freezepanes, split, zoom, gridlines, etc. (`[]` by default, also when read from a file without them). */
+    views: SheetViewModel[];
     /** The auto filter of the worksheet (a range such as `"A1:C1"`, or its corners), if any. */
     autoFilter: AutoFilterModel | null | undefined;
     /** The images (and background image). */
@@ -289,20 +290,7 @@ class Worksheet {
             options.pageSetup
         );
 
-        this.headerFooter = Object.assign(
-            {},
-            {
-                differentFirst: false,
-                differentOddEven: false,
-                oddHeader: null,
-                oddFooter: null,
-                evenHeader: null,
-                evenFooter: null,
-                firstHeader: null,
-                firstFooter: null,
-            } satisfies HeaderFooterModel,
-            options.headerFooter
-        );
+        this.headerFooter = Object.assign(defaultHeaderFooter(), options.headerFooter);
 
         this.dataValidations = new DataValidations();
 
@@ -1526,6 +1514,8 @@ class Worksheet {
         this.properties = value.properties;
         this.pageSetup = value.pageSetup;
         this.headerFooter = value.headerFooter;
+        // a model without page breaks has none (one built by hand: the getter and a file read always give the list)
+        this.rowBreaks = value.rowBreaks ?? [];
         this.views = value.views;
         this.autoFilter = value.autoFilter;
         this._media = value.media.map((medium) => new Image(this, medium));

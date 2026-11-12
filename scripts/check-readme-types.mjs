@@ -39,8 +39,6 @@ const KNOWN = [
     ]),
     // worksheet.getTable(name) is undefined when the sheet has no table of that name
     { code: 18048, message: "'table' is possibly 'undefined'." },
-    // worksheet.headerFooter is null for a sheet read from a file without <headerFooter>
-    { code: 18047, message: "'worksheet.headerFooter' is possibly 'null'." },
     // `const options = { worksheets: 'emit' }` widens 'emit' to string (TypeScript needs `as const`)
     { code: 2345, line: "new ExcelJS.stream.xlsx.WorkbookReader('./file.xlsx', options)" },
 ];

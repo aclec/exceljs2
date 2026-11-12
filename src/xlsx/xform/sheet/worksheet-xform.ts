@@ -59,7 +59,7 @@ import PictureXform from "./picture-xform";
 import DrawingXform from "./drawing-xform";
 import TablePartXform from "./table-part-xform";
 import RowBreaksXform from "./row-breaks-xform";
-import HeaderFooterXform from "./header-footer-xform";
+import HeaderFooterXform, { defaultHeaderFooter } from "./header-footer-xform";
 import ConditionalFormattingsXform from "./cf/conditional-formattings-xform";
 import CfRuleXform from "./cf/cf-rule-xform";
 import ExtListXform from "./ext-lst-xform";
@@ -729,12 +729,14 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                     // parsed items are RowXform parse models (the list type also covers the rendered document rows)
                     rows: map.sheetData.model as RowModel<ParsedCellModel>[] | null | undefined,
                     mergeCells: map.mergeCells.model,
+                    rowBreaks: map.rowBreaks.model ?? [],
                     hyperlinks: map.hyperlinks.model,
                     dataValidations: map.dataValidations.model,
                     properties,
-                    views: map.sheetViews.model,
+                    // without <sheetViews> / <headerFooter>: as a new worksheet has them (rendered as nothing)
+                    views: map.sheetViews.model ?? [],
                     pageSetup,
-                    headerFooter: map.headerFooter.model,
+                    headerFooter: map.headerFooter.model ?? defaultHeaderFooter(),
                     background: map.picture.model,
                     drawing: map.drawing.model,
                     tables: map.tableParts.model,

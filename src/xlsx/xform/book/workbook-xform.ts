@@ -78,7 +78,7 @@ export interface WorkbookXformWriteModel {
     worksheets: WorkbookSheetWriteModel[];
     sheets?: readonly WorkbookSheetWriteModel[];
     definedNames: DefinedNameModel[];
-    views: readonly WorkbookViewModel[] | undefined;
+    views: readonly WorkbookViewModel[];
     properties: Partial<WorkbookProperties>;
     calcProperties: Partial<CalculationProperties>;
     media?: readonly MediaModel[];
@@ -263,7 +263,7 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
                 const model: WorkbookPartModel = {
                     sheets: this.map.sheets.model ?? undefined,
                     properties: this.map.workbookPr.model || {},
-                    views: this.map.bookViews.model ?? undefined,
+                    views: this.map.bookViews.model ?? [],
                     calcProperties: {},
                 };
                 if (this.map.definedNames.model) {

@@ -947,6 +947,12 @@ export interface Row extends StyleProperties {
      */
     commit(): void | Promise<void>;
     destroy(): void;
+    /**
+     * Adds a manual page break after this row (to `worksheet.rowBreaks`), from column `lft` to column `rght` (1-based;
+     * absent or 0: from the first column, to the last one).
+     *
+     * @throws Error for a column that is not one of the worksheet (an integer from 1 to 16,384)
+     */
     addPageBreak(lft?: number, rght?: number): void;
 }
 
@@ -1164,14 +1170,16 @@ export interface PageSetup {
     showGridLines: boolean;
 
     /**
-     * Which number to use for the first page. When set, it is written with `useFirstPageNumber`. A worksheet read from
-     * a file has `1` when the file gives none.
+     * Which number to use for the first page; absent (the default) for automatic numbering. When set, the pages are
+     * numbered from it unless `useFirstPageNumber` is `false`. A worksheet read from a file has none when the file gives
+     * none and does not use one; `1` when it uses one without giving it (the default of the format).
      */
     firstPageNumber: number;
 
     /**
-     * Read from a file: whether the file uses `firstPageNumber` (else the pages are numbered automatically). Ignored when
-     * writing: `firstPageNumber` decides.
+     * Whether the pages are numbered from `firstPageNumber` (written as `useFirstPageNumber`): when absent, they are as
+     * soon as `firstPageNumber` is set. A worksheet read from a file that gives a `firstPageNumber` has `false` when the
+     * file does not use it (automatic numbering, as Excel does), `true` when it does.
      */
     useFirstPageNumber: boolean;
 
@@ -1448,7 +1456,7 @@ export interface RowBreak {
     max: number;
     /** The first column of the break (0-based); absent for the first column. */
     min?: number;
-    /** `1`: a manual break. */
+    /** `1`: a manual break (`row.addPageBreak()`); `0`: an automatic one (read from a file). */
     man: number;
 }
 
@@ -1545,8 +1553,8 @@ export interface WorksheetColumnModel {
 /**
  * The model of a worksheet (`worksheet.model`): its settings (shared with the worksheet, not copied), its cells (the
  * rows and column ranges as models), its images, tables and conditional formattings. Setting `worksheet.model` replaces
- * the worksheet with a model of this shape ({@link WorksheetModelInput}: without the getter-only fields): note that the
- * merged cells are then read from `mergeCells`, not `merges`.
+ * the worksheet with a model of this shape ({@link WorksheetModelInput}: without the getter-only fields), so that
+ * `worksheet2.model = worksheet1.model` copies a worksheet (but its name, id and state).
  */
 export interface WorksheetModel {
     /** The id of the worksheet in the workbook. */
@@ -1561,12 +1569,12 @@ export interface WorksheetModel {
     properties: Partial<WorksheetProperties>;
     /** The print settings. */
     pageSetup: Partial<PageSetup>;
-    /** Headers and footers of the printed pages (`null` texts by default; `null` for a sheet read without them). */
-    headerFooter: WorksheetHeaderFooter | null;
-    /** The manual page breaks after rows (not read by the setter). */
+    /** Headers and footers of the printed pages (`null` texts by default). */
+    headerFooter: WorksheetHeaderFooter;
+    /** The page breaks after rows. */
     rowBreaks: RowBreak[];
-    /** The views (`null` for a sheet read from a file without views). */
-    views: WorksheetViewModel[] | null;
+    /** The views (`[]` by default). */
+    views: WorksheetViewModel[];
     /** The auto filter: `null` or `undefined` when there is none. */
     autoFilter?: AutoFilter | null;
     /** The images (and background image). */
@@ -1583,36 +1591,38 @@ export interface WorksheetModel {
     rows: RowModel[];
     /** The used range (the getter only; not read by the setter). */
     dimensions: Range;
-    /** The merged ranges, e.g. `"A1:B2"` (the getter only; the setter reads `mergeCells`). */
+    /** The merged ranges, e.g. `"A1:B2"` (the setter reads them when `mergeCells` is absent). */
     merges: string[];
-    /** The merged ranges given to the setter (copy `merges` here to keep them); absent from the getter. */
+    /** The merged ranges of a model read from a file by a {@link ModelContainer} (read first); absent from the getter. */
     mergeCells?: string[];
 }
 
 /**
  * What setting `worksheet.model` reads: a {@link WorksheetModel} (such as the one of another worksheet, or one of a
- * file read by a {@link ModelContainer}) without the fields that only the getter gives, which the setter does not read:
- * `id` and `state` (the worksheet keeps its own; `workbook.model =` reads them), `rowBreaks`, `dimensions` (a Range from
- * the getter, the `ref` text in a model read from a file) and `merges` (the merged cells are read from `mergeCells`).
+ * file read by a {@link ModelContainer}) whose fields that the setter does not need may be absent: `id` and `state` (the
+ * worksheet keeps its own; `workbook.model =` reads them), `rowBreaks` (none when absent), `dimensions` (not read: a
+ * Range from the getter, the `ref` text in a model read from a file) and `merges` (the merged cells are read from
+ * `mergeCells`, else from `merges`).
+ *
+ * @throws Error (the setter) for a merged range that is invalid or names another sheet
  */
 export interface WorksheetModelInput extends Omit<WorksheetModel, "id" | "state" | "rowBreaks" | "dimensions" | "merges"> {
     /** The id of the worksheet in the workbook (read by `workbook.model =` only). */
     id?: number;
     /** Whether the worksheet is visible (read by `workbook.model =` only: visible when absent). */
     state?: WorksheetState;
-    /** Not read. */
+    /** The page breaks after rows (none when absent). */
     rowBreaks?: RowBreak[];
     /** Not read. */
     dimensions?: Range | string;
-    /** Not read: copy them to `mergeCells` to keep them. */
+    /** The merged ranges, read when `mergeCells` is absent. */
     merges?: string[];
 }
 
 /**
  * What setting `workbook.model` reads, and the model of a {@link ModelContainer}: a {@link WorkbookModel} whose worksheet
  * models may lack the fields that only the worksheet getter gives (see {@link WorksheetModelInput}). A file read by a
- * ModelContainer gives worksheet models without `rowBreaks` nor `merges` (`mergeCells` instead), their `dimensions` as
- * text.
+ * ModelContainer gives worksheet models without `merges` (`mergeCells` instead), their `dimensions` as text.
  */
 export interface WorkbookModelInput extends Omit<WorkbookModel, "worksheets"> {
     /** The worksheets, in their order (each one with its `id`). */
@@ -1908,10 +1918,10 @@ export interface Worksheet {
     pageSetup: Partial<PageSetup>;
 
     /**
-     * Headers and footers of the printed pages (`null` texts by default). `null` for a worksheet read from a file without
-     * `<headerFooter>`.
+     * Headers and footers of the printed pages (`null` texts by default, also for a worksheet read from a file without
+     * `<headerFooter>`).
      */
-    headerFooter: WorksheetHeaderFooter | null;
+    headerFooter: WorksheetHeaderFooter;
 
     /**
      * Worksheet State
@@ -1924,10 +1934,10 @@ export interface Worksheet {
     properties: Partial<WorksheetProperties>;
 
     /**
-     * The views of the worksheet (frozen or split panes, zoom, grid lines...): empty by default, `null` for a worksheet
+     * The views of the worksheet (frozen or split panes, zoom, grid lines...): empty by default, also for a worksheet
      * read from a file without `<sheetViews>`.
      */
-    views: WorksheetViewModel[] | null;
+    views: WorksheetViewModel[];
 
     /** The auto filter of the worksheet, `null` or `undefined` when there is none. */
     autoFilter?: AutoFilter | null;
@@ -1938,10 +1948,7 @@ export interface Worksheet {
      */
     sheetProtection: WorksheetProtectionModel | null | undefined;
 
-    /**
-     * The manual page breaks after rows, added by `row.addPageBreak()` (the page breaks of a file that is read are not
-     * kept).
-     */
+    /** The page breaks after rows, added by `row.addPageBreak()` or read from a file. */
     rowBreaks: RowBreak[];
 
     /** The conditional formattings (`addConditionalFormatting`), in order. */
@@ -2819,7 +2826,7 @@ export interface WorkbookModel {
     /** The defined names. */
     definedNames: DefinedNamesModel;
     /** The workbook windows. */
-    views: WorkbookView[] | undefined;
+    views: WorkbookView[];
     /** Document property: the company. */
     company?: string;
     /** Document property: the manager. */
@@ -2927,9 +2934,9 @@ export class Workbook {
 
     /**
      * The Workbook views controls how many separate windows Excel will open when viewing the workbook. `[]` for a new
-     * workbook; `undefined` after loading a file without `<bookViews>` (such as one written with no views).
+     * workbook, also after loading a file without `<bookViews>` (such as one written with no views).
      */
-    views: WorkbookView[] | undefined;
+    views: WorkbookView[];
 
     /** The images (`addImage`, or read from a file), by image id. */
     media: Media[];

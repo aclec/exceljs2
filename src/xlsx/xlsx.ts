@@ -498,6 +498,8 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             comments: Object.create(null) as XlsxReadModel["comments"],
             tables: Object.create(null) as XlsxReadModel["tables"],
             vmlDrawings: Object.create(null) as XlsxReadModel["vmlDrawings"],
+            // replaced by those of xl/workbook.xml
+            views: [],
         };
         // the cap on merged cells applies to the whole workbook, and is kept by the loaded workbook
         const maxMergedCells =

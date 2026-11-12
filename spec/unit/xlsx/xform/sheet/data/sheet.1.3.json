@@ -103,6 +103,7 @@
     "hyperlinks": [{ "address": "B6", "rId": "rId1" }],
     "background": null,
     "mergeCells": null,
+    "rowBreaks": [],
     "dataValidations": null,
     "drawing": null,
     "headerFooter": {
