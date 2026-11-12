@@ -1,7 +1,7 @@
 // Cell hyperlinks: external links are relationships, internal links (a place in the workbook,
 // written by the user as "#Sheet!A1" or "#DefinedName") are a location attribute only,
 // as Excel writes them (ECMA-376 CT_Hyperlink).
-const { PassThrough } = require("stream");
+const { PassThrough, Readable } = require("stream");
 const { strFromU8 } = require("fflate");
 const { baseWorkbookBuffer, tamper, readPart, unzipParts } = require("../../utils/xlsx-tamper");
 
@@ -159,5 +159,51 @@ describe("Hyperlinks", () => {
         expect(loaded.getCell("A1").hyperlink).to.equal("#Data!A1");
         expect(loaded.getCell("A2").hyperlink).to.equal("#MyName");
         expect(loaded.getCell("A3").hyperlink).to.equal("https://example.com/");
+    });
+
+    it("round-trips tooltips of internal and external links", async () => {
+        const values = {
+            A1: { text: "internal", hyperlink: "#Data!A1", tooltip: "to the data" },
+            A2: { text: "external", hyperlink: "https://example.com/", tooltip: "a <site> & more" },
+            A3: { text: "no tooltip", hyperlink: "https://example.com/other" },
+        };
+        let buffer = await baseWorkbookBuffer((wb, ws) => {
+            wb.addWorksheet("Data");
+            Object.entries(values).forEach(([address, value]) => {
+                ws.getCell(address).value = value;
+            });
+        });
+        for (let i = 0; i < 2; i++) {
+            const wb = await load(buffer);
+            const ws = wb.getWorksheet("Sheet1");
+            Object.entries(values).forEach(([address, value]) => {
+                expect(ws.getCell(address).value, address).to.deep.equal(value);
+            });
+            buffer = await wb.xlsx.writeBuffer();
+        }
+        expect(await hyperlinkNodes(buffer)).to.deep.equal([
+            '<hyperlink ref="A1" tooltip="to the data" location="Data!A1"/>',
+            '<hyperlink ref="A2" r:id="rId1" tooltip="a &lt;site&gt; &amp; more"/>',
+            '<hyperlink ref="A3" r:id="rId2"/>',
+        ]);
+    });
+
+    it("streaming reader: hyperlink events carry the location and tooltip", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            wb.addWorksheet("Data");
+            ws.getCell("A2").value = { text: "internal", hyperlink: "#Data!B2", tooltip: "tip" };
+            ws.getCell("A3").value = { text: "external", hyperlink: "https://example.com/" };
+        });
+        const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), { hyperlinks: "emit" });
+        const events = [];
+        for await (const worksheet of reader) {
+            for await (const sheetEvents of worksheet.parse()) {
+                sheetEvents.filter(({ eventType }) => eventType === "hyperlink").forEach(({ value }) => events.push(value));
+            }
+        }
+        expect(events).to.deep.equal([
+            { ref: "A2", location: "Data!B2", tooltip: "tip" },
+            { ref: "A3", rId: "rId1" },
+        ]);
     });
 });

@@ -2513,7 +2513,9 @@ If worksheets come before the shared strings in the zip file, the reader spools 
 
 ###### Iterating over all events(#contents)<!-- Link generated with jump2header -->
 
-Events on workbook are 'worksheet', 'shared-strings' and 'hyperlinks'. Events on worksheet are 'row' and 'hyperlinks'.
+Events on workbook are 'worksheet', 'shared-strings' and 'hyperlinks'. Events on worksheet are 'row' and 'hyperlink'. A 'hyperlink'
+ value holds the attributes of the sheet's `<hyperlink>` element that are present: `{ref, rId, location, tooltip, display}` (an
+ internal link has a `location` and no `rId`; the target of an `rId` is in the sheet relationships that the hyperlinks reader emits).
 
 ```js
 const options = {

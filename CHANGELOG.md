@@ -137,6 +137,8 @@ upstream PR code was merged) and has a regression test.
 - Notes on cells without a value were lost on read: Excel (and ExcelJS) write no `<c>` element for such cells. The cells, and their rows
   when missing, are now created.
 - Streaming writer: notes on the cells of a row without values were dropped (the row was skipped).
+- Hyperlink tooltips were lost on read (document reader). The streaming reader's `hyperlink` events now carry `location`, `tooltip` and
+  `display` too (an internal link was an event without target).
 
 ### Documentation
 
