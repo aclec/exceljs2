@@ -1,29 +1,31 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
 import * as crypto from "crypto";
 
+/**
+ * The hashing of the passwords of sheet protection (ECMA-376 Part 1, 18.3.1.85 sheetProtection: hashValue, saltValue,
+ * spinCount). Uses Node's crypto; the browser bundle has a shim for these three functions.
+ */
 const Encryptor = {
     /**
-     * Calculate a hash of the concatenated buffers with the given algorithm.
-     * @param {string} algorithm - The hash algorithm.
-     * @returns {Buffer} The hash
+     * Calculates a hash of the concatenated buffers with the given algorithm.
+     * @param algorithm - A Node.js hash algorithm name, e.g. "sha512".
+     * @returns The hash.
      */
-    hash(algorithm, ...buffers) {
+    hash(algorithm: string, ...buffers: readonly Uint8Array[]): Buffer {
         const hash = crypto.createHash(algorithm);
         hash.update(Buffer.concat(buffers));
         return hash.digest();
     },
     /**
-     * Convert a password into an encryption key
-     * @param {string} password - The password
-     * @param {string} hashAlgorithm - The hash algoritm
-     * @param {string} saltValue - The salt value
-     * @param {number} spinCount - The spin count
-     * @param {number} keyBits - The length of the key in bits
-     * @param {Buffer} blockKey - The block key
-     * @returns {Buffer} The encryption key
+     * Converts a password into its hash: the hash of salt + password (UTF-16LE), then spinCount times the hash of the
+     * previous hash + the iteration number (32-bit little endian), as Excel does it (which is why crypto.pbkdf2 cannot).
+     * @param password - The password.
+     * @param hashAlgorithm - The hash algorithm, e.g. "SHA-512" or "sha512" (case insensitive).
+     * @param saltValue - The salt, base64.
+     * @param spinCount - The number of iterations.
+     * @returns The hash, base64.
+     * @throws Error when the hash algorithm is not supported.
      */
-    convertPasswordToHash(password, hashAlgorithm, saltValue, spinCount) {
+    convertPasswordToHash(password: string, hashAlgorithm: string, saltValue: string, spinCount: number): string {
         hashAlgorithm = hashAlgorithm.toLowerCase();
         const hashes = crypto.getHashes();
         if (hashes.indexOf(hashAlgorithm) < 0) {
@@ -46,9 +48,9 @@ const Encryptor = {
     },
     /**
      * Generates cryptographically strong pseudo-random data.
-     * @param size The size argument is a number indicating the number of bytes to generate.
+     * @param size - The number of bytes to generate.
      */
-    randomBytes(size) {
+    randomBytes(size: number): Buffer {
         return crypto.randomBytes(size);
     },
 };

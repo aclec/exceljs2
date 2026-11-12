@@ -1,5 +1,3 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
 // Rows, cells and defined-name cells are kept in arrays indexed by row or column number, which a single far
 // row (1,048,576) or cell (column XFD) makes that long. forEach and index loops visit every index below the
 // length: about 14 ms for 1,048,576 indexes in V8 and JSC, even when one entry exists. Object.keys lists the
@@ -8,11 +6,16 @@
 // over until a run of MAX_GAP holes, and only a sparse array is enumerated by its keys.
 const MAX_GAP = 32;
 
-// Calls predicate(value, index) for each entry of array from index start holding a value other than undefined,
-// in index order, until it returns a truthy value. Returns whether it did. Values are read when they are
-// reached, as forEach does, but entries added past the first run of MAX_GAP holes while it runs may not be
-// visited.
-function someEntry(array, predicate, start = 0) {
+/** An array indexed by row or column number, with holes (or `undefined` entries) for the missing ones. */
+export type SparseArray<T> = readonly (T | undefined)[];
+
+/**
+ * Calls predicate(value, index) for each entry of array from index start holding a value other than undefined,
+ * in index order, until it returns a truthy value. Values are read when they are reached, as forEach does, but
+ * entries added past the first run of MAX_GAP holes while it runs may not be visited.
+ * @returns Whether the predicate returned a truthy value.
+ */
+export function someEntry<T>(array: SparseArray<T>, predicate: (value: T, index: number) => unknown, start = 0): boolean {
     const { length } = array;
     let gap = 0;
     for (let i = start; i < length; i++) {
@@ -40,9 +43,11 @@ function someEntry(array, predicate, start = 0) {
     return false;
 }
 
-// Calls callback(value, index) for each entry of array from index start holding a value other than undefined,
-// in index order (someEntry without its predicate: this runs for every row and cell)
-function eachEntry(array, callback, start = 0) {
+/**
+ * Calls callback(value, index) for each entry of array from index start holding a value other than undefined,
+ * in index order (someEntry without its predicate: this runs for every row and cell).
+ */
+export function eachEntry<T>(array: SparseArray<T>, callback: (value: T, index: number) => void, start = 0): void {
     const { length } = array;
     let gap = 0;
     for (let i = start; i < length; i++) {
@@ -66,17 +71,17 @@ function eachEntry(array, callback, start = 0) {
     }
 }
 
-// The indices of the entries of array holding a value other than undefined, ascending
-function entryIndices(array) {
-    const indices = [];
+/** The indices of the entries of array holding a value other than undefined, ascending. */
+export function entryIndices(array: SparseArray<unknown>): number[] {
+    const indices: number[] = [];
     eachEntry(array, (value, index) => {
         indices.push(index);
     });
     return indices;
 }
 
-// The index of the last entry of array holding a value other than undefined, or -1
-function lastEntryIndex(array) {
+/** The index of the last entry of array holding a value other than undefined, or -1. */
+export function lastEntryIndex(array: SparseArray<unknown>): number {
     const { length } = array;
     const stop = Math.max(0, length - MAX_GAP);
     for (let i = length - 1; i >= stop; i--) {
@@ -98,21 +103,26 @@ function lastEntryIndex(array) {
     return -1;
 }
 
-// The steps i of a loop over first..last (any order) that moves the entry at i to i + offset, whose source i or
-// destination i + offset is in indices (sorted, ascending): the steps that are not no-ops. Ascending.
-function shiftSteps(indices, first, last, offset) {
-    const steps = [];
+/**
+ * The steps i of a loop over first..last (any order) that moves the entry at i to i + offset, whose source i or
+ * destination i + offset is in indices: the steps that are not no-ops.
+ * @param indices - Sorted, ascending.
+ * @returns The steps, ascending.
+ */
+export function shiftSteps(indices: readonly number[], first: number, last: number, offset: number): number[] {
+    const steps: number[] = [];
     let s = 0; // next source
     let d = 0; // next destination
     for (;;) {
-        while (s < indices.length && indices[s] < first) {
+        // indices[s] and indices[d] exist: s and d are below indices.length
+        while (s < indices.length && indices[s]! < first) {
             s++;
         }
-        while (d < indices.length && indices[d] - offset < first) {
+        while (d < indices.length && indices[d]! - offset < first) {
             d++;
         }
-        const source = s < indices.length && indices[s] <= last ? indices[s] : Infinity;
-        const destination = d < indices.length && indices[d] - offset <= last ? indices[d] - offset : Infinity;
+        const source = s < indices.length && indices[s]! <= last ? indices[s]! : Infinity;
+        const destination = d < indices.length && indices[d]! - offset <= last ? indices[d]! - offset : Infinity;
         const step = Math.min(source, destination);
         if (step === Infinity) {
             return steps;
@@ -122,11 +132,14 @@ function shiftSteps(indices, first, last, offset) {
     }
 }
 
-// The steps of a loop over first..last moving the entry for number i to i + offset, where the entry of array at
-// index n holds number n + base: all of them for a short loop, else the shiftSteps of the entries
-function loopSteps(array, base, first, last, offset) {
+/**
+ * The steps of a loop over first..last moving the entry for number i to i + offset, where the entry of array at
+ * index n holds number n + base: all of them for a short loop, else the {@link shiftSteps} of the entries.
+ * @returns The steps, ascending.
+ */
+export function loopSteps(array: SparseArray<unknown>, base: number, first: number, last: number, offset: number): number[] {
     if (last - first < 2 * MAX_GAP) {
-        const steps = [];
+        const steps: number[] = [];
         for (let i = first; i <= last; i++) {
             steps.push(i);
         }
@@ -140,10 +153,12 @@ function loopSteps(array, base, first, last, offset) {
     );
 }
 
-// Like array.splice(start, numDelete, <numInsert holes>), returning a new array, in time proportional to the
-// existing entries (splice moves every index after start)
-function spliceEntries(array, start, numDelete, numInsert) {
-    const result = [];
+/**
+ * Like array.splice(start, numDelete, <numInsert holes>), returning a new array, in time proportional to the
+ * existing entries (splice moves every index after start).
+ */
+export function spliceEntries<T>(array: SparseArray<T>, start: number, numDelete: number, numInsert: number): T[] {
+    const result: T[] = [];
     eachEntry(array, (value, index) => {
         if (index < start) {
             result[index] = value;

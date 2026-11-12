@@ -1,47 +1,140 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+// Conversions between A1-style addresses and row / column numbers, with caches for the column letters and the
+// addresses of the top-left 100x100 cells.
+
 const addressRegex = /^[A-Z]+\d+$/;
 
 // Grid size of an xlsx worksheet (ECMA-376 / Excel limits)
 const MAX_ROWS = 1048576;
 const MAX_COLS = 16384;
+
+/**
+ * A decoded cell address, e.g. `B3` → `{ address: "B3", col: 2, row: 3, $col$row: "$B$3" }`.
+ *
+ * The objects returned for the top-left 100x100 cells are cached and shared between callers: do not mutate them (copy
+ * them, e.g. `{ ...address, sheetName }`).
+ *
+ * `col` and `row` are 1-based. For a string without column letters (`"12"`) or without row digits (`"B"`), the missing
+ * number is `undefined` at runtime, although typed `number`: validate untrusted text first (`validateAddress`).
+ */
+export interface CellAddress {
+    /** The address without `$` signs, e.g. `"B3"`. */
+    readonly address: string;
+    /** 1-based column number (1 to {@link MAX_COLS}). */
+    readonly col: number;
+    /** 1-based row number (1 to {@link MAX_ROWS}). */
+    readonly row: number;
+    /** The absolute form of the address, e.g. `"$B$3"`. */
+    readonly $col$row: string;
+}
+
+/** The bounds of a rectangle of cells: 1-based row and column numbers, inclusive. */
+export interface RangeBounds {
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+}
+
+/** A range decoded by {@link colCache.decode}, e.g. `A1:B2`, normalised so that `tl` is the top-left corner. */
+export interface DecodedRange extends RangeBounds {
+    /** The top-left address, e.g. `"A1"`. */
+    tl: string;
+    /** The bottom-right address, e.g. `"B2"`. */
+    br: string;
+    /** `"tl:br"`, e.g. `"A1:B2"`. */
+    dimensions: string;
+}
+
+/** A cell address that may belong to a worksheet, as returned by {@link colCache.decodeEx}. */
+export type SheetCellAddress = CellAddress & { readonly sheetName?: string };
+
+/** A corner of a {@link DecodedExRange}: a new object, whose `sheetName` key is always present. */
+export interface RangeCorner {
+    address: string;
+    col: number;
+    row: number;
+    $col$row: string;
+    sheetName: string | undefined;
+}
+
+/** A range decoded by {@link colCache.decodeEx}, e.g. `Sheet1!$A$1:$B$2`. */
+export interface DecodedExRange extends RangeBounds {
+    /** The sheet name, unquoted; `undefined` when the reference has none. */
+    sheetName: string | undefined;
+    tl: RangeCorner;
+    br: RangeCorner;
+    /** `"A1:B2"`, without the sheet name nor `$` signs. */
+    dimensions: string;
+}
+
+/** An error reference decoded by {@link colCache.decodeEx}, e.g. `Sheet1!#REF!`. */
+export interface DecodedExError {
+    sheetName?: string;
+    /** The reference, starting with `#`, e.g. `"#REF!"`. */
+    error: string;
+}
+
+/** What {@link colCache.decodeEx} returns: a range, an error reference, or a cell address. */
+export type DecodedEx = DecodedExRange | DecodedExError | SheetCellAddress;
+
+/** The letter of a 26-letter "digit" of a column, from 0 (`A`) to 25 (`Z`). */
+const letter = (i: number): string => String.fromCharCode(65 + i);
+
+/**
+ * Decodes the address of a cell given by its row and column numbers, or by its address.
+ * @returns A {@link CellAddress}, shared with other callers for the top-left 100x100 cells.
+ * @throws Error when the column or the row is out of bounds.
+ */
+function getAddress(row: number, col: number): CellAddress;
+function getAddress(address: string): CellAddress;
+function getAddress(r: number | string, c?: number): CellAddress {
+    if (c) {
+        const address = colCache.n2l(c) + r;
+        return colCache.decodeAddress(address);
+    }
+    // the (address) form; a row number with a column 0 is decoded as a string, as it always was
+    return colCache.decodeAddress(r as string);
+}
+
+/**
+ * The address of a cell (`encode(row, col)` → `"B3"`) or of a range (`encode(top, left, bottom, right)` → `"A1:B2"`).
+ * @throws Error with another number of arguments, or when a column is out of bounds.
+ */
+function encode(row: number, col: number): string;
+function encode(top: number, left: number, bottom: number, right: number): string;
+function encode(...args: [number, number] | [number, number, number, number]): string {
+    switch (args.length) {
+        case 2:
+            return colCache.encodeAddress(args[0], args[1]);
+        case 4:
+            return `${colCache.encodeAddress(args[0], args[1])}:${colCache.encodeAddress(args[2], args[3])}`;
+        default:
+            throw new Error("Can only encode with 2 or 4 arguments");
+    }
+}
+
 // =========================================================================
 // Column Letter to Number conversion
+/**
+ * Conversions between column letters and numbers, and between A1-style addresses and row / column numbers.
+ *
+ * Column numbers are 1-based, from 1 (`A`) to {@link MAX_COLS} (`XFD`); row numbers from 1 to {@link MAX_ROWS}.
+ */
 const colCache = {
+    /** The number of rows of a worksheet (1,048,576). */
     MAX_ROWS,
+    /** The number of columns of a worksheet (16,384, column `XFD`). */
     MAX_COLS,
-    _dictionary: [
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-        "F",
-        "G",
-        "H",
-        "I",
-        "J",
-        "K",
-        "L",
-        "M",
-        "N",
-        "O",
-        "P",
-        "Q",
-        "R",
-        "S",
-        "T",
-        "U",
-        "V",
-        "W",
-        "X",
-        "Y",
-        "Z",
-    ],
+    /** The 26 column letters. */
+    _dictionary: Array.from({ length: 26 }, (_, i) => letter(i)) as readonly string[],
+    /** The number of letters (1 to 3) of the columns filled in `_l2n` / `_n2l` so far. */
     _l2nFill: 0,
-    _l2n: Object.create(null), // no prototype: l2n('constructor') must throw
-    _n2l: [],
-    _level(n) {
+    /** Column letters → number. No prototype: l2n('constructor') must throw. */
+    _l2n: Object.create(null) as Record<string, number>,
+    /** Column number → letters (index 0 unused). */
+    _n2l: [] as string[],
+    /** The number of letters of column n. */
+    _level(n: number): 1 | 2 | 3 {
         if (n <= 26) {
             return 1;
         }
@@ -50,19 +143,20 @@ const colCache = {
         }
         return 3;
     },
-    _fill(level) {
-        let c;
-        let v;
-        let l1;
-        let l2;
-        let l3;
+    /**
+     * Fills the caches with all the columns of up to `level` letters.
+     * @throws Error when level is 4 or more (no such column in Excel).
+     */
+    _fill(level: number): void {
+        let c: string;
+        let v: number;
         let n = 1;
         if (level >= 4) {
             throw new Error("Out of bounds. Excel supports columns from 1 to 16384");
         }
         if (this._l2nFill < 1 && level >= 1) {
             while (n <= 26) {
-                c = this._dictionary[n - 1];
+                c = letter(n - 1);
                 this._n2l[n] = c;
                 this._l2n[c] = n;
                 n++;
@@ -73,9 +167,7 @@ const colCache = {
             n = 27;
             while (n <= 26 + 26 * 26) {
                 v = n - (26 + 1);
-                l1 = v % 26;
-                l2 = Math.floor(v / 26);
-                c = this._dictionary[l2] + this._dictionary[l1];
+                c = letter(Math.floor(v / 26)) + letter(v % 26);
                 this._n2l[n] = c;
                 this._l2n[c] = n;
                 n++;
@@ -86,10 +178,7 @@ const colCache = {
             n = 26 + 26 * 26 + 1;
             while (n <= 16384) {
                 v = n - (26 * 26 + 26 + 1);
-                l1 = v % 26;
-                l2 = Math.floor(v / 26) % 26;
-                l3 = Math.floor(v / (26 * 26));
-                c = this._dictionary[l3] + this._dictionary[l2] + this._dictionary[l1];
+                c = letter(Math.floor(v / (26 * 26))) + letter(Math.floor(v / 26) % 26) + letter(v % 26);
                 this._n2l[n] = c;
                 this._l2n[c] = n;
                 n++;
@@ -97,49 +186,70 @@ const colCache = {
             this._l2nFill = 3;
         }
     },
-    l2n(l) {
+    /**
+     * The number of a column, e.g. `"AB"` → 28.
+     * @param l - Column letters, upper case, without `$`.
+     * @throws Error when l is not a column of Excel (`A` to `XFD`).
+     */
+    l2n(l: string): number {
         if (!this._l2n[l]) {
             this._fill(l.length);
         }
-        if (!this._l2n[l]) {
+        const n = this._l2n[l];
+        if (!n) {
             throw new Error(`Out of bounds. Invalid column letter: ${l}`);
         }
-        return this._l2n[l];
+        return n;
     },
-    n2l(n) {
+    /**
+     * The letters of a column, e.g. 28 → `"AB"`.
+     * @param n - An integer from 1 to {@link MAX_COLS}.
+     * @throws Error when n is out of these bounds.
+     */
+    n2l(n: number): string {
         if (n < 1 || n > MAX_COLS) {
             throw new Error(`${n} is out of bounds. Excel supports columns from 1 to ${MAX_COLS}`);
         }
         if (!this._n2l[n]) {
             this._fill(this._level(n));
         }
-        return this._n2l[n];
+        // filled above for an integer n in bounds (a fractional or NaN n reads undefined, as it always did)
+        return this._n2l[n] as string;
     },
 
     // =========================================================================
     // Address processing
-    _hash: {},
+    /** The decoded addresses of the top-left 100x100 cells, by address and absolute address (`$A$1`). */
+    _hash: Object.create(null) as Record<string, CellAddress>,
 
-    // check if value looks like an address
-    validateAddress(value) {
+    /**
+     * Checks that value looks like a cell address: upper-case column letters then row digits, e.g. `"B3"` (no `$`).
+     * @throws Error when it does not.
+     */
+    validateAddress(value: string): true {
         if (!addressRegex.test(value)) {
             throw new Error(`Invalid Address: ${value}`);
         }
         return true;
     },
 
-    // convert address string into structure
-    decodeAddress(value) {
+    /**
+     * Decodes a cell address such as `"B3"` or `"$B$3"`: the column letters (upper case) then the row digits, `$` signs
+     * ignored; parsing stops at the first other character after both.
+     * @returns A {@link CellAddress}, shared with other callers for the top-left 100x100 cells.
+     * @throws Error when the column is beyond `XFD` or the row beyond {@link MAX_ROWS}.
+     */
+    decodeAddress(value: string): CellAddress {
         const addr = value.length < 5 && this._hash[value];
         if (addr) {
             return addr;
         }
         let hasCol = false;
         let col = "";
-        let colNumber = 0;
+        let colNumber: number | undefined = 0;
         let hasRow = false;
         let row = "";
-        let rowNumber = 0;
+        let rowNumber: number | undefined = 0;
         for (let i = 0, char; i < value.length; i++) {
             char = value.charCodeAt(i);
             // col should before row
@@ -178,13 +288,14 @@ const colCache = {
 
         const address = {
             address: value,
-            col: colNumber,
-            row: rowNumber,
+            // undefined without column letters / row digits (see CellAddress)
+            col: colNumber as number,
+            row: rowNumber as number,
             $col$row: `$${col}$${row}`,
         };
 
         // mem fix - cache only the tl 100x100 square
-        if (colNumber <= 100 && rowNumber <= 100) {
+        if (address.col <= 100 && address.row <= 100) {
             this._hash[value] = address;
             this._hash[address.$col$row] = address;
         }
@@ -192,54 +303,52 @@ const colCache = {
         return address;
     },
 
-    // convert r,c into structure (if only 1 arg, assume r is address string)
-    getAddress(r, c) {
-        if (c) {
-            const address = this.n2l(c) + r;
-            return this.decodeAddress(address);
-        }
-        return this.decodeAddress(r);
-    },
+    getAddress,
 
-    // convert [address], [tl:br] into address structures
-    decode(value) {
+    /**
+     * Decodes a cell address (`"B3"`) or a range (`"A1:B2"`, normalised so that tl is the top-left corner).
+     * @throws Error when a column or a row is out of bounds.
+     */
+    decode(value: string): CellAddress | DecodedRange {
         const parts = value.split(":");
         if (parts.length === 2) {
-            const tl = this.decodeAddress(parts[0]);
-            const br = this.decodeAddress(parts[1]);
-            const result = {
-                top: Math.min(tl.row, br.row),
-                left: Math.min(tl.col, br.col),
-                bottom: Math.max(tl.row, br.row),
-                right: Math.max(tl.col, br.col),
-            };
+            const tl = this.decodeAddress(parts[0]!);
+            const br = this.decodeAddress(parts[1]!);
+            const top = Math.min(tl.row, br.row);
+            const left = Math.min(tl.col, br.col);
+            const bottom = Math.max(tl.row, br.row);
+            const right = Math.max(tl.col, br.col);
             // reconstruct tl, br and dimensions
-            result.tl = this.n2l(result.left) + result.top;
-            result.br = this.n2l(result.right) + result.bottom;
-            result.dimensions = `${result.tl}:${result.br}`;
-            return result;
+            const tlAddress = this.n2l(left) + top;
+            const brAddress = this.n2l(right) + bottom;
+            return { top, left, bottom, right, tl: tlAddress, br: brAddress, dimensions: `${tlAddress}:${brAddress}` };
         }
         return this.decodeAddress(value);
     },
 
-    // convert [sheetName!][$]col[$]row[[$]col[$]row] into address or range structures
-    decodeEx(value) {
-        const groups = value.match(/(?:(?:(?:'((?:[^']|'')*)')|([^'^ !]*))!)?(.*)/);
+    /**
+     * Decodes a reference `[sheetName!][$]col[$]row[:[$]col[$]row]`: a cell address or a range, optionally preceded by a
+     * sheet name (quoted with `'` when it contains spaces, `''` for a quote), or an error such as `Sheet1!#REF!`.
+     * @throws Error when a column or a row is out of bounds.
+     */
+    decodeEx(value: string): DecodedEx {
+        // matches every string: all of its groups are optional
+        const groups = value.match(/(?:(?:(?:'((?:[^']|'')*)')|([^'^ !]*))!)?(.*)/)!;
 
         const sheetName = groups[1] || groups[2]; // Qouted and unqouted groups
-        const reference = groups[3]; // Remaining address
+        const reference = groups[3] ?? ""; // Remaining address
 
         const parts = reference.split(":");
         if (parts.length > 1) {
-            let tl = this.decodeAddress(parts[0]);
-            let br = this.decodeAddress(parts[1]);
+            const tl = this.decodeAddress(parts[0]!);
+            const br = this.decodeAddress(parts[1]!);
             const top = Math.min(tl.row, br.row);
             const left = Math.min(tl.col, br.col);
             const bottom = Math.max(tl.row, br.row);
             const right = Math.max(tl.col, br.col);
 
-            tl = this.n2l(left) + top;
-            br = this.n2l(right) + bottom;
+            const tlAddress = this.n2l(left) + top;
+            const brAddress = this.n2l(right) + bottom;
 
             return {
                 top,
@@ -247,15 +356,15 @@ const colCache = {
                 bottom,
                 right,
                 sheetName,
-                tl: { address: tl, col: left, row: top, $col$row: `$${this.n2l(left)}$${top}`, sheetName },
+                tl: { address: tlAddress, col: left, row: top, $col$row: `$${this.n2l(left)}$${top}`, sheetName },
                 br: {
-                    address: br,
+                    address: brAddress,
                     col: right,
                     row: bottom,
                     $col$row: `$${this.n2l(right)}$${bottom}`,
                     sheetName,
                 },
-                dimensions: `${tl}:${br}`,
+                dimensions: `${tlAddress}:${brAddress}`,
             };
         }
         if (reference.startsWith("#")) {
@@ -266,29 +375,29 @@ const colCache = {
         return sheetName ? { sheetName, ...address } : address;
     },
 
-    // convert row,col into address string
-    encodeAddress(row, col) {
+    /**
+     * The address of a cell, e.g. (3, 2) → `"B3"`.
+     * @throws Error when col is out of bounds.
+     */
+    encodeAddress(row: number, col: number): string {
         return colCache.n2l(col) + row;
     },
 
-    // convert row,col into string address or t,l,b,r into range
-    encode() {
-        switch (arguments.length) {
-            case 2:
-                return colCache.encodeAddress(arguments[0], arguments[1]);
-            case 4:
-                return `${colCache.encodeAddress(arguments[0], arguments[1])}:${colCache.encodeAddress(arguments[2], arguments[3])}`;
-            default:
-                throw new Error("Can only encode with 2 or 4 arguments");
-        }
-    },
+    encode,
 
-    // return true if address is contained within range
-    inRange(range, address) {
+    /**
+     * Whether a cell is in a rectangle.
+     * @param range - `[left, top, (ignored), right, bottom]`.
+     * @param address - `[col, row]`.
+     */
+    inRange(range: readonly [number, number, unknown, number, number], address: readonly [number, number]): boolean {
         const [left, top, , right, bottom] = range;
         const [col, row] = address;
         return col >= left && col <= right && row >= top && row <= bottom;
     },
 };
+
+/** The type of the {@link colCache} object. */
+export type ColCache = typeof colCache;
 
 export default colCache;

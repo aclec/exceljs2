@@ -1,69 +1,92 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import * as Stream from "stream";
+import { EventEmitter } from "events";
+import { Duplex } from "stream";
 
-import utils from "./utils";
+import { nop } from "./utils";
 import StringBuf from "./string-buf";
+
+/** The callback of {@link StreamBuf.write}. */
+type WriteCallback = (error?: Error | null) => void;
 
 // =============================================================================
 // data chunks - encapsulating incoming data
-class StringChunk {
-    constructor(data, encoding) {
+interface Chunk {
+    /** The size in bytes. */
+    readonly length: number;
+    /** Copies the bytes [sourceStart, sourceEnd) to target at targetOffset. */
+    copy(target: Uint8Array, targetOffset: number, sourceStart: number, sourceEnd: number): number;
+    toBuffer(): Buffer;
+}
+
+/** A string, or a String object. */
+type StringLike = string | { valueOf(): string };
+
+class StringChunk implements Chunk {
+    private _data: StringLike | ArrayBuffer;
+    private _encoding: BufferEncoding | undefined;
+    private _buffer: Buffer | undefined;
+
+    constructor(data: StringLike | ArrayBuffer, encoding: BufferEncoding | undefined) {
         this._data = data;
         this._encoding = encoding;
     }
 
-    get length() {
+    get length(): number {
         return this.toBuffer().length;
     }
 
     // copy to target buffer
-    copy(target, targetOffset, offset, length) {
-        return this.toBuffer().copy(target, targetOffset, offset, length);
+    copy(target: Uint8Array, targetOffset: number, sourceStart: number, sourceEnd: number): number {
+        return this.toBuffer().copy(target, targetOffset, sourceStart, sourceEnd);
     }
 
-    toBuffer() {
+    toBuffer(): Buffer {
         if (!this._buffer) {
-            this._buffer = Buffer.from(this._data, this._encoding);
+            const data = this._data;
+            // Buffer.from(arrayBuffer, encoding) took the encoding as a byte offset, read as 0
+            this._buffer = data instanceof ArrayBuffer ? Buffer.from(data) : Buffer.from(data, this._encoding);
         }
         return this._buffer;
     }
 }
 
-class StringBufChunk {
-    constructor(data) {
+class StringBufChunk implements Chunk {
+    private _data: StringBuf;
+
+    constructor(data: StringBuf) {
         this._data = data;
     }
 
-    get length() {
+    get length(): number {
         return this._data.length;
     }
 
     // copy to target buffer
-    copy(target, targetOffset, offset, length) {
-        return this._data._buf.copy(target, targetOffset, offset, length);
+    copy(target: Uint8Array, targetOffset: number, sourceStart: number, sourceEnd: number): number {
+        return this._data.buffer.copy(target, targetOffset, sourceStart, sourceEnd);
     }
 
-    toBuffer() {
+    toBuffer(): Buffer {
         return this._data.toBuffer();
     }
 }
 
-class BufferChunk {
-    constructor(data) {
+class BufferChunk implements Chunk {
+    private _data: Buffer;
+
+    constructor(data: Buffer) {
         this._data = data;
     }
 
-    get length() {
+    get length(): number {
         return this._data.length;
     }
 
     // copy to target buffer
-    copy(target, targetOffset, offset, length) {
-        this._data.copy(target, targetOffset, offset, length);
+    copy(target: Uint8Array, targetOffset: number, sourceStart: number, sourceEnd: number): number {
+        return this._data.copy(target, targetOffset, sourceStart, sourceEnd);
     }
 
-    toBuffer() {
+    toBuffer(): Buffer {
         return this._data;
     }
 }
@@ -71,17 +94,22 @@ class BufferChunk {
 // =============================================================================
 // ReadWriteBuf - a single buffer supporting simple read-write
 class ReadWriteBuf {
-    constructor(size) {
+    size: number;
+    // the buffer
+    buffer: Buffer;
+    // read index
+    iRead: number;
+    // write index
+    iWrite: number;
+
+    constructor(size: number) {
         this.size = size;
-        // the buffer
         this.buffer = Buffer.alloc(size);
-        // read index
         this.iRead = 0;
-        // write index
         this.iWrite = 0;
     }
 
-    toBuffer() {
+    toBuffer(): Buffer {
         if (this.iRead === 0 && this.iWrite === this.size) {
             return this.buffer;
         }
@@ -91,19 +119,20 @@ class ReadWriteBuf {
         return buf;
     }
 
-    get length() {
+    get length(): number {
         return this.iWrite - this.iRead;
     }
 
-    get eod() {
+    get eod(): boolean {
         return this.iRead === this.iWrite;
     }
 
-    get full() {
+    get full(): boolean {
         return this.iWrite === this.size;
     }
 
-    read(size) {
+    // size bytes from the buffer (all of them when undefined or larger than the content); null for 0
+    read(size?: number): Buffer | null {
         let buf;
         // read size bytes from buffer and return buffer
         if (size === 0) {
@@ -120,14 +149,14 @@ class ReadWriteBuf {
 
         // otherwise return a chunk
         buf = Buffer.alloc(size);
+        // copies [iRead, size), not [iRead, iRead + size): kept as it always was (StreamBuf#read(size) is unused)
         this.buffer.copy(buf, 0, this.iRead, size);
         this.iRead += size;
         return buf;
     }
 
-    write(chunk, offset, length) {
-        // write as many bytes from data from optional source offset
-        // and return number of bytes written
+    // writes as many bytes of chunk from offset as fit (at most length); returns the number of bytes written
+    write(chunk: Chunk, offset: number, length: number): number {
         const size = Math.min(length, this.size - this.iWrite);
         chunk.copy(this.buffer, this.iWrite, offset, offset + size);
         this.iWrite += size;
@@ -135,50 +164,71 @@ class ReadWriteBuf {
     }
 }
 
+/** Options of a {@link StreamBuf}. */
+export interface StreamBufOptions {
+    /** The size of each internal buffer, in bytes (1 MiB by default). */
+    bufSize?: number;
+    /** Batch mode: fill a buffer completely before passing the data on to the pipes. */
+    batch?: boolean;
+}
+
 // =============================================================================
-// StreamBuf - a multi-purpose read-write stream
-//  As MemBuf - write as much data as you like. Then call toBuffer() to consolidate
-//  As StreamHub - pipe to multiple writables
-//  As readable stream - feed data into the writable part and have some other code read from it.
-
-// Note: Not sure why but StreamBuf does not like JS "class" sugar. It fails the
-// integration tests
-const StreamBuf = function (options) {
-    options = options || {};
-    this.bufSize = options.bufSize || 1024 * 1024;
-    this.buffers = [];
-
+/**
+ * A multi-purpose read-write stream:
+ * - as a memory buffer: write as much data as you like, then call toBuffer() (or read()) to consolidate it;
+ * - as a stream hub: pipe it to several writables;
+ * - as a readable stream: feed data into the writable part and have some other code read from it.
+ *
+ * It implements the read / write / pipe methods of Duplex itself and does not use Duplex's flow control: write() and
+ * end() emit 'data', 'readable' and 'finish' directly, and the listener methods (on, addListener, removeListener, off,
+ * removeAllListeners) are EventEmitter's, so that adding a 'data' or 'readable' listener does not resume the stream nor
+ * read (drain) its data. The Duplex state exists (the constructor builds it): destroy() works and emits 'close'.
+ * Async iteration is not supported. write() takes strings, Buffers, ArrayBuffers and StringBufs.
+ */
+class StreamBuf extends Duplex {
+    /** The size of each internal buffer, in bytes. */
+    bufSize: number;
+    /** The data written and not read yet. */
+    buffers: ReadWriteBuf[];
     // batch mode fills a buffer completely before passing the data on
     // to pipes or 'readable' event listeners
-    this.batch = options.batch || false;
-
-    this.corked = false;
+    batch: boolean;
+    corked: boolean;
     // where in the current writable buffer we're up to
-    this.inPos = 0;
-
+    inPos: number;
     // where in the current readable buffer we've read up to
-    this.outPos = 0;
-
+    outPos: number;
     // consuming pipe streams go here
-    this.pipes = [];
-
+    pipes: NodeJS.WritableStream[];
     // controls emit('data')
-    this.paused = false;
+    paused: boolean;
+    encoding: BufferEncoding | null;
 
-    this.encoding = null;
-};
+    constructor(options?: StreamBufOptions) {
+        super();
+        options = options || {};
+        this.bufSize = options.bufSize || 1024 * 1024;
+        this.buffers = [];
+        this.batch = options.batch || false;
+        this.corked = false;
+        this.inPos = 0;
+        this.outPos = 0;
+        this.pipes = [];
+        this.paused = false;
+        this.encoding = null;
+    }
 
-utils.inherits(StreamBuf, Stream.Duplex, {
-    toBuffer() {
+    /** All the data written and not read yet, in one Buffer; null when nothing was written. */
+    toBuffer(): Buffer | null {
         switch (this.buffers.length) {
             case 0:
                 return null;
             case 1:
-                return this.buffers[0].toBuffer();
+                return this.buffers[0]!.toBuffer();
             default:
                 return Buffer.concat(this.buffers.map((rwBuf) => rwBuf.toBuffer()));
         }
-    },
+    }
 
     // writable
     // event drain - if write returns false (which it won't), indicates when safe to write again.
@@ -187,20 +237,18 @@ utils.inherits(StreamBuf, Stream.Duplex, {
     // unpipe(src) - unpipe() has been called on readable
     // error - duh
 
-    _getWritableBuffer() {
-        if (this.buffers.length) {
-            const last = this.buffers[this.buffers.length - 1];
-            if (!last.full) {
-                return last;
-            }
+    private _getWritableBuffer(): ReadWriteBuf {
+        const last = this.buffers[this.buffers.length - 1];
+        if (last && !last.full) {
+            return last;
         }
         const buf = new ReadWriteBuf(this.bufSize);
         this.buffers.push(buf);
         return buf;
-    },
+    }
 
-    async _pipe(chunk) {
-        const write = function (pipe) {
+    private async _pipe(chunk: { toBuffer(): Buffer }): Promise<void> {
+        const write = function (pipe: NodeJS.WritableStream): Promise<void> {
             return new Promise((resolve) => {
                 pipe.write(chunk.toBuffer(), () => {
                     resolve();
@@ -208,8 +256,9 @@ utils.inherits(StreamBuf, Stream.Duplex, {
             });
         };
         await Promise.all(this.pipes.map(write));
-    },
-    _writeToBuffers(chunk) {
+    }
+
+    private _writeToBuffers(chunk: Chunk): void {
         let inPos = 0;
         const inLen = chunk.length;
         while (inPos < inLen) {
@@ -219,16 +268,25 @@ utils.inherits(StreamBuf, Stream.Duplex, {
             // write some data
             inPos += buffer.write(chunk, inPos, inLen - inPos);
         }
-    },
-    async write(data, encoding, callback) {
+    }
+
+    /**
+     * Writes data: to the pipes (once they took it, callback is called), else to the internal buffers ('data' and
+     * 'readable' are emitted; callback is not called).
+     * @param data - A string (or String), a Buffer, an ArrayBuffer or a StringBuf.
+     * @param encoding - The encoding of a string (utf8 by default), or the callback.
+     * @returns Always true (no backpressure).
+     * @throws Error when data is of another type.
+     */
+    override write(data: unknown, encoding?: BufferEncoding | WriteCallback, callback?: WriteCallback): boolean {
         if (encoding instanceof Function) {
             callback = encoding;
             encoding = "utf8";
         }
-        callback = callback || utils.nop;
+        const done = callback || nop;
 
         // encapsulate data into a chunk
-        let chunk;
+        let chunk: Chunk;
         if (data instanceof StringBuf) {
             chunk = new StringBufChunk(data);
         } else if (data instanceof Buffer) {
@@ -244,14 +302,13 @@ utils.inherits(StreamBuf, Stream.Duplex, {
             if (this.batch) {
                 this._writeToBuffers(chunk);
                 while (!this.corked && this.buffers.length > 1) {
-                    this._pipe(this.buffers.shift());
+                    void this._pipe(this.buffers.shift()!);
                 }
             } else if (!this.corked) {
-                await this._pipe(chunk);
-                callback();
+                void this._pipe(chunk).then(() => done());
             } else {
                 this._writeToBuffers(chunk);
-                process.nextTick(callback);
+                process.nextTick(done);
             }
         } else {
             if (!this.paused) {
@@ -263,27 +320,38 @@ utils.inherits(StreamBuf, Stream.Duplex, {
         }
 
         return true;
-    },
-    cork() {
+    }
+
+    override cork(): void {
         this.corked = true;
-    },
-    _flush(/* destination */) {
+    }
+
+    // passes the buffered data on to the pipes, if any
+    private _flush(): void {
         // if we have comsumers...
         if (this.pipes.length) {
             // and there's stuff not written
-            while (this.buffers.length) {
-                this._pipe(this.buffers.shift());
+            let buffer;
+            while ((buffer = this.buffers.shift())) {
+                void this._pipe(buffer);
             }
         }
-    },
-    uncork() {
+    }
+
+    override uncork(): void {
         this.corked = false;
         this._flush();
-    },
-    end(chunk, encoding, callback) {
-        const writeComplete = (error) => {
+    }
+
+    /**
+     * Writes the last chunk if any, then passes the buffered data on to the pipes, ends them and emits 'finish'.
+     * With a chunk and no pipe, 'finish' is not emitted (write() does not call back without a pipe).
+     * @throws Error when chunk is not of a type write() takes; a callback must be the third argument (`end(cb)` throws).
+     */
+    override end(chunk?: unknown, encoding?: BufferEncoding | WriteCallback, callback?: WriteCallback): this {
+        const writeComplete = (error?: Error | null): void => {
             if (error) {
-                callback(error);
+                callback?.(error);
             } else {
                 this._flush();
                 this.pipes.forEach((pipe) => {
@@ -297,7 +365,8 @@ utils.inherits(StreamBuf, Stream.Duplex, {
         } else {
             writeComplete();
         }
-    },
+        return this;
+    }
 
     // readable
     // event readable - some data is now available
@@ -305,14 +374,16 @@ utils.inherits(StreamBuf, Stream.Duplex, {
     // event end - no more data
     // event close - optional, indicates upstream close
     // event error - duh
-    read(size) {
-        let buffers;
+    /** Reads (and removes) up to size bytes, or all the data when size is 0 or undefined. */
+    override read(size?: number): Buffer {
+        let buffers: Buffer[];
         // read min(buffer, size || infinity)
         if (size) {
             buffers = [];
-            while (size && this.buffers.length && !this.buffers[0].eod) {
-                const first = this.buffers[0];
-                const buffer = first.read(size);
+            let first;
+            while (size && (first = this.buffers[0]) && !first.eod) {
+                // not null: size is not 0
+                const buffer = first.read(size)!;
                 size -= buffer.length;
                 buffers.push(buffer);
                 if (first.eod && first.full) {
@@ -325,41 +396,73 @@ utils.inherits(StreamBuf, Stream.Duplex, {
         buffers = this.buffers.map((buf) => buf.toBuffer()).filter(Boolean);
         this.buffers = [];
         return Buffer.concat(buffers);
-    },
-    setEncoding(encoding) {
+    }
+
+    /** Records the encoding (not used: read() and 'data' give Buffers). */
+    override setEncoding(encoding: BufferEncoding): this {
         // causes stream.read or stream.on('data) to return strings of encoding instead of Buffer objects
         this.encoding = encoding;
-    },
-    pause() {
+        return this;
+    }
+
+    /** Stops the 'data' events (the data is still buffered). */
+    override pause(): this {
         this.paused = true;
-    },
-    resume() {
+        return this;
+    }
+
+    override resume(): this {
         this.paused = false;
-    },
-    isPaused() {
+        return this;
+    }
+
+    override isPaused(): boolean {
         return !!this.paused;
-    },
-    pipe(destination) {
+    }
+
+    /** Adds a destination; when not paused, passes the buffered data on to it and ends (see end()). */
+    override pipe<T extends NodeJS.WritableStream>(destination: T): T {
         // add destination to pipe list & write current buffer
         this.pipes.push(destination);
         if (!this.paused && this.buffers.length) {
             this.end();
         }
         return destination;
-    },
-    unpipe(destination) {
+    }
+
+    override unpipe(destination?: NodeJS.WritableStream): this {
         // remove destination from pipe list
         this.pipes = this.pipes.filter((pipe) => pipe !== destination);
-    },
-    unshift(/* chunk */) {
+        return this;
+    }
+
+    /** @throws Error always: not implemented. */
+    override unshift(): never {
         // some numpty has read some data that's not for them and they want to put it back!
         // Might implement this some day
         throw new Error("Not Implemented");
-    },
-    wrap(/* stream */) {
+    }
+
+    /** @throws Error always: not implemented. */
+    override wrap(): never {
         // not implemented
         throw new Error("Not Implemented");
-    },
-});
+    }
+
+    /**
+     * @throws Error always: not implemented (Readable's iterator would loop forever: read() never returns null).
+     */
+    override [Symbol.asyncIterator](): never {
+        throw new Error("Not Implemented");
+    }
+}
+
+// Readable's listener methods drive its flow state: on('data') calls resume() (undoing pause()), on('readable') calls
+// read(0) on the next tick (which returns, so drains, all the data here), removeListener can resume. StreamBuf emits its
+// events itself, as when it did not construct the Duplex state: it uses the plain EventEmitter methods.
+const emitterMethods = ["on", "addListener", "removeListener", "off", "removeAllListeners"] as const;
+for (const name of emitterMethods) {
+    Object.defineProperty(StreamBuf.prototype, name, Object.getOwnPropertyDescriptor(EventEmitter.prototype, name)!);
+}
 
 export default StreamBuf;
