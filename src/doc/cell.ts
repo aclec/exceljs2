@@ -982,7 +982,7 @@ class MergeValue {
 
 /** The text of a formula result: the code of an error, the `toString()` of another value. */
 function resultText(result: FormulaResult): string {
-    return typeof result === "object" && "error" in result ? result.error : String(result);
+    return typeof result === "object" && "error" in result ? result.error : result.toString();
 }
 
 /** A cell reference or range in a formula (for `dependencies`), with an optional sheet name. */

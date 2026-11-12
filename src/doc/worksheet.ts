@@ -1336,8 +1336,8 @@ class Worksheet {
      */
     addPivotTable(model: PivotTableInput): PivotTable {
         console.warn(
-            `Warning: Pivot Table support is experimental.
-Please leave feedback at https://github.com/exceljs/exceljs/discussions/2575`
+            // (the message has a space at the end of its first line)
+            "Warning: Pivot Table support is experimental. \nPlease leave feedback at https://github.com/exceljs/exceljs/discussions/2575"
         );
 
         const pivotTable = makePivotTable(this, model);

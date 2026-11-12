@@ -17,7 +17,7 @@ const DEFAULT_COLUMN_WIDTH = 9;
  */
 export interface ColumnDefn {
     /** The header: one row (a string) or several (an array), written in the first rows of the column. */
-    header?: string | readonly string[] | undefined;
+    header?: string | string[] | undefined;
     /** The key of the column, for the rows set from objects (`row.values = { key: value }`). */
     key?: string | undefined;
     /** The width in characters (default {@link DEFAULT_COLUMN_WIDTH}). */
@@ -86,7 +86,7 @@ class Column {
     /** 1-based column number. */
     _number: number;
     // the fields below are set by the defn setter (not at all when the constructor gets defn false)
-    declare _header?: string | readonly string[] | undefined;
+    declare _header?: string | string[] | undefined;
     declare _key?: string | undefined;
     declare _width?: number | undefined;
     /** The width was not given: the default width is not written when the sheet default is another one. */
@@ -185,12 +185,12 @@ class Column {
     }
 
     /** The header: one row (a string) or several (an array). */
-    get header(): string | readonly string[] | undefined {
+    get header(): string | string[] | undefined {
         return this._header;
     }
 
     /** Sets the header, and writes it in the first rows of the column. */
-    set header(value: string | readonly string[] | undefined) {
+    set header(value: string | string[] | undefined) {
         if (value !== undefined) {
             this._header = value;
             this.headers.forEach((text, index) => {
@@ -453,18 +453,20 @@ class Column {
     static rangesFromModel(cols: readonly ColModel[] | null | undefined): ColumnRanges {
         const ranges: ColumnRange[] = [];
         let count = 1;
-        const sorted = (cols || []).slice().sort((pre, next) => pre.min - next.min);
-        for (const col of sorted) {
-            const min = Math.ceil(col.min);
-            if (min > count) {
-                count = min;
-            }
-            const max = Math.floor(col.max);
-            if (count <= max) {
-                ranges.push({ min: count, max, defn: col });
-                count = max + 1;
-            }
-        }
+        (cols || [])
+            .slice()
+            .sort((pre, next) => pre.min - next.min)
+            .forEach((col) => {
+                const min = Math.ceil(col.min);
+                if (min > count) {
+                    count = min;
+                }
+                const max = Math.floor(col.max);
+                if (count <= max) {
+                    ranges.push({ min: count, max, defn: col });
+                    count = max + 1;
+                }
+            });
         return { ranges, length: count - 1 };
     }
 
