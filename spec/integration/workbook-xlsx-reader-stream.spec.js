@@ -595,6 +595,47 @@ describe("WorkbookReader (stream)", () => {
         ]);
     });
 
+    describe("hyperlinks: emit with read()", () => {
+        const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+        // relationships that do not compress well: the part spans many chunks of the zip input
+        async function hyperlinksBuffer(count) {
+            let rels = '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+            for (let i = 0; i < count; i++) {
+                const target = require("crypto").randomBytes(24).toString("hex");
+                rels += `<Relationship Id="rId${i}" Type="${REL}" Target="https://example.com/${target}" TargetMode="External"/>`;
+            }
+            const parts = unzipParts(await baseWorkbookBuffer());
+            parts["xl/worksheets/_rels/sheet1.xml.rels"] = `${rels}</Relationships>`;
+            return zipParts(parts);
+        }
+
+        async function readHyperlinks(buffer, startRead) {
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer, 64 * 1024), { hyperlinks: "emit" });
+            let count = 0;
+            await new Promise((resolve, reject) => {
+                reader.on("hyperlinks", (hyperlinks) => {
+                    hyperlinks.on("hyperlink", () => count++);
+                    if (startRead) {
+                        // as in the README
+                        hyperlinks.read();
+                    }
+                });
+                reader.on("worksheet", (worksheet) => worksheet.on("row", () => {}));
+                reader.on("end", resolve);
+                reader.on("error", reject);
+                reader.read();
+            });
+            return count;
+        }
+
+        it("reads all the relationships of a large part before moving on", async () => {
+            const buffer = await hyperlinksBuffer(10000);
+            expect(await readHyperlinks(buffer, true)).to.equal(10000);
+            // the reader reads them when the listener does not
+            expect(await readHyperlinks(buffer, false)).to.equal(10000);
+        });
+    });
+
     it("merges options passed to read() with the defaults", async () => {
         const buffer = await baseWorkbookBuffer();
         const reader = new ExcelJS.stream.xlsx.WorkbookReader();
