@@ -55,5 +55,15 @@ describe("CfvoXform", () => {
             "",
         ]);
         expect(CfvoXform.toValue(undefined)).to.equal(undefined);
+        expect(["1.", "1.e5", "0001", "1E+10", "-.5e-3"].map(CfvoXform.toValue)).to.deep.equal([1, 100000, 1, 1e10, -0.0005]);
+        expect([".", "1e", "--1", "1.5.5", "e5", "1.5E"].map(CfvoXform.toValue)).to.deep.equal([".", "1e", "--1", "1.5.5", "e5", "1.5E"]);
+    });
+
+    it("tells long non-numeric values from numbers in linear time", () => {
+        for (const text of [`${"1".repeat(50000)}x`, `1.${"1".repeat(50000)}x`, `1E${"1".repeat(50000)}x`]) {
+            const start = Date.now();
+            expect(CfvoXform.toValue(text)).to.equal(text);
+            expect(Date.now() - start).to.be.below(50);
+        }
     });
 });
