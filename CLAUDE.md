@@ -1,7 +1,8 @@
-# CLAUDE.md — exceljs (maintained fork, v5)
+# CLAUDE.md — @aclec/exceljs2 (maintained fork of exceljs, v5)
 
-Read/write `.xlsx` and `.csv`. Fork of the unmaintained `exceljs/exceljs` (upstream frozen at `5bed18b`, 2024-01). Must run in **browsers**
-(bundled `dist/`), **Node >= 22.12** and **Bun >= 1.4**. CommonJS source, no transpilation of `lib/`.
+Published on npm as `@aclec/exceljs2` (`exceljs` on npm is the dead upstream). Read/write `.xlsx` and `.csv`. Fork of the unmaintained
+`exceljs/exceljs` (upstream frozen at `5bed18b`, 2024-01). Must run in **browsers** (bundled `dist/`), **Node >= 22.12** and **Bun >= 1.4**.
+CommonJS source, no transpilation of `lib/`.
 
 ## Commands (bun only — never npm/yarn; no lockfile other than `bun.lock`)
 

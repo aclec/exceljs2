@@ -1,17 +1,24 @@
 {
-    "name": "exceljs",
+    "name": "@aclec/exceljs2",
     "version": "5.0.0",
-    "description": "Excel Workbook Manager - Read and Write xlsx and csv Files.",
+    "description": "Excel Workbook Manager - Read and Write xlsx and csv Files. Maintained fork of exceljs: up-to-date dependencies and security fixes.",
     "private": false,
     "license": "MIT",
     "author": {
         "name": "Guyon Roche",
         "email": "guyon@live.com"
     },
+    "contributors": [
+        "aclec (maintainer of the fork)"
+    ],
     "repository": {
         "type": "git",
-        "url": "https://github.com/exceljs/exceljs.git"
+        "url": "git+https://github.com/aclec/exceljs2.git"
     },
+    "bugs": {
+        "url": "https://github.com/aclec/exceljs2/issues"
+    },
+    "homepage": "https://github.com/aclec/exceljs2#readme",
     "engines": {
         "node": ">=22.12.0"
     },
@@ -138,5 +145,8 @@
         "glob": "^14.0.5",
         "minimatch": "^11.0.8"
     },
-    "trustedDependencies": []
+    "trustedDependencies": [],
+    "publishConfig": {
+        "access": "public"
+    }
 }

@@ -41,7 +41,7 @@ const BUNDLES = [
     { entry: "lib/exceljs.bare.js", name: "exceljs.bare" },
 ];
 
-const banner = `/*! ExcelJS v${pkg.version} | ${pkg.license} License | https://github.com/exceljs/exceljs */`;
+const banner = `/*! ExcelJS v${pkg.version} | ${pkg.license} License | https://github.com/aclec/exceljs2 (fork of exceljs/exceljs) */`;
 const footer = [
     'if (typeof module === "object" && module.exports) { module.exports = ExcelJS; }',
     'else if (typeof define === "function" && define.amd) { define([], function () { return ExcelJS; }); }',

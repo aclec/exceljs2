@@ -3,6 +3,16 @@
 Version 5.0 modernises the runtime requirements and hardens the parsing of untrusted files. Most of the API is unchanged; the sections below
 list everything that can break an existing application. See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 
+## Package name
+
+5.0 is published by the maintained fork as **`@aclec/exceljs2`** (the `exceljs` name on npm belongs to the original, unmaintained project).
+Either change your imports to `@aclec/exceljs2`, or keep `require('exceljs')` / `import 'exceljs'` unchanged by installing the fork under an
+alias:
+
+```shell
+npm install exceljs@npm:@aclec/exceljs2
+```
+
 ## Runtime requirements
 
 |          | ExcelJS 4.x                               | ExcelJS 5.0                       |

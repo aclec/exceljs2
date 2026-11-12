@@ -30,15 +30,30 @@ Reverse engineered from Excel spreadsheet files as a project.
 
 # Installation
 
-ExcelJS is published on npm and works with any package manager:
+This fork is published on npm as **`@aclec/exceljs2`** and works with any package manager:
 
 ```shell
-npm install exceljs
+npm install @aclec/exceljs2
 # or
-bun add exceljs
+bun add @aclec/exceljs2
 # or
-pnpm add exceljs
-yarn add exceljs
+pnpm add @aclec/exceljs2
+yarn add @aclec/exceljs2
+```
+
+```javascript
+const ExcelJS = require('@aclec/exceljs2');
+// or
+import ExcelJS from '@aclec/exceljs2';
+```
+
+**Drop-in replacement for `exceljs`.** The examples in this document use `require('exceljs')`. To keep existing code and
+imports unchanged, install the fork under the `exceljs` name with a package alias:
+
+```shell
+npm install exceljs@npm:@aclec/exceljs2
+# or
+bun add exceljs@npm:@aclec/exceljs2
 ```
 
 Bun is only used to develop ExcelJS itself; it is not required to use the package.

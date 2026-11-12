@@ -3,7 +3,7 @@
 // also checks that the published entry point and its types line up.
 import { PassThrough } from "stream";
 import { expect } from "chai";
-import * as ExcelJS from "exceljs";
+import * as ExcelJS from "@aclec/exceljs2";
 
 describe("typescript", () => {
     it("can create and buffer xlsx", async () => {
