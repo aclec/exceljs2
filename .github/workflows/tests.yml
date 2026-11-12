@@ -64,6 +64,8 @@ jobs:
             matrix:
                 bun-version: [1.4.4, latest]
         runs-on: ubuntu-latest
+        # the pinned version gates the build; "latest" is an early-warning canary for upcoming Bun releases
+        continue-on-error: ${{ matrix.bun-version == 'latest' }}
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
