@@ -497,7 +497,7 @@ describe("hostile input", function () {
             const names = [0, 1, 2].map((i) => `<definedName name="n${i}">Sheet1!$A$1:$CV$1000</definedName>`).join("");
             const wb = await load(await tamper(await baseWorkbookBuffer(), withDefinedNames(names)));
             // 100,000 cells: the first name uses the whole budget, the others are kept as rectangles
-            expect(Object.keys(wb.definedNames.rangeMap)).to.deep.equal(["n1", "n2"]);
+            expect([...wb.definedNames.rangeMap.keys()]).to.deep.equal(["n1", "n2"]);
             expect(wb.getWorksheet("Sheet1").getCell("CV1000").names).to.deep.equal(["n0", "n1", "n2"]);
             expect(wb.definedNames.model).to.deep.equal(["n0", "n1", "n2"].map((name) => ({ name, ranges: ["Sheet1!$A$1:$CV$1000"] })));
         });

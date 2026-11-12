@@ -130,20 +130,23 @@ function subtractRectangle(range: LargeNameRange, cut: LargeNameRange): LargeNam
  * {@link LargeNameRange}): removing cells from it cuts it into the rectangles that remain.
  */
 class DefinedNames {
-    /** Name → its cells. No prototype: names come from files. */
-    matrixMap: Record<string, CellMatrix<{ mark?: boolean }>>;
-    /** Name → its ranges too large to expand. No prototype: names come from files. */
-    rangeMap: Record<string, LargeNameRange[]>;
+    /** Name → its cells (a Map: names come from files). */
+    matrixMap: Map<string, CellMatrix<{ mark?: boolean }>>;
+    /** Name → its ranges too large to expand (a Map: names come from files). */
+    rangeMap: Map<string, LargeNameRange[]>;
 
     constructor() {
-        this.matrixMap = Object.create(null) as Record<string, CellMatrix<{ mark?: boolean }>>;
-        // name -> [{sheetName, top, left, bottom, right}] for ranges too large to expand
-        this.rangeMap = Object.create(null) as Record<string, LargeNameRange[]>;
+        this.matrixMap = new Map();
+        this.rangeMap = new Map();
     }
 
     /** The cells of a name (created empty when the name has none). */
     getMatrix(name: string): CellMatrix<{ mark?: boolean }> {
-        const matrix = this.matrixMap[name] || (this.matrixMap[name] = new CellMatrix());
+        let matrix = this.matrixMap.get(name);
+        if (!matrix) {
+            matrix = new CellMatrix();
+            this.matrixMap.set(name, matrix);
+        }
         return matrix;
     }
 
@@ -160,34 +163,39 @@ class DefinedNames {
     /**
      * Adds a cell or a range to a name: a range larger than the budget (and than 100,000 cells) is kept as a rectangle.
      * @param budget - the cells still allowed to be expanded, shared by several calls (decremented)
+     * @throws Error for a range whose bounds are not rows and columns of the grid, or are reversed
      */
     addEx(location: NameLocation, name: string, budget: ExpansionBudget = { cells: MAX_EXPANDED_CELLS }): void {
-        // a range (a range starting at row 0 is added as a cell, as it always was)
-        const range = "top" in location && location.top ? location : undefined;
-        const count = range ? (1 + range.bottom - range.top) * (1 + range.right - range.left) : 1;
-        if (range && count > Math.min(budget.cells, MAX_EXPANDED_CELLS)) {
-            const { sheetName, top, left, bottom, right } = range;
-            (this.rangeMap[name] || (this.rangeMap[name] = [])).push({ sheetName, top, left, bottom, right });
+        if (!("top" in location)) {
+            // a cell (an error reference, #REF!, is filed as CellMatrix files it, under "undefined")
+            budget.cells -= 1;
+            this.getMatrix(name).addCellEx(location);
+            return;
+        }
+        const range = validRectangle(location);
+        const count = (1 + range.bottom - range.top) * (1 + range.right - range.left);
+        if (count > Math.min(budget.cells, MAX_EXPANDED_CELLS)) {
+            const ranges = this.rangeMap.get(name);
+            if (ranges) {
+                ranges.push(range);
+            } else {
+                this.rangeMap.set(name, [range]);
+            }
             return;
         }
         budget.cells -= count;
         const matrix = this.getMatrix(name);
-        if (range) {
-            for (let col = range.left; col <= range.right; col++) {
-                for (let row = range.top; row <= range.bottom; row++) {
-                    const address = {
-                        sheetName: range.sheetName,
-                        address: colCache.n2l(col) + row,
-                        row,
-                        col,
-                    };
+        for (let col = range.left; col <= range.right; col++) {
+            for (let row = range.top; row <= range.bottom; row++) {
+                const address = {
+                    sheetName: range.sheetName,
+                    address: colCache.n2l(col) + row,
+                    row,
+                    col,
+                };
 
-                    matrix.addCellEx(address);
-                }
+                matrix.addCellEx(address);
             }
-        } else {
-            // a cell (a range starting at row 0, an invalid location, is filed as CellMatrix files it, as it always was)
-            matrix.addCellEx(location as MatrixLocation);
         }
     }
 
@@ -215,7 +223,7 @@ class DefinedNames {
      * @throws Error for a range whose bounds are not rows and columns of the grid, or are reversed
      */
     removeAllNames(location: NameLocation): void {
-        this._removeCells(location, [...new Set([...Object.keys(this.matrixMap), ...Object.keys(this.rangeMap)])]);
+        this._removeCells(location, [...new Set([...this.matrixMap.keys(), ...this.rangeMap.keys()])]);
     }
 
     /**
@@ -228,7 +236,7 @@ class DefinedNames {
         if ("top" in location) {
             rectangle = validRectangle(location);
             for (const name of names) {
-                const matrix = this.matrixMap[name];
+                const matrix = this.matrixMap.get(name);
                 if (matrix) {
                     matrix.removeCellsIn(rectangle);
                 }
@@ -240,7 +248,7 @@ class DefinedNames {
                     ? { sheetName: location.sheetName, top: location.row, left: location.col, bottom: location.row, right: location.col }
                     : undefined;
             for (const name of names) {
-                const matrix = this.matrixMap[name];
+                const matrix = this.matrixMap.get(name);
                 if (matrix) {
                     matrix.removeCellEx(location);
                 }
@@ -248,9 +256,12 @@ class DefinedNames {
         }
         if (rectangle) {
             for (const name of names) {
-                const ranges = this.rangeMap[name];
+                const ranges = this.rangeMap.get(name);
                 if (ranges) {
-                    this.rangeMap[name] = ranges.flatMap((range) => subtractRectangle(range, rectangle));
+                    this.rangeMap.set(
+                        name,
+                        ranges.flatMap((range) => subtractRectangle(range, rectangle))
+                    );
                 }
             }
         }
@@ -266,8 +277,8 @@ class DefinedNames {
      * not enumerated.
      */
     forEach(callback: (name: string, cell: NameCell) => void): void {
-        for (const name of Object.keys(this.matrixMap)) {
-            this.matrixMap[name]!.forEach((cell) => {
+        for (const [name, matrix] of this.matrixMap) {
+            matrix.forEach((cell) => {
                 callback(name, cell);
             });
         }
@@ -281,13 +292,13 @@ class DefinedNames {
     /** All the names of a cell location. */
     getNamesEx(address: MatrixLocation): string[] {
         const names = new Set<string>();
-        for (const name of Object.keys(this.matrixMap)) {
-            if (this.matrixMap[name]!.findCellEx(address) && name) {
+        for (const [name, matrix] of this.matrixMap) {
+            if (matrix.findCellEx(address) && name) {
                 names.add(name);
             }
         }
-        for (const name of Object.keys(this.rangeMap)) {
-            if (!names.has(name) && this.rangeMap[name]!.some((range) => this._rangeContains(range, address))) {
+        for (const [name, ranges] of this.rangeMap) {
+            if (!names.has(name) && ranges.some((range) => this._rangeContains(range, address))) {
                 names.add(name);
             }
         }
@@ -298,9 +309,9 @@ class DefinedNames {
     _explore(matrix: CellMatrix<{ mark?: boolean }>, cell: NameCell): Range {
         cell.mark = false;
         // a cell without sheet name is filed under "undefined" (see CellMatrix)
-        const sheetName = cell.sheetName as string;
+        const sheetName = String(cell.sheetName);
 
-        const range = new Range(cell.row, cell.col, cell.row, cell.col, sheetName);
+        const range = new Range(cell.row, cell.col, cell.row, cell.col, cell.sheetName);
         let x;
         let y;
 
@@ -329,8 +340,8 @@ class DefinedNames {
                 }
             }
             range[edge] = xx;
-            for (let i = 0; i < cells.length; i++) {
-                cells[i]!.mark = false;
+            for (const c of cells) {
+                c.mark = false;
             }
             return true;
         }
@@ -346,8 +357,8 @@ class DefinedNames {
      * @param matrix - the cells of the name (default: its own)
      */
     getRanges(name: string, matrix?: CellMatrix<{ mark?: boolean }>): DefinedNameModel {
-        matrix = matrix || this.matrixMap[name];
-        const largeRanges = (this.rangeMap[name] || []).map(
+        matrix = matrix || this.matrixMap.get(name);
+        const largeRanges = (this.rangeMap.get(name) || []).map(
             ({ sheetName, top, left, bottom, right }) => new Range(top, left, bottom, right, sheetName).$shortRange
         );
 
@@ -388,8 +399,7 @@ class DefinedNames {
 
     /** Moves the names after `numDelete` rows were removed and `numInsert` inserted at row `start` of a sheet. */
     spliceRows(sheetName: string, start: number, numDelete: number, numInsert: number): void {
-        for (const name of Object.keys(this.matrixMap)) {
-            const matrix = this.matrixMap[name]!;
+        for (const matrix of this.matrixMap.values()) {
             matrix.spliceRows(sheetName, start, numDelete, numInsert);
             this.normaliseMatrix(matrix, sheetName);
         }
@@ -398,8 +408,7 @@ class DefinedNames {
 
     /** Moves the names after `numDelete` columns were removed and `numInsert` inserted at column `start` of a sheet. */
     spliceColumns(sheetName: string, start: number, numDelete: number, numInsert: number): void {
-        for (const name of Object.keys(this.matrixMap)) {
-            const matrix = this.matrixMap[name]!;
+        for (const matrix of this.matrixMap.values()) {
             matrix.spliceColumns(sheetName, start, numDelete, numInsert);
             this.normaliseMatrix(matrix, sheetName);
         }
@@ -415,21 +424,25 @@ class DefinedNames {
         lo: "top" | "left",
         hi: "bottom" | "right"
     ): void {
-        for (const name of Object.keys(this.rangeMap)) {
-            this.rangeMap[name] = this.rangeMap[name]!.map((range) => {
+        for (const [name, ranges] of this.rangeMap) {
+            const spliced = ranges.map((range) => {
                 if (range.sheetName !== sheetName) {
                     return range;
                 }
                 const interval = spliceInterval(range[lo], range[hi], start, numDelete, numInsert);
                 return interval && { ...range, [lo]: interval[0], [hi]: interval[1] };
-            }).filter((range): range is LargeNameRange => !!range);
+            });
+            this.rangeMap.set(
+                name,
+                spliced.filter((range): range is LargeNameRange => !!range)
+            );
         }
     }
 
     /** The names with their ranges (see getRanges); names without range are left out. */
     get model(): DefinedNameModel[] {
         // To get names per cell - just iterate over all names finding cells if they exist
-        const names = new Set([...Object.keys(this.matrixMap), ...Object.keys(this.rangeMap)]);
+        const names = new Set([...this.matrixMap.keys(), ...this.rangeMap.keys()]);
         return [...names].map((name) => this.getRanges(name)).filter((definedName) => definedName.ranges.length);
     }
 
@@ -440,8 +453,8 @@ class DefinedNames {
      */
     set model(value: readonly DefinedNameModel[]) {
         // value is [ { name, ranges }, ... ]
-        this.matrixMap = Object.create(null) as Record<string, CellMatrix<{ mark?: boolean }>>;
-        this.rangeMap = Object.create(null) as Record<string, LargeNameRange[]>;
+        this.matrixMap = new Map();
+        this.rangeMap = new Map();
         const budget = { cells: MAX_EXPANDED_CELLS };
         value.forEach((definedName) => {
             this.getMatrix(definedName.name);
