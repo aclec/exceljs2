@@ -83,7 +83,7 @@ interface XlsxWorksheetXform {
 const WorksheetXform = WorksheetXformJs as unknown as {
     /** @param options - the read options and the load budget (parse) */
     new (options?: object): XlsxWorksheetXform;
-    createLoadBudget(this: void, maxMergedCells: number): LoadBudget;
+    createLoadBudget(this: void, maxMergedCells?: number): LoadBudget;
 };
 
 const CommentsXform = CommentsXformJs as unknown as new () => {
@@ -99,8 +99,8 @@ const VmlNotesXform = VmlNotesXformJs as unknown as {
 
 /** What xlsx.ts needs from the workbook (src/doc/workbook.ts). */
 export interface XlsxWorkbook {
-    /** the cap on the merged cells of the workbook, kept by a loaded workbook */
-    maxMergedCells: number;
+    /** the cap on the merged cells of the workbook, kept by a loaded workbook (a ModelContainer has none: the default cap applies) */
+    maxMergedCells?: number;
     get model(): WorkbookModel;
     set model(value: WorkbookModel | XlsxReadModel);
 }

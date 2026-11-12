@@ -7,7 +7,10 @@ import dayjs from "dayjs";
 import StreamBuf from "../utils/stream-buf";
 import colCache from "../utils/col-cache";
 import { exists } from "../utils/utils";
-import type { CellErrorValue, CellValue, CsvReadOptions, CsvWriteOptions, Workbook, Worksheet } from "../../index";
+import type { CellErrorValue, CellValue, CsvReadOptions, CsvWriteOptions } from "../../index";
+import type Workbook from "../doc/workbook";
+import type { CellValue as DocCellValue } from "../doc/cell";
+import type Worksheet from "../doc/worksheet";
 
 dayjs.extend(customParseFormat);
 dayjs.extend(utc);
@@ -109,7 +112,8 @@ class CSV {
 
             const dateFormats = readOptions.dateFormats || DEFAULT_DATE_FORMATS;
             const mayBeDate = (datum: string): boolean => dateFormats !== DEFAULT_DATE_FORMATS || DEFAULT_DATE_SHAPE.test(datum);
-            const map: (datum: string, index: number) => unknown =
+            // the value of the cell (a user map may return anything: the Cell setter stores objects as JSON values)
+            const map: (datum: string, index: number) => DocCellValue =
                 readOptions.map ||
                 function (datum: string): CsvCellValue {
                     if (datum === "") {
@@ -249,9 +253,9 @@ class CSV {
             csvStream.pipe(stream);
 
             const { dateFormat, dateUTC } = writeOptions;
-            const map: (value: CellValue, index: number) => unknown =
+            const map: (value: DocCellValue, index: number) => unknown =
                 writeOptions.map ||
-                ((value: CellValue): unknown => {
+                ((value: DocCellValue): unknown => {
                     if (value && typeof value === "object") {
                         // the properties of the value objects of index.d.ts (hyperlink, formula, error)
                         const object = value as {
