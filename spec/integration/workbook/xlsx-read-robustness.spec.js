@@ -408,5 +408,27 @@ describe('xlsx read robustness', function() {
       });
       expectEverything((await load(buffer)).getWorksheet('Sheet1'));
     });
+
+    it('takes the note properties from the legacyDrawing, not a header/footer vml', async () => {
+      const zip = await JSZip.loadAsync(await richBuffer());
+      zip.file(
+        'xl/drawings/vmlDrawing2.vml',
+        '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">' +
+          '<v:shape id="LH" type="#_x0000_t75" style="position:absolute;width:10pt;height:10pt">' +
+          '<v:imagedata o:relid="rId1" o:title="img"/></v:shape></xml>'
+      );
+      const buffer = await tamper(await zip.generateAsync({type: 'nodebuffer'}), {
+        [RELS]: xml =>
+          xml.replace(
+            /(<Relationships[^>]*>)/,
+            '$1<Relationship Id="rId9" Target="../drawings/vmlDrawing2.vml" ' +
+              'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing"/>'
+          ),
+        [SHEET]: xml => xml.replace('</worksheet>', '<legacyDrawingHF r:id="rId9"/></worksheet>'),
+      });
+      const wb = await load(buffer);
+      expectEverything(wb.getWorksheet('Sheet1'));
+      await wb.xlsx.writeBuffer();
+    });
   });
 });
