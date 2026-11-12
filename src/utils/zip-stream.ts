@@ -1,6 +1,4 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-// Zip container writing. Compression and CRC-32 come from deflate.js (node:zlib on Node.js and Bun,
+// Zip container writing. Compression and CRC-32 come from deflate.ts (node:zlib on Node.js and Bun,
 // fflate in the browser); the records are written here (fflate's Zip has no ZIP64 support).
 //
 // Entries are written in the order they are created. Every entry is compressed as soon as its data
@@ -15,7 +13,16 @@
 // being compressed. Data of an entry waiting for an earlier, still open entry is not counted: it only leaves memory
 // when that entry ends.
 import { EventEmitter } from "events";
-import { createCompressor, selectBackend } from "./deflate";
+import type { ZipOptions } from "../../index";
+import {
+    createCompressor,
+    isCompressionLevel,
+    selectBackend,
+    type CompressionLevel,
+    type Compressor,
+    type CompressorCallback,
+    type DeflateBackend,
+} from "./deflate";
 
 const SIG_LOCAL = 0x04034b50;
 const SIG_CENTRAL = 0x02014b50;
@@ -34,8 +41,14 @@ const FLAG_UTF8 = 0x0800;
 const VERSION = 20;
 const VERSION_ZIP64 = 45;
 
-// values >= size, or `entries` entries or more, need ZIP64 records (only tests lower them: _zip64Limits)
-const ZIP64_LIMITS = { size: MAX_U32, entries: MAX_U16 };
+/** Thresholds of the ZIP64 records: values >= `size`, or `entries` entries or more, need them. */
+export interface Zip64Limits {
+    readonly size: number;
+    readonly entries: number;
+}
+
+// only tests lower them (_zip64Limits)
+const ZIP64_LIMITS: Zip64Limits = { size: MAX_U32, entries: MAX_U16 };
 
 // uncompressed bytes being compressed (asynchronously) above which drained() waits
 const HIGH_WATER_MARK = 4 * 1024 * 1024;
@@ -46,11 +59,39 @@ const EMPTY = new Uint8Array(0);
 // -----------------------------------------------------------------------------
 // options
 
-// The zip options are {level, forceZip64, comment}. The shapes of the zip libraries used before v5
-// are still accepted: archiver's {zlib: {level}, store} and JSZip's {compression, compressionOptions}.
-function normalizeZipOptions(options) {
-    const zip = options || {};
-    let level = 6;
+/**
+ * Options of {@link ZipWriter}: the public {@link ZipOptions} (including the deprecated shapes of the zip libraries used
+ * before v5, archiver's `{zlib: {level}, store}` and JSZip's `{compression, compressionOptions}`), plus internal ones for
+ * tests.
+ */
+export interface ZipWriterOptions extends Readonly<Partial<ZipOptions>> {
+    /** internal, for tests: lower ZIP64 thresholds */
+    readonly _zip64Limits?: Partial<Zip64Limits>;
+    /** internal, for tests: the DEFLATE backend */
+    readonly _backend?: DeflateBackend;
+}
+
+/** {@link ZipWriterOptions} validated, with their defaults */
+export interface NormalizedZipOptions {
+    readonly level: CompressionLevel;
+    readonly forceZip64: boolean;
+    /** the archive comment, UTF-8 encoded (at most 65535 bytes) */
+    readonly comment: Uint8Array;
+    readonly zip64Limits: Zip64Limits;
+    readonly backend: DeflateBackend;
+}
+
+/**
+ * Validates the zip options and applies their defaults (level 6, no comment, ZIP64 records only where needed).
+ * `level` wins over the deprecated `zlib.level` and `compressionOptions.level`; `store: true` or
+ * `compression: "STORE"` force level 0.
+ *
+ * @throws TypeError when the level is not an integer from 0 to 9, or the backend is unknown; RangeError when the comment
+ * is longer than 65535 bytes (UTF-8)
+ */
+function normalizeZipOptions(options?: ZipWriterOptions | null): NormalizedZipOptions {
+    const zip: ZipWriterOptions = options || {};
+    let level: number = 6;
     if (zip.level !== undefined) {
         ({ level } = zip);
     } else if (zip.zlib && zip.zlib.level !== undefined) {
@@ -61,7 +102,7 @@ function normalizeZipOptions(options) {
     if (zip.store === true || zip.compression === "STORE") {
         level = 0;
     }
-    if (!Number.isInteger(level) || level < 0 || level > 9) {
+    if (!isCompressionLevel(level)) {
         throw new TypeError(`zip level must be an integer from 0 (no compression) to 9, got ${level}`);
     }
     const comment = zip.comment === undefined ? EMPTY : textEncoder.encode(String(zip.comment));
@@ -72,7 +113,7 @@ function normalizeZipOptions(options) {
         level,
         forceZip64: Boolean(zip.forceZip64),
         comment,
-        zip64Limits: Object.assign({}, ZIP64_LIMITS, zip._zip64Limits),
+        zip64Limits: { ...ZIP64_LIMITS, ...zip._zip64Limits },
         // internal, for tests: "zlib" or "fflate"
         backend: selectBackend(zip._backend),
     };
@@ -81,24 +122,30 @@ function normalizeZipOptions(options) {
 // -----------------------------------------------------------------------------
 // binary helpers
 
-function writeU16(data, pos, value) {
+function writeU16(data: Uint8Array, pos: number, value: number): void {
     data[pos] = value & 0xff;
     data[pos + 1] = (value >>> 8) & 0xff;
 }
 
-function writeU32(data, pos, value) {
+function writeU32(data: Uint8Array, pos: number, value: number): void {
     data[pos] = value & 0xff;
     data[pos + 1] = (value >>> 8) & 0xff;
     data[pos + 2] = (value >>> 16) & 0xff;
     data[pos + 3] = (value >>> 24) & 0xff;
 }
 
-function writeU64(data, pos, value) {
+function writeU64(data: Uint8Array, pos: number, value: number): void {
     writeU32(data, pos, value % TWO_32);
     writeU32(data, pos + 4, Math.floor(value / TWO_32));
 }
 
-function dosDateTime(date) {
+/** MS-DOS date and time of the entries (local time, 2-second resolution, years 1980 to 2107) */
+interface DosDateTime {
+    readonly time: number;
+    readonly date: number;
+}
+
+function dosDateTime(date: Date): DosDateTime {
     const year = Math.min(Math.max(date.getFullYear(), 1980), 2107);
     return {
         time: (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1),
@@ -107,15 +154,26 @@ function dosDateTime(date) {
 }
 
 // ZIP64 extended information extra field
-function zip64Extra(values) {
+function zip64Extra(values: readonly number[]): Uint8Array {
     const extra = new Uint8Array(4 + 8 * values.length);
     writeU16(extra, 0, 1);
     writeU16(extra, 2, 8 * values.length);
-    values.forEach((value, index) => writeU64(extra, 4 + 8 * index, value));
+    let pos = 4;
+    for (const value of values) {
+        writeU64(extra, pos, value);
+        pos += 8;
+    }
     return extra;
 }
 
-function toBytes(data) {
+/**
+ * Data of a zip entry: a string (UTF-8 encoded), bytes (a Buffer, any typed array or DataView, an ArrayBuffer), or an
+ * object with a `toBuffer()` method (StringBuf, src/utils/string-buf.ts).
+ */
+export type ZipEntryData = string | ArrayBufferView | ArrayBuffer | { toBuffer(): Uint8Array };
+
+/** @throws TypeError on any other value (JavaScript callers) */
+function toBytes(data: ZipEntryData): Uint8Array {
     if (typeof data === "string") {
         return textEncoder.encode(data);
     }
@@ -128,20 +186,21 @@ function toBytes(data) {
     if (ArrayBuffer.isView(data)) {
         return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     }
-    // StringBuf (lib/utils/string-buf.js)
+    // StringBuf (src/utils/string-buf.ts)
     if (data && typeof data.toBuffer === "function") {
         return data.toBuffer();
     }
     throw new TypeError("Zip entry data must be a string, a Buffer, a Uint8Array or an ArrayBuffer");
 }
 
-function toBuffer(data) {
+// a Buffer view of the bytes (not a copy)
+function toBuffer(data: Uint8Array): Buffer {
     return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
 }
 
 // leading slashes are dropped (like archiver did); anything that could extract outside of the target
 // directory is refused (zip slip)
-function entryName(name) {
+function entryName(name: string): string {
     const normalised = String(name).replace(/^\/+/, "");
     if (!normalised || normalised.includes("\\") || normalised.split("/").some((part) => part === ".." || part === ".")) {
         throw new Error(`Invalid zip entry name: ${JSON.stringify(String(name))}`);
@@ -151,12 +210,51 @@ function entryName(name) {
 
 // -----------------------------------------------------------------------------
 
-// One entry. Also the writable that the streaming writers write a part to: write(data)... end().
-// Emits 'finish' when ended and 'zipped' once all its data is in the archive output.
-class ZipEntry extends EventEmitter {
-    constructor(zip, name) {
+/** events of a {@link ZipEntry}: 'finish' once ended, 'zipped' once all its data is in the archive output */
+type ZipEntryEvents = {
+    finish: [];
+    zipped: [];
+};
+
+/**
+ * One entry of a {@link ZipWriter}. It is also the writable that the streaming writers write a part to:
+ * `write(data)`... `end()`. Emits 'finish' when ended and 'zipped' once all its data is in the archive output.
+ */
+class ZipEntry extends EventEmitter<ZipEntryEvents> {
+    /** the name in the archive (leading slashes dropped) */
+    readonly name: string;
+    readonly nameBytes: Uint8Array;
+    /** general purpose flags, but bit 3 (data descriptor) */
+    readonly flags: number;
+    readonly stored: boolean;
+    readonly compressor: Compressor;
+    /** compressed bytes produced so far */
+    compressedSize = 0;
+    /** compressed data waiting for the earlier entries */
+    pending: Uint8Array[] = [];
+    ended = false;
+    /** all the data is compressed: `crc` and `size` are known */
+    finished = false;
+    headerWritten = false;
+    /** CRC-32 of the uncompressed data, once finished */
+    crc = 0;
+    /** uncompressed size, once finished */
+    size = 0;
+    /** offset of the local header in the archive, once written */
+    offset = 0;
+    /** the sizes follow the data, in a data descriptor (the entry was not finished when its header was written) */
+    dataDescriptor = false;
+    /** the local header has a ZIP64 extra field */
+    zip64 = false;
+
+    /**
+     * @throws Error when the name is invalid (empty, a `.` or `..` segment, a backslash) or longer than 65535 bytes
+     */
+    constructor(
+        private readonly zip: ZipWriter,
+        name: string
+    ) {
         super();
-        this.zip = zip;
         this.name = entryName(name);
         this.nameBytes = textEncoder.encode(this.name);
         if (this.nameBytes.length > MAX_U16) {
@@ -164,20 +262,21 @@ class ZipEntry extends EventEmitter {
         }
         this.flags = this.nameBytes.length === this.name.length ? 0 : FLAG_UTF8;
         this.stored = zip.level === 0;
-        this.compressor = createCompressor(zip.level, zip.backend, (error, chunks, final) => this._onData(error, chunks, final));
-        this.compressedSize = 0;
-        // compressed data waiting for the earlier entries
-        this.pending = [];
-        this.ended = false;
-        this.finished = false;
-        this.headerWritten = false;
+        this.compressor = createCompressor(zip.level, zip.backend, (...args) => this._onData(...args));
     }
 
-    get method() {
+    /** compression method: 0 (stored) or 8 (deflated) */
+    get method(): 0 | 8 {
         return this.stored ? 0 : 8;
     }
 
-    write(data) {
+    /**
+     * Adds data to the entry. The data is compressed at once (or copied): the caller may reuse its buffer.
+     *
+     * @returns true (backpressure goes through {@link ZipWriter.drained})
+     * @throws Error after end(); TypeError on an invalid data type
+     */
+    write(data: ZipEntryData): boolean {
         if (this.ended) {
             throw new Error(`Write after end of the zip entry ${this.name}`);
         }
@@ -188,7 +287,12 @@ class ZipEntry extends EventEmitter {
         return true;
     }
 
-    end(data) {
+    /**
+     * Ends the entry, with optional last data. Further calls are ignored.
+     *
+     * @throws TypeError on an invalid data type
+     */
+    end(data?: ZipEntryData): void {
         if (this.ended) {
             return;
         }
@@ -197,7 +301,7 @@ class ZipEntry extends EventEmitter {
         this.emit("finish");
     }
 
-    _compress(bytes, final) {
+    private _compress(bytes: Uint8Array, final: boolean): void {
         try {
             this.compressor.push(bytes, final);
         } catch (error) {
@@ -205,7 +309,7 @@ class ZipEntry extends EventEmitter {
         }
     }
 
-    _onData(error, chunks, final) {
+    private _onData(...[error, chunks, final]: Parameters<CompressorCallback>): void {
         if (error) {
             this.zip._fail(error);
             return;
@@ -228,8 +332,78 @@ class ZipEntry extends EventEmitter {
     }
 }
 
-class ZipWriter extends EventEmitter {
-    constructor(options) {
+/** options of {@link ZipWriter.append} */
+export interface ZipAppendOptions {
+    /** the entry name (leading slashes are dropped) */
+    readonly name: string;
+    /** the data is a base64 string, to decode */
+    readonly base64?: boolean;
+}
+
+/**
+ * Where the archive is written: a Node.js Writable, a StreamBuf, or any object with `write()` and `end()`. When it has
+ * `on()` (a stream, which then also has `removeListener()`), its 'drain' event drives the backpressure and its
+ * 'error' and 'close' events fail an incomplete archive.
+ */
+export interface ZipOutput {
+    /** @returns false to ask to wait for 'drain' (streams) */
+    write(chunk: Buffer): unknown;
+    end(): unknown;
+    on?(event: "error" | "drain" | "close", listener: (error: Error) => void): unknown;
+    removeListener?(event: "error" | "drain" | "close", listener: (error: Error) => void): unknown;
+}
+
+type ZipOutputStream = ZipOutput & Required<Pick<ZipOutput, "on" | "removeListener">>;
+
+// streams have both on() and removeListener()
+function isStream(output: ZipOutput): output is ZipOutputStream {
+    return typeof output.on === "function";
+}
+
+/** events of a {@link ZipWriter}: the archive output, then its end */
+type ZipWriterEvents = {
+    data: [chunk: Buffer];
+    end: [];
+};
+
+/**
+ * Streaming zip writer. Entries are added with {@link append} (all of the data at once) or {@link openStream} (data
+ * written later), and written to the output (see {@link pipe}) in the order they are added; {@link finalize} writes the
+ * central directory once every entry is complete.
+ */
+class ZipWriter extends EventEmitter<ZipWriterEvents> {
+    readonly level: CompressionLevel;
+    readonly backend: DeflateBackend;
+    readonly forceZip64: boolean;
+    readonly comment: Uint8Array;
+    readonly limits: Zip64Limits;
+    readonly dosDateTime: DosDateTime;
+    readonly entries: ZipEntry[] = [];
+    /** index of the entry being written to the output */
+    current = 0;
+    /** bytes written to the output */
+    offset = 0;
+    finalizing = false;
+    /** the archive is complete */
+    done = false;
+    /** the first failure; the archive then stays incomplete */
+    private failure: { readonly error: unknown } | null = null;
+    /** the output stream asked to wait for 'drain' */
+    private outputFull = false;
+    /** the promise drained() returns while the output is backlogged, and its resolve / reject functions */
+    private drainPromise: Promise<void> | null = null;
+    private drainWaiter: { readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
+    /** settles when the archive is complete, or as soon as it fails */
+    readonly finished: Promise<void>;
+    // set by the executor of `finished`, which runs synchronously in the constructor
+    private _resolve!: () => void;
+    private _reject!: (error: unknown) => void;
+    // _pump() is running, and has to run once more
+    private pumping = false;
+    private pumpAgain = false;
+
+    /** @throws see {@link normalizeZipOptions} */
+    constructor(options?: ZipWriterOptions | null) {
         super();
         const { level, forceZip64, comment, zip64Limits, backend } = normalizeZipOptions(options);
         this.level = level;
@@ -238,20 +412,6 @@ class ZipWriter extends EventEmitter {
         this.comment = comment;
         this.limits = zip64Limits;
         this.dosDateTime = dosDateTime(new Date());
-        this.entries = [];
-        // index of the entry being written to the output
-        this.current = 0;
-        // bytes written to the output
-        this.offset = 0;
-        this.finalizing = false;
-        this.done = false;
-        this.error = null;
-        // the output stream asked to wait for 'drain'
-        this.outputFull = false;
-        // the promise drained() returns while the output is backlogged, and its resolve / reject functions
-        this.drainPromise = null;
-        this.drainWaiter = null;
-        // settles when the archive is complete, or as soon as it fails
         this.finished = new Promise((resolve, reject) => {
             this._resolve = resolve;
             this._reject = reject;
@@ -260,25 +420,34 @@ class ZipWriter extends EventEmitter {
         this.finished.catch(() => {});
     }
 
-    // the output: 'data' events (Buffers), then 'end'
-    pipe(destination) {
+    /** the first failure of the archive, or null */
+    get error(): unknown {
+        return this.failure ? this.failure.error : null;
+    }
+
+    /**
+     * Writes the archive output to `destination` ('data' events, then `end()`).
+     *
+     * @returns `destination`
+     */
+    pipe<T extends ZipOutput>(destination: T): T {
         // backpressure needs the 'drain' event
-        const drains = typeof destination.on === "function";
+        const drains = isStream(destination);
         this.on("data", (chunk) => {
             if (destination.write(chunk) === false && drains) {
                 this.outputFull = true;
             }
         });
-        if (drains) {
+        if (isStream(destination)) {
             // an error of the destination while the archive is written fails it; once it is complete, the
             // destination's errors are its owner's again (the listener would hide them)
-            const onError = (error) => this._fail(error);
-            const onDrain = () => {
+            const onError = (error: Error): void => this._fail(error);
+            const onDrain = (): void => {
                 this.outputFull = false;
                 this._checkDrained();
             };
             // destroyed without an error (e.g. an HTTP response whose client went away): 'drain' will never come
-            const onClose = () => this._fail(new Error("The output stream was closed before the zip archive was complete"));
+            const onClose = (): void => this._fail(new Error("The output stream was closed before the zip archive was complete"));
             destination.on("error", onError);
             destination.on("drain", onDrain);
             destination.on("close", onClose);
@@ -292,19 +461,29 @@ class ZipWriter extends EventEmitter {
         return destination;
     }
 
-    // adds an entry with all of its data: {name, base64}
-    append(data, options) {
+    /**
+     * Adds an entry with all of its data, compressed at once.
+     *
+     * @param data - the entry data; with `options.base64`, a base64 string to decode
+     * @throws the error of a failed archive; Error after finalize() or on an invalid name; TypeError on an invalid data
+     * type
+     */
+    append(data: ZipEntryData, options: ZipAppendOptions): void {
         this._check();
         // converted first: an invalid value must not leave an entry that never ends
-        const bytes = options.base64 ? Buffer.from(data, "base64") : toBytes(data);
+        const bytes = options.base64 && typeof data === "string" ? Buffer.from(data, "base64") : toBytes(data);
         const entry = new ZipEntry(this, options.name);
         this.entries.push(entry);
         entry.end(bytes);
         this._pump();
     }
 
-    // adds an entry whose data is written later through the returned ZipEntry
-    openStream(name) {
+    /**
+     * Adds an entry whose data is written later, through the returned entry (`write()`... `end()`).
+     *
+     * @throws the error of a failed archive; Error after finalize() or on an invalid name
+     */
+    openStream(name: string): ZipEntry {
         this._check();
         const entry = new ZipEntry(this, name);
         this.entries.push(entry);
@@ -312,19 +491,25 @@ class ZipWriter extends EventEmitter {
         return entry;
     }
 
-    // writes the central directory once every entry is complete; resolves when the output has ended
-    finalize() {
-        if (!this.finalizing && !this.error) {
+    /**
+     * Writes the central directory once every entry is complete.
+     *
+     * @returns {@link finished}: resolves when the output has ended, rejects with the error of a failed archive
+     */
+    finalize(): Promise<void> {
+        if (!this.finalizing && !this.failure) {
             this.finalizing = true;
             this._pump();
         }
         return this.finished;
     }
 
-    // a promise that resolves once the output can take more data (see Backpressure above), or rejects with the error
-    // of a failed archive. It is marked handled: callers may ignore it.
-    drained() {
-        if (this.error) {
+    /**
+     * A promise that resolves once the output can take more data (see Backpressure above), or rejects with the error
+     * of a failed archive. It is marked handled: callers may ignore it.
+     */
+    drained(): Promise<void> {
+        if (this.failure) {
             return this.finished;
         }
         if (!this._backlogged()) {
@@ -340,7 +525,7 @@ class ZipWriter extends EventEmitter {
         return this.drainPromise;
     }
 
-    _backlogged() {
+    private _backlogged(): boolean {
         if (this.done) {
             return false;
         }
@@ -349,44 +534,47 @@ class ZipWriter extends EventEmitter {
         }
         let inFlight = 0;
         for (let i = this.current; i < this.entries.length; i++) {
-            inFlight += this.entries[i].compressor.inFlight;
+            inFlight += this.entries[i]?.compressor.inFlight ?? 0;
         }
         return inFlight > HIGH_WATER_MARK;
     }
 
-    _checkDrained() {
-        if (this.drainPromise && (this.error || !this._backlogged())) {
-            const { resolve, reject } = this.drainWaiter;
+    /** settles the promise of drained() once the backlog clears or the archive fails (@internal, for ZipEntry) */
+    _checkDrained(): void {
+        const waiter = this.drainWaiter;
+        if (waiter && (this.failure || !this._backlogged())) {
             this.drainPromise = null;
             this.drainWaiter = null;
-            if (this.error) {
-                reject(this.error);
+            if (this.failure) {
+                waiter.reject(this.failure.error);
             } else {
-                resolve();
+                waiter.resolve();
             }
         }
     }
 
-    _check() {
-        if (this.error) {
-            throw this.error;
+    private _check(): void {
+        if (this.failure) {
+            throw this.failure.error;
         }
         if (this.finalizing) {
             throw new Error("Cannot add zip entries after finalize()");
         }
     }
 
-    _fail(error) {
-        if (!this.error && !this.done) {
-            this.error = error;
+    /** fails the archive, unless it is complete or already failed (@internal, for ZipEntry) */
+    _fail(error: unknown): void {
+        if (!this.failure && !this.done) {
+            this.failure = { error };
             this._reject(error);
             this._checkDrained();
         }
     }
 
-    _output(data) {
+    /** writes bytes to the output (@internal, for ZipEntry) */
+    _output(data: Uint8Array): void {
         // nothing more for a failed destination
-        if (this.error) {
+        if (this.failure) {
             return;
         }
         this.offset += data.length;
@@ -397,9 +585,11 @@ class ZipWriter extends EventEmitter {
         }
     }
 
-    // writes what can be written; re-entrant calls (e.g. from a 'zipped' listener) are folded into the
-    // running one
-    _pump() {
+    /**
+     * Writes what can be written; re-entrant calls (e.g. from a 'zipped' listener) are folded into the running one
+     * (@internal, for ZipEntry).
+     */
+    _pump(): void {
         if (this.pumping) {
             this.pumpAgain = true;
             return;
@@ -417,15 +607,17 @@ class ZipWriter extends EventEmitter {
         }
     }
 
-    _pumpOnce() {
-        while (!this.error && !this.done && this.current < this.entries.length) {
-            const entry = this.entries[this.current];
+    private _pumpOnce(): void {
+        let entry: ZipEntry | undefined;
+        while (!this.failure && !this.done && (entry = this.entries[this.current])) {
             if (!entry.headerWritten) {
                 this._writeLocalHeader(entry);
             }
             const { pending } = entry;
             entry.pending = [];
-            pending.forEach((chunk) => this._output(chunk));
+            for (const chunk of pending) {
+                this._output(chunk);
+            }
             if (!entry.finished) {
                 return;
             }
@@ -435,9 +627,9 @@ class ZipWriter extends EventEmitter {
             this.current++;
             entry.emit("zipped");
         }
-        if (this.finalizing && !this.error && !this.done && this.current === this.entries.length) {
+        if (this.finalizing && !this.failure && !this.done && this.current === this.entries.length) {
             this._writeCentralDirectory();
-            if (!this.error) {
+            if (!this.failure) {
                 this.done = true;
                 this.emit("end");
                 this._resolve();
@@ -446,16 +638,16 @@ class ZipWriter extends EventEmitter {
         }
     }
 
-    _needsZip64(...values) {
-        return values.some((value) => value >= this.limits.size);
+    private _needsZip64(value: number): boolean {
+        return value >= this.limits.size;
     }
 
-    _writeLocalHeader(entry) {
+    private _writeLocalHeader(entry: ZipEntry): void {
         entry.offset = this.offset;
         entry.headerWritten = true;
         // the sizes are known unless the entry is still being streamed
         entry.dataDescriptor = !entry.finished;
-        entry.zip64 = this.forceZip64 || (entry.finished && this._needsZip64(entry.size, entry.compressedSize));
+        entry.zip64 = this.forceZip64 || (entry.finished && (this._needsZip64(entry.size) || this._needsZip64(entry.compressedSize)));
         // with a data descriptor, the ZIP64 field only announces 64-bit sizes in the descriptor
         const extra = entry.zip64 ? zip64Extra(entry.finished ? [entry.size, entry.compressedSize] : [0, 0]) : EMPTY;
         const header = new Uint8Array(30 + entry.nameBytes.length + extra.length);
@@ -482,9 +674,9 @@ class ZipWriter extends EventEmitter {
         this._output(header);
     }
 
-    _writeDataDescriptor(entry) {
+    private _writeDataDescriptor(entry: ZipEntry): void {
         // 64-bit sizes when the local header announced them, or when they are needed
-        const wide = entry.zip64 || this._needsZip64(entry.size, entry.compressedSize);
+        const wide = entry.zip64 || this._needsZip64(entry.size) || this._needsZip64(entry.compressedSize);
         const descriptor = new Uint8Array(wide ? 24 : 16);
         writeU32(descriptor, 0, SIG_DATA_DESCRIPTOR);
         writeU32(descriptor, 4, entry.crc);
@@ -498,10 +690,10 @@ class ZipWriter extends EventEmitter {
         this._output(descriptor);
     }
 
-    _centralHeader(entry) {
+    private _centralHeader(entry: ZipEntry): Uint8Array {
         // the ZIP64 field holds the values that do not fit, in this order
-        const values = [];
-        const fit = (value) => {
+        const values: number[] = [];
+        const fit = (value: number): number => {
             if (this.forceZip64 || this._needsZip64(value)) {
                 values.push(value);
                 return MAX_U32;
@@ -532,13 +724,15 @@ class ZipWriter extends EventEmitter {
         return header;
     }
 
-    _writeCentralDirectory() {
+    private _writeCentralDirectory(): void {
         const start = this.offset;
-        this.entries.forEach((entry) => this._output(this._centralHeader(entry)));
+        for (const entry of this.entries) {
+            this._output(this._centralHeader(entry));
+        }
         const size = this.offset - start;
         const count = this.entries.length;
         const manyEntries = count >= this.limits.entries;
-        const zip64 = this.forceZip64 || manyEntries || this._needsZip64(size, start);
+        const zip64 = this.forceZip64 || manyEntries || this._needsZip64(size) || this._needsZip64(start);
 
         if (zip64) {
             const recordOffset = this.offset;
@@ -577,3 +771,4 @@ class ZipWriter extends EventEmitter {
 }
 
 export { ZipWriter, normalizeZipOptions };
+export type { ZipEntry };

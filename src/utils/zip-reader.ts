@@ -1,6 +1,4 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-// Zip container reading. Decompression comes from deflate.js (node:zlib on Node.js and Bun, fflate in
+// Zip container reading. Decompression comes from deflate.ts (node:zlib on Node.js and Bun, fflate in
 // the browser).
 //
 // - readZip(buffer, options): in-memory archive (xlsx.load). The central directory is the source of
@@ -11,7 +9,8 @@
 //
 // Both enforce the decompression limits (see ZipLimits) while inflating, so that a zip bomb is
 // rejected before its output is materialised.
-import { createInflater, inflateWhole, selectBackend, sliceSize } from "./deflate";
+import type { ZipReadLimits } from "../../index";
+import { createInflater, inflateWhole, selectBackend, sliceSize, type DeflateBackend } from "./deflate";
 
 const SIG_LOCAL = 0x04034b50;
 const SIG_CENTRAL = 0x02014b50;
@@ -35,17 +34,31 @@ const KiB = 1024;
 const MiB = 1024 * KiB;
 const GiB = 1024 * MiB;
 
-// The document reader (xlsx.load / read / readFile) materialises every part: a single part cannot be
-// parsed past V8's maximum string length (~512 MiB) anyway, and the whole model has to fit in memory.
-const DOCUMENT_LIMITS = {
+/**
+ * Options of {@link readZip} and {@link parseZipStream}: the decompression limits, each one defaulting to the reader's
+ * ({@link DOCUMENT_LIMITS} or {@link STREAM_LIMITS}). Other properties are ignored: the reader options can be passed as
+ * they are.
+ */
+export interface ZipReadOptions extends Readonly<Partial<ZipReadLimits>> {
+    /** internal, for tests: the DEFLATE backend */
+    readonly _backend?: DeflateBackend;
+}
+
+/**
+ * Default limits of the document reader (xlsx.load / read / readFile), which materialises every part: a single part
+ * cannot be parsed past V8's maximum string length (~512 MiB) anyway, and the whole model has to fit in memory.
+ */
+const DOCUMENT_LIMITS: Readonly<ZipReadLimits> = {
     maxEntrySize: 1 * GiB,
     maxUncompressedSize: 2 * GiB,
     maxCompressionRatio: 1000,
 };
-// The streaming reader parses worksheets without materialising them (multi-GiB sheets are its purpose);
-// worksheets that arrive before the parts they depend on are spooled to temp files, which these sizes
-// also bound.
-const STREAM_LIMITS = {
+/**
+ * Default limits of the streaming reader, which parses worksheets without materialising them (multi-GiB sheets are its
+ * purpose); worksheets that arrive before the parts they depend on are spooled to temp files, which these sizes also
+ * bound.
+ */
+const STREAM_LIMITS: Readonly<ZipReadLimits> = {
     maxEntrySize: 16 * GiB,
     maxUncompressedSize: 32 * GiB,
     maxCompressionRatio: 1000,
@@ -56,19 +69,22 @@ const RATIO_MIN_SIZE = 10 * MiB;
 
 const textDecoder = new TextDecoder("utf-8");
 
-function zipError(message) {
+function zipError(message: string): Error {
     return new Error(`Invalid or unsupported zip file: ${message}`);
 }
 
-function u16(data, pos) {
-    return data[pos] | (data[pos + 1] << 8);
+// Little-endian unsigned integers. A byte past the end of `data` reads as 0 (as the bitwise operators of the original
+// JavaScript did with `undefined`): callers check the bounds where it matters.
+function u16(data: Uint8Array, pos: number): number {
+    return (data[pos] ?? 0) | ((data[pos + 1] ?? 0) << 8);
 }
 
-function u32(data, pos) {
-    return (data[pos] | (data[pos + 1] << 8) | (data[pos + 2] << 16) | (data[pos + 3] << 24)) >>> 0;
+function u32(data: Uint8Array, pos: number): number {
+    return ((data[pos] ?? 0) | ((data[pos + 1] ?? 0) << 8) | ((data[pos + 2] ?? 0) << 16) | ((data[pos + 3] ?? 0) << 24)) >>> 0;
 }
 
-function u64(data, pos) {
+// sizes and offsets must stay exact: values past Number.MAX_SAFE_INTEGER (2^53 - 1) are refused
+function u64(data: Uint8Array, pos: number): number {
     const value = u32(data, pos + 4) * TWO_32 + u32(data, pos);
     if (value > Number.MAX_SAFE_INTEGER) {
         throw zipError("64-bit size or offset out of range");
@@ -76,13 +92,24 @@ function u64(data, pos) {
     return value;
 }
 
-function decodeName(bytes) {
+function decodeName(bytes: Uint8Array): string {
     // like JSZip: names are decoded as UTF-8 whether or not the UTF-8 flag (bit 11) is set
     return textDecoder.decode(bytes);
 }
 
+/** bounds of some data in a buffer: [start, end) */
+interface Span {
+    readonly start: number;
+    readonly end: number;
+}
+
+/** a size or an offset, whose 0xFFFFFFFF placeholder may be replaced by its ZIP64 value */
+interface Zip64Field {
+    value: number;
+}
+
 // the value of the ZIP64 extended information extra field (header ID 1), or null
-function findZip64Extra(data, start, length) {
+function findZip64Extra(data: Uint8Array, start: number, length: number): Span | null {
     const end = start + length;
     let pos = start;
     while (pos + 4 <= end) {
@@ -100,7 +127,7 @@ function findZip64Extra(data, start, length) {
 }
 
 // replace the 0xFFFFFFFF placeholders by their ZIP64 values, which follow a fixed order
-function applyZip64(data, extraStart, extraLength, fields, name) {
+function applyZip64(data: Uint8Array, extraStart: number, extraLength: number, fields: readonly Zip64Field[], name: string): void {
     const wanted = fields.filter(({ value }) => value === MAX_U32);
     if (!wanted.length) {
         return;
@@ -109,53 +136,67 @@ function applyZip64(data, extraStart, extraLength, fields, name) {
     if (!extra || extra.end - extra.start < wanted.length * 8) {
         throw zipError(`missing ZIP64 extra field for "${name}"`);
     }
-    wanted.forEach((field, index) => {
-        field.value = u64(data, extra.start + index * 8);
-    });
+    let pos = extra.start;
+    for (const field of wanted) {
+        field.value = u64(data, pos);
+        pos += 8;
+    }
 }
 
 // =============================================================================
 // Decompression limits
 
-function limitValue(options, name, defaults) {
-    const value = options && options[name] !== undefined ? options[name] : defaults[name];
+// the option, else the default; options also come from JavaScript callers, whatever their declared type
+function limitValue(options: ZipReadOptions | undefined, name: keyof ZipReadLimits, defaults: Readonly<ZipReadLimits>): number {
+    const value: unknown = options && options[name] !== undefined ? options[name] : defaults[name];
     if (!(typeof value === "number" && value > 0)) {
-        throw new TypeError(`${name} must be a positive number, got ${value}`);
+        throw new TypeError(`${name} must be a positive number, got ${String(value)}`);
     }
     return value;
 }
 
-class ZipLimits {
-    constructor(options, defaults) {
+/**
+ * The decompression limits of one archive, and the sizes counted against them. A check that fails throws an Error that
+ * names the limit exceeded.
+ */
+class ZipLimits implements Readonly<ZipReadLimits> {
+    readonly maxEntrySize: number;
+    readonly maxUncompressedSize: number;
+    readonly maxCompressionRatio: number;
+    /** bytes inflated so far */
+    private total = 0;
+    /** sum of the declared uncompressed sizes */
+    private declaredTotal = 0;
+    /** compressed bytes of the entries inflated (`total` comes from them) */
+    private compressedTotal = 0;
+
+    /** @throws TypeError when a limit is not a positive number */
+    constructor(options: ZipReadOptions | undefined, defaults: Readonly<ZipReadLimits>) {
         this.maxEntrySize = limitValue(options, "maxEntrySize", defaults);
         this.maxUncompressedSize = limitValue(options, "maxUncompressedSize", defaults);
         this.maxCompressionRatio = limitValue(options, "maxCompressionRatio", defaults);
-        this.total = 0;
-        this.declaredTotal = 0;
-        // compressed bytes of the entries inflated (total comes from them)
-        this.compressedTotal = 0;
     }
 
     // declared sizes (central directory or local header): fail before any work
-    checkDeclared(name, compressedSize, uncompressedSize) {
+    checkDeclared(name: string, compressedSize: number, uncompressedSize: number): void {
         this.declaredTotal += uncompressedSize;
-        this._check(name, uncompressedSize, compressedSize, Math.max(this.total, this.declaredTotal));
+        this.check(name, uncompressedSize, compressedSize, Math.max(this.total, this.declaredTotal));
     }
 
     // declared sizes of one entry
-    checkEntry(name, compressedSize, uncompressedSize) {
-        this._check(name, uncompressedSize, compressedSize, this.total);
+    checkEntry(name: string, compressedSize: number, uncompressedSize: number): void {
+        this.check(name, uncompressedSize, compressedSize, this.total);
     }
 
     // compressed data about to be inflated
-    addCompressed(bytes) {
+    addCompressed(bytes: number): void {
         this.compressedTotal += bytes;
     }
 
     // actual sizes, while inflating
-    add(name, bytes, entrySize, compressedSize) {
+    add(name: string, bytes: number, entrySize: number, compressedSize: number): void {
         this.total += bytes;
-        this._check(name, entrySize, compressedSize, this.total);
+        this.check(name, entrySize, compressedSize, this.total);
         // small parts too: the content of the archive is bounded by its size (many parts that share their data, or many
         // parts that each compress at the maximum ratio)
         if (this.total > RATIO_MIN_SIZE && this.total > this.compressedTotal * this.maxCompressionRatio) {
@@ -163,7 +204,7 @@ class ZipLimits {
         }
     }
 
-    _check(name, entrySize, compressedSize, total) {
+    private check(name: string, entrySize: number, compressedSize: number, total: number): void {
         if (entrySize > this.maxEntrySize) {
             throw new Error(`Zip entry "${name}" is larger than maxEntrySize (${this.maxEntrySize} bytes)`);
         }
@@ -176,7 +217,7 @@ class ZipLimits {
     }
 }
 
-function checkMethod(name, method, flags) {
+function checkMethod(name: string, method: number, flags: number): void {
     if (flags & FLAG_ENCRYPTED) {
         throw new Error(`Encrypted zip entries are not supported: "${name}"`);
     }
@@ -188,7 +229,7 @@ function checkMethod(name, method, flags) {
 // =============================================================================
 // In-memory archive
 
-function findEndOfCentralDirectory(data) {
+function findEndOfCentralDirectory(data: Uint8Array): number {
     // the record is 22 bytes followed by a comment of up to 65535 bytes
     const min = Math.max(0, data.length - 22 - MAX_U16);
     for (let pos = data.length - 22; pos >= min; pos--) {
@@ -199,7 +240,18 @@ function findEndOfCentralDirectory(data) {
     throw zipError("end of central directory not found (is this an xlsx file?)");
 }
 
-function readCentralDirectoryLocation(data) {
+/** where the central directory is in the buffer */
+interface CentralDirectoryLocation {
+    /** number of entries recorded in the end records */
+    readonly count: number;
+    readonly start: number;
+    /** where the central directory ends (it is followed by the end records) */
+    readonly end: number;
+    /** number of bytes prepended to the archive */
+    readonly shift: number;
+}
+
+function readCentralDirectoryLocation(data: Uint8Array): CentralDirectoryLocation {
     const eocd = findEndOfCentralDirectory(data);
     let count = u16(data, eocd + 10);
     let size = u32(data, eocd + 12);
@@ -231,10 +283,22 @@ function readCentralDirectoryLocation(data) {
     return { count, start: offset + shift, end, shift };
 }
 
+/** an entry of the central directory */
+interface CentralEntry {
+    readonly name: string;
+    readonly dir: boolean;
+    readonly flags: number;
+    readonly method: number;
+    readonly compressedSize: number;
+    readonly uncompressedSize: number;
+    /** offset of the local header in the buffer (prepended data included) */
+    readonly localOffset: number;
+}
+
 // Each entry must have its own data: entries that share their data (the central directory points several times at
 // the same local header, or at a local header within the data of another entry) multiply the inflated output without
 // adding compressed data (overlapping zip bomb). No zip writer produces them.
-function checkOverlaps(data, entries) {
+function checkOverlaps(data: Uint8Array, entries: readonly CentralEntry[]): void {
     const ranges = entries.map(({ name, localOffset, compressedSize }) => {
         // the lengths of the local header, or a lower bound when it is invalid (then reading the entry fails)
         const valid = localOffset + 30 <= data.length && u32(data, localOffset) === SIG_LOCAL;
@@ -242,18 +306,21 @@ function checkOverlaps(data, entries) {
         return { name, start: localOffset, end: localOffset + header + compressedSize };
     });
     ranges.sort((a, b) => a.start - b.start);
+    let previous = ranges[0];
     for (let i = 1; i < ranges.length; i++) {
-        if (ranges[i].start < ranges[i - 1].end) {
-            throw zipError(`entries "${ranges[i - 1].name}" and "${ranges[i].name}" overlap`);
+        const range = ranges[i];
+        if (previous && range && range.start < previous.end) {
+            throw zipError(`entries "${previous.name}" and "${range.name}" overlap`);
         }
+        previous = range;
     }
 }
 
-function readCentralDirectory(data, limits) {
+function readCentralDirectory(data: Uint8Array, limits: ZipLimits): CentralEntry[] {
     const { count, start, end, shift } = readCentralDirectoryLocation(data);
     // every entry of the central directory, and the entry kept for each name
-    const all = [];
-    const entries = new Map();
+    const all: CentralEntry[] = [];
+    const entries = new Map<string, CentralEntry>();
     let pos = start;
     let found = 0;
     while (pos + 46 <= end && u32(data, pos) === SIG_CENTRAL) {
@@ -268,13 +335,13 @@ function readCentralDirectory(data, limits) {
             throw zipError("central directory entry out of bounds");
         }
         const name = decodeName(data.subarray(nameStart, extraStart));
-        const uncompressedSize = { value: u32(data, pos + 24) };
-        const compressedSize = { value: u32(data, pos + 20) };
-        const localOffset = { value: u32(data, pos + 42) };
+        const uncompressedSize: Zip64Field = { value: u32(data, pos + 24) };
+        const compressedSize: Zip64Field = { value: u32(data, pos + 20) };
+        const localOffset: Zip64Field = { value: u32(data, pos + 42) };
         applyZip64(data, extraStart, extraLength, [uncompressedSize, compressedSize, localOffset], name);
 
         limits.checkDeclared(name, compressedSize.value, uncompressedSize.value);
-        const entry = {
+        const entry: CentralEntry = {
             name,
             dir: name.endsWith("/"),
             flags,
@@ -296,7 +363,8 @@ function readCentralDirectory(data, limits) {
     return [...entries.values()];
 }
 
-function entryData(data, entry) {
+// the compressed data of an entry: a view of the archive buffer
+function entryData(data: Uint8Array, entry: CentralEntry): Uint8Array {
     const { localOffset, compressedSize, name } = entry;
     if (localOffset + 30 > data.length || u32(data, localOffset) !== SIG_LOCAL) {
         throw zipError(`local header not found for "${name}"`);
@@ -308,47 +376,81 @@ function entryData(data, entry) {
     return data.subarray(start, start + compressedSize);
 }
 
-// Reads an in-memory zip archive (a Uint8Array, a Buffer, an ArrayBuffer...). Returns its entries in
-// central directory order: {name, dir, async data()}, data() inflating the entry into a Uint8Array.
-function readZip(buffer, options) {
+/** An in-memory archive: a Buffer, any typed array or DataView, an ArrayBuffer, or an array of byte values. */
+export type ZipInput = ArrayBufferView | ArrayBuffer | number[];
+
+/** An entry of an in-memory archive ({@link readZip}). */
+export interface ZipFileEntry {
+    /** path in the archive, as recorded (decoded as UTF-8) */
+    readonly name: string;
+    /** true when the name ends with "/" */
+    readonly dir: boolean;
+    /**
+     * Inflates the entry, checking the decompression limits (of the entry and of the whole archive).
+     *
+     * @returns a new Uint8Array, never a view of the archive buffer
+     * @throws (rejects) when a limit is exceeded, the entry is encrypted or uses an unknown compression method, or its
+     * data is invalid or does not have the declared size
+     */
+    data(): Promise<Uint8Array>;
+}
+
+/**
+ * Reads an in-memory zip archive. The central directory is read at once (the declared sizes are checked against the
+ * limits); the entries are inflated on demand, one at a time.
+ *
+ * @param buffer - the archive; data prepended to it (e.g. a self-extractor stub) is tolerated
+ * @param options - decompression limits, defaulting to {@link DOCUMENT_LIMITS}
+ * @returns the entries in central directory order; a later entry with the same name replaces an earlier one but keeps
+ * its position (like JSZip)
+ * @throws TypeError on an invalid input or limit; Error on an invalid or unsupported archive, declared sizes over the
+ * limits, or entries that share their data
+ */
+function readZip(buffer: ZipInput, options?: ZipReadOptions): ZipFileEntry[] {
+    // checked for JavaScript callers
     if (!(ArrayBuffer.isView(buffer) || buffer instanceof ArrayBuffer || Array.isArray(buffer))) {
         throw new TypeError("Can't read the zip file: expected a Buffer, a Uint8Array, an ArrayBuffer or a Blob");
     }
     const data = Array.isArray(buffer) ? new Uint8Array(buffer) : toBytes(buffer);
     const limits = new ZipLimits(options, DOCUMENT_LIMITS);
     const backend = selectBackend(options && options._backend);
-    return readCentralDirectory(data, limits).map((entry) => ({
+    return readCentralDirectory(data, limits).map((entry): ZipFileEntry => ({
         name: entry.name,
         dir: entry.dir,
-        async data() {
-            const { name, method, flags, uncompressedSize } = entry;
-            checkMethod(name, method, flags);
-            const compressed = entryData(data, entry);
-            limits.addCompressed(compressed.length);
-            // the declared size was checked against the limits: inflating stops past it
-            let output;
-            if (method === METHOD_STORE) {
-                // a copy: not a view of the caller's buffer
-                output = compressed.length > uncompressedSize ? null : new Uint8Array(compressed);
-            } else {
-                output = inflateWhole(compressed, uncompressedSize, backend);
-            }
-            if (!output || output.length > uncompressedSize) {
-                throw zipError(`"${name}" is larger than its declared size`);
-            }
-            if (output.length !== uncompressedSize) {
-                throw zipError(`"${name}" is smaller than its declared size`);
-            }
-            limits.add(name, output.length, output.length, compressed.length);
-            return output;
-        },
+        // synchronous: what inflateEntry throws rejects the promise
+        data: () => new Promise((resolve) => resolve(inflateEntry(data, entry, limits, backend))),
     }));
+}
+
+// inflates an entry of an in-memory archive into a new array
+function inflateEntry(data: Uint8Array, entry: CentralEntry, limits: ZipLimits, backend: DeflateBackend): Uint8Array {
+    const { name, method, flags, uncompressedSize } = entry;
+    checkMethod(name, method, flags);
+    const compressed = entryData(data, entry);
+    limits.addCompressed(compressed.length);
+    // the declared size was checked against the limits: inflating stops past it
+    let output: Uint8Array | null;
+    if (method === METHOD_STORE) {
+        // a copy: not a view of the caller's buffer
+        output = compressed.length > uncompressedSize ? null : new Uint8Array(compressed);
+    } else {
+        output = inflateWhole(compressed, uncompressedSize, backend);
+    }
+    if (!output || output.length > uncompressedSize) {
+        throw zipError(`"${name}" is larger than its declared size`);
+    }
+    if (output.length !== uncompressedSize) {
+        throw zipError(`"${name}" is smaller than its declared size`);
+    }
+    limits.add(name, output.length, output.length, compressed.length);
+    return output;
 }
 
 // =============================================================================
 // Forward-only archive
 
-function toBytes(value) {
+// a view of the bytes of an input chunk (not a copy)
+function toBytes(value: unknown): Uint8Array {
     if (value instanceof Uint8Array) {
         return value;
     }
@@ -361,20 +463,25 @@ function toBytes(value) {
     throw new TypeError(`Zip input chunks must be bytes, got ${typeof value}`);
 }
 
+/** the input of the forward-only reader, buffered: `buffer[pos...]` is read and not consumed yet */
 class ByteSource {
-    constructor(chunks) {
+    private readonly iterator: AsyncIterator<unknown, unknown, undefined>;
+    buffer: Uint8Array = new Uint8Array(0);
+    pos = 0;
+    /** true at the end of the input (or once closed) */
+    ended = false;
+
+    constructor(chunks: AsyncIterable<unknown, unknown, undefined>) {
         this.iterator = chunks[Symbol.asyncIterator]();
-        this.buffer = new Uint8Array(0);
-        this.pos = 0;
-        this.ended = false;
     }
 
-    get available() {
+    /** bytes read and not consumed */
+    get available(): number {
         return this.buffer.length - this.pos;
     }
 
     // read one more chunk; false at the end of the input
-    async more() {
+    async more(): Promise<boolean> {
         if (this.ended) {
             return false;
         }
@@ -396,7 +503,8 @@ class ByteSource {
         return true;
     }
 
-    async ensure(length) {
+    // at least `length` bytes available; false if the input ends first
+    async ensure(length: number): Promise<boolean> {
         while (this.available < length) {
             if (!(await this.more())) {
                 return false;
@@ -405,24 +513,26 @@ class ByteSource {
         return true;
     }
 
-    async require(length) {
+    /** @throws Error when the input ends before `length` bytes are available */
+    async require(length: number): Promise<void> {
         if (!(await this.ensure(length))) {
             throw new Error("Unexpected end of zip data");
         }
     }
 
-    take(length) {
+    // consumes `length` available bytes: a view of the input
+    take(length: number): Uint8Array {
         const result = this.buffer.subarray(this.pos, this.pos + length);
         this.pos += length;
         return result;
     }
 
-    u32(offset) {
+    u32(offset: number): number {
         return u32(this.buffer, this.pos + offset);
     }
 
     // stop reading: releases the input (e.g. destroys a stream)
-    async close() {
+    async close(): Promise<void> {
         if (!this.ended && typeof this.iterator.return === "function") {
             this.ended = true;
             await this.iterator.return();
@@ -430,27 +540,59 @@ class ByteSource {
     }
 }
 
-const NEXT_RECORD = [SIG_LOCAL, SIG_CENTRAL, SIG_ZIP64_EOCD, SIG_EOCD];
+// the records that may follow the data of an entry
+const NEXT_RECORD: readonly number[] = [SIG_LOCAL, SIG_CENTRAL, SIG_ZIP64_EOCD, SIG_EOCD];
 
-class StreamEntry {
-    constructor(parser, header) {
-        this.parser = parser;
-        this.header = header;
+/** a local header */
+interface LocalHeader {
+    readonly name: string;
+    readonly flags: number;
+    readonly method: number;
+    readonly compressedSize: number;
+    /** with a data descriptor, the size it records, set once the data is read */
+    uncompressedSize: number;
+    /** the header has a ZIP64 extra field (the data descriptor then has 64-bit sizes) */
+    readonly zip64: boolean;
+    /** general purpose flag bit 3: the sizes are in a data descriptor that follows the data */
+    readonly dataDescriptor: boolean;
+}
+
+/** An entry of a forward-only archive ({@link parseZipStream}). */
+export interface ZipStreamEntry extends AsyncIterable<Uint8Array> {
+    /** path in the archive, as recorded (decoded as UTF-8) */
+    readonly path: string;
+    readonly type: "Directory" | "File";
+    /**
+     * The inflated data, chunk by chunk, in one pass (iterating again continues the same pass). The chunks are new
+     * arrays, not views of the input. The iteration throws when a limit is exceeded, the entry is encrypted or uses an
+     * unknown compression method, or its data is invalid or does not have the recorded size.
+     */
+    [Symbol.asyncIterator](): AsyncIterator<Uint8Array>;
+}
+
+class StreamEntry implements ZipStreamEntry {
+    readonly path: string;
+    readonly type: "Directory" | "File";
+    /** the compressed data, in slices */
+    private readonly raw: AsyncGenerator<Uint8Array, void, undefined>;
+    private chunks: AsyncGenerator<Uint8Array, void, undefined> | null = null;
+
+    constructor(
+        private readonly parser: ZipStreamParser,
+        private readonly header: LocalHeader
+    ) {
         this.path = header.name;
         this.type = header.name.endsWith("/") ? "Directory" : "File";
         this.raw = parser._rawData(header);
-        this.chunks = null;
     }
 
     // the inflated data, chunk by chunk (one pass)
-    [Symbol.asyncIterator]() {
-        if (!this.chunks) {
-            this.chunks = this._inflate();
-        }
+    [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+        this.chunks ??= this.inflate();
         return this.chunks;
     }
 
-    async *_inflate() {
+    private async *inflate(): AsyncGenerator<Uint8Array, void, undefined> {
         const { name, method, flags, dataDescriptor, compressedSize, uncompressedSize } = this.header;
         const { limits, backend } = this.parser;
         checkMethod(name, method, flags);
@@ -461,19 +603,19 @@ class StreamEntry {
         // sizes of the data read so far: the limits are checked on every inflated chunk
         let size = 0;
         let compressed = 0;
-        const consume = (slice) => {
+        const consume = (slice: Uint8Array): void => {
             compressed += slice.length;
             limits.addCompressed(slice.length);
         };
-        const count = (chunk) => {
+        const count = (chunk: Uint8Array): void => {
             size += chunk.length;
             limits.add(name, chunk.length, size, compressed);
         };
         // not `for await`: when the consumer stops early, it would close `raw`, which drain() then needs
         // to skip the rest of the entry
-        const next = () => this.raw.next();
+        const next = (): Promise<IteratorResult<Uint8Array, void>> => this.raw.next();
         // the size recorded in the local header or, once the data is read, in the data descriptor
-        const checkSize = () => {
+        const checkSize = (): void => {
             if (size !== this.header.uncompressedSize) {
                 throw zipError(`"${name}" does not have the size recorded in the archive`);
             }
@@ -491,7 +633,7 @@ class StreamEntry {
         const inflater = createInflater(count, backend);
         try {
             // hold one slice back to know which one is the last
-            let previous = null;
+            let previous: Uint8Array | null = null;
             for (let slice = await next(); !slice.done; slice = await next()) {
                 if (previous) {
                     consume(previous);
@@ -499,7 +641,7 @@ class StreamEntry {
                 }
                 previous = slice.value;
             }
-            previous = previous || new Uint8Array(0);
+            previous ??= new Uint8Array(0);
             consume(previous);
             yield* await inflater.push(previous, true);
             checkSize();
@@ -508,23 +650,30 @@ class StreamEntry {
         }
     }
 
-    // skip whatever has not been read
-    async drain() {
-        for await (const slice of this.raw) {
-            // compressed data of an unread entry is skipped without inflating it
+    /** skips whatever has not been read; compressed data of an unread entry is skipped without inflating it */
+    async drain(): Promise<void> {
+        let slice = await this.raw.next();
+        while (!slice.done) {
+            slice = await this.raw.next();
         }
     }
 }
 
 class ZipStreamParser {
-    constructor(chunks, options) {
+    private readonly source: ByteSource;
+    readonly limits: ZipLimits;
+    readonly backend: DeflateBackend;
+    /** maximum size of the compressed slices handed to the decompressor */
+    private readonly slice: number;
+
+    constructor(chunks: AsyncIterable<unknown, unknown, undefined>, options: ZipReadOptions | undefined) {
         this.source = new ByteSource(chunks);
         this.limits = new ZipLimits(options, STREAM_LIMITS);
         this.backend = selectBackend(options && options._backend);
         this.slice = sliceSize(this.backend);
     }
 
-    async *entries() {
+    async *entries(): AsyncGenerator<ZipStreamEntry, void, undefined> {
         const { source } = this;
         try {
             let first = true;
@@ -550,7 +699,7 @@ class ZipStreamParser {
                     }
                     throw zipError(`unexpected signature 0x${signature.toString(16)}`);
                 }
-                const entry = new StreamEntry(this, await this._readLocalHeader());
+                const entry = new StreamEntry(this, await this.readLocalHeader());
                 yield entry;
                 await entry.drain();
             }
@@ -559,13 +708,13 @@ class ZipStreamParser {
         }
     }
 
-    async _readLocalHeader() {
+    private async readLocalHeader(): Promise<LocalHeader> {
         const { source } = this;
         await source.require(30);
         const flags = u16(source.buffer, source.pos + 6);
         const method = u16(source.buffer, source.pos + 8);
-        const compressedSize = { value: source.u32(18) };
-        const uncompressedSize = { value: source.u32(22) };
+        const compressedSize: Zip64Field = { value: source.u32(18) };
+        const uncompressedSize: Zip64Field = { value: source.u32(22) };
         const nameLength = u16(source.buffer, source.pos + 26);
         const extraLength = u16(source.buffer, source.pos + 28);
         await source.require(30 + nameLength + extraLength);
@@ -593,10 +742,14 @@ class ZipStreamParser {
         };
     }
 
-    // the compressed data of an entry, in slices
-    async *_rawData(header) {
+    /**
+     * The compressed data of an entry, in slices of at most `slice` bytes (views of the input).
+     *
+     * @internal used by StreamEntry
+     */
+    async *_rawData(header: LocalHeader): AsyncGenerator<Uint8Array, void, undefined> {
         if (header.dataDescriptor) {
-            yield* this._rawDataUntilDescriptor(header);
+            yield* this.rawDataUntilDescriptor(header);
             return;
         }
         const { source } = this;
@@ -614,7 +767,7 @@ class ZipStreamParser {
     // Sizes unknown (general purpose flag bit 3): the data ends with a data descriptor. Its signature
     // may also occur inside the compressed data, so a candidate is accepted only when the compressed
     // size it records matches the number of bytes seen.
-    async *_rawDataUntilDescriptor(header) {
+    private async *rawDataUntilDescriptor(header: LocalHeader): AsyncGenerator<Uint8Array, void, undefined> {
         const { source } = this;
         // compressed bytes already handed out
         let size = 0;
@@ -622,7 +775,7 @@ class ZipStreamParser {
             const { buffer, pos, available } = source;
             // bytes known to be data (before any possible descriptor)
             let safe = available;
-            let found = null;
+            let found: DescriptorLength = 0;
             for (let at = buffer.indexOf(0x50, pos) - pos; at >= 0; at = buffer.indexOf(0x50, pos + at + 1) - pos) {
                 if (at + 4 > available) {
                     safe = at;
@@ -660,12 +813,21 @@ class ZipStreamParser {
     }
 }
 
+/** length of a data descriptor: 16 (32-bit sizes) or 24 (64-bit sizes) bytes; 0 for none */
+type DescriptorLength = 0 | 16 | 24;
+
 // the length of the data descriptor starting at `pos` if it is valid, else 0
-function matchDescriptor(header, buffer, pos, available, compressedSize) {
+function matchDescriptor(
+    header: LocalHeader,
+    buffer: Uint8Array,
+    pos: number,
+    available: number,
+    compressedSize: number
+): DescriptorLength {
     if (available < 16 || u32(buffer, pos + 8) !== compressedSize % TWO_32) {
         return 0;
     }
-    const isNext = (offset) => available < offset + 4 || NEXT_RECORD.includes(u32(buffer, pos + offset));
+    const isNext = (offset: number): boolean => available < offset + 4 || NEXT_RECORD.includes(u32(buffer, pos + offset));
     const high = u32(buffer, pos + 12);
     if (header.zip64 || compressedSize >= TWO_32) {
         // 64-bit sizes
@@ -681,16 +843,27 @@ function matchDescriptor(header, buffer, pos, available, compressedSize) {
     return 0;
 }
 
-function* sliced(data, size) {
+function* sliced(data: Uint8Array, size: number): Generator<Uint8Array, void, undefined> {
     for (let pos = 0; pos < data.length; pos += size) {
         yield data.subarray(pos, pos + size);
     }
 }
 
-// Reads a zip archive from an async iterable of byte chunks. Yields entries in archive order
-// ({path, type, [Symbol.asyncIterator]}); the data of an entry must be read before the next entry is
-// requested, whatever is left is skipped.
-function parseZipStream(chunks, options) {
+/**
+ * Reads a zip archive from an async iterable of byte chunks (e.g. a Node.js Readable), local header by local header.
+ * The data of an entry must be read before the next entry is requested: whatever is left is skipped (never inflated).
+ * Stopping the iteration early releases the input (its iterator's `return()`, which destroys a stream).
+ *
+ * @param chunks - Uint8Array / Buffer / ArrayBuffer / typed array chunks
+ * @param options - decompression limits, defaulting to {@link STREAM_LIMITS}
+ * @returns the entries in archive order
+ * @throws TypeError on an invalid limit (at once) or input chunk; Error (from the iteration) on an invalid or truncated
+ * archive
+ */
+function parseZipStream(
+    chunks: AsyncIterable<unknown, unknown, undefined>,
+    options?: ZipReadOptions
+): AsyncGenerator<ZipStreamEntry, void, undefined> {
     return new ZipStreamParser(chunks, options).entries();
 }
 

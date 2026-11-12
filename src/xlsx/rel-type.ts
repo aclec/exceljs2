@@ -1,6 +1,8 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-export default {
+/**
+ * Relationship types (the `Type` attribute of a `<Relationship>` in a `.rels` part) of the parts read and written,
+ * by name.
+ */
+const RelType = {
     OfficeDocument: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
     Worksheet: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
     CalcChain: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain",
@@ -17,4 +19,11 @@ export default {
     PivotCacheDefinition: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition",
     PivotCacheRecords: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords",
     PivotTable: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable",
-};
+} as const;
+
+/** name of a relationship type */
+export type RelTypeName = keyof typeof RelType;
+/** a relationship type URI */
+export type RelTypeUri = (typeof RelType)[RelTypeName];
+
+export default RelType;
