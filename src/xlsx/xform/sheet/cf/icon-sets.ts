@@ -34,6 +34,12 @@ const X14_ONLY_ICON_SETS: ReadonlySet<string> = new Set<IconSetTypes>(["3Stars",
 /** The icon set of a rule or an icon read from a file without one (the default of ST_IconSetType). */
 export const DEFAULT_ICON_SET = "3TrafficLights1" satisfies IconSetTypes;
 
+/**
+ * The name that versions before 5.0 documented (and read) as the default icon set: not an ST_IconSetType value, it is
+ * written as the default one ({@link DEFAULT_ICON_SET}) so that code following the old documentation keeps working.
+ */
+const LEGACY_DEFAULT_ICON_SET = "3TrafficLights";
+
 /** @returns whether `value` is an icon set of the x14 ST_IconSetType (a superset of the ECMA-376 one) */
 export function isIconSet(value: string): value is IconSetTypes {
     return Object.hasOwn(ICON_COUNTS, value);
@@ -51,7 +57,7 @@ export function isX14OnlyIconSet(iconSet: string | undefined): boolean {
  * @throws Error for a value that is not an icon set, or one that only the x14 extension has in the main `<iconSet>`
  */
 export function iconSetAttribute(iconSet: string | undefined, x14: boolean): IconSetTypes | undefined {
-    if (iconSet === undefined || iconSet === DEFAULT_ICON_SET) {
+    if (iconSet === undefined || iconSet === DEFAULT_ICON_SET || iconSet === LEGACY_DEFAULT_ICON_SET) {
         return undefined;
     }
     const valid = validIconSet(iconSet);
@@ -62,10 +68,13 @@ export function iconSetAttribute(iconSet: string | undefined, x14: boolean): Ico
 }
 
 /**
- * @returns the icon set given, checked
+ * @returns the icon set given, checked (the legacy `"3TrafficLights"` gives the default one)
  * @throws Error when it is absent or not an icon set of the x14 ST_IconSetType
  */
 export function validIconSet(iconSet: string | undefined): IconSetTypes {
+    if (iconSet === LEGACY_DEFAULT_ICON_SET) {
+        return DEFAULT_ICON_SET;
+    }
     if (iconSet === undefined || !isIconSet(iconSet)) {
         throw new Error(
             `Unknown icon set ${iconSet === undefined ? "(none)" : `"${iconSet}"`} (ST_IconSetType), e.g. "${DEFAULT_ICON_SET}"`

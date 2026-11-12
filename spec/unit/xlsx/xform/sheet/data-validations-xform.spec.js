@@ -189,6 +189,22 @@ const expectations = [
     `,
         tests: ["render", "renderIn", "parse"],
     },
+    {
+        // an ISO date string was converted to a date before 5.0: written as a formula it would be 2016 - 1 - 1
+        title: "a date given as an ISO 8601 string",
+        create: () => new DataValidationsXform(),
+        preparedModel: {
+            A1: { type: "date", operator: "lessThan", formulae: ["2016-01-01"] },
+            A2: { type: "date", operator: "lessThan", formulae: ["2016-01-01T00:00:00Z"] },
+        },
+        xml: `
+      <dataValidations count="2">
+        <dataValidation type="date" operator="lessThan" sqref="A1"><formula1>42370</formula1></dataValidation>
+        <dataValidation type="date" operator="lessThan" sqref="A2"><formula1>42370</formula1></dataValidation>
+      </dataValidations>
+    `,
+        tests: ["render", "renderIn"],
+    },
 ];
 
 describe("DataValidationsXform", () => {

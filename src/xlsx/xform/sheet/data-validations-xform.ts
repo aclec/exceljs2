@@ -45,13 +45,21 @@ function parseFormula(type: DataValidationModel["type"], text: string): DataVali
 }
 
 /**
- * The text of a formula of a `<dataValidation>`: a string as is (a formula, or a literal), a number as a number (for a
- * `date` rule, as milliseconds since 1970 like `new Date(number)`: its serial date), a Date as its serial date.
+ * An ISO 8601 date or date-time (`2016-01-01`, `2016-01-01T12:00:00Z`): the text that versions before 5.0 converted to a
+ * date for a `date` rule (anchored, linear).
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
+
+/**
+ * The text of a formula of a `<dataValidation>`: a string as is (a formula, or a literal; for a `date` rule an ISO 8601
+ * date string is a date), a number as a number (for a `date` rule, as milliseconds since 1970 like `new Date(number)`:
+ * its serial date), a Date as its serial date.
  *
- * @throws Error for an invalid Date (or a number that is not one, for a `date` rule), or a number that is not finite
+ * @throws Error for an invalid Date (or a number or ISO date string that is not one, for a `date` rule), or a number
+ * that is not finite
  */
 function formulaText(type: DataValidationModel["type"], formula: DataValidationFormula): string {
-    if (typeof formula === "string") {
+    if (typeof formula === "string" && !(type === "date" && ISO_DATE.test(formula))) {
         return formula;
     }
     if (formula instanceof Date || type === "date") {

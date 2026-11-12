@@ -546,7 +546,7 @@ describe("conditional formatting", () => {
         });
 
         it("rejects an icon set that is not one of the file format", async () => {
-            for (const iconSet of ["3TrafficLights", "bogus"]) {
+            for (const iconSet of ["3TrafficLight", "bogus"]) {
                 for (const icons of [
                     undefined,
                     [
@@ -565,6 +565,24 @@ describe("conditional formatting", () => {
                     expect(thrown, iconSet).to.be.an.instanceOf(Error);
                     expect(thrown.message).to.include(`"${iconSet}"`);
                 }
+            }
+        });
+
+        it("writes the legacy default name 3TrafficLights as the default icon set", async () => {
+            for (const icons of [
+                undefined,
+                [
+                    { iconSet: "3Flags", iconId: 0 },
+                    { iconSet: "3Flags", iconId: 1 },
+                    { iconSet: "3Flags", iconId: 2 },
+                ],
+            ]) {
+                const xml = await readPart(
+                    await iconSetSheet({ type: "iconSet", iconSet: "3TrafficLights", cfvo: thresholds, icons }).xlsx.writeBuffer(),
+                    SHEET
+                );
+                expect(xml).to.not.include('iconSet="3TrafficLights"');
+                expect(xml).to.include(icons ? "<x14:iconSet" : "<iconSet>");
             }
         });
 
