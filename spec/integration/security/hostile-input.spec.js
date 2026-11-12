@@ -132,6 +132,50 @@ describe("hostile input", function () {
         });
     });
 
+    describe("number formats", () => {
+        // a numeric cell styled with the custom format formatCode
+        const withNumFmt = (formatCode, cells = 1) => ({
+            "xl/styles.xml": (xml) =>
+                xml
+                    .replace(/<numFmts[^>]*>/, (open) => `${open}<numFmt numFmtId="200" formatCode="${formatCode}"/>`)
+                    .replace(/<cellXfs count="(\d+)">(.*?)<\/cellXfs>/s, (m, count, xfs) => {
+                        const xf = '<xf numFmtId="200" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>';
+                        return `<cellXfs count="${+count + 1}">${xfs}${xf}</cellXfs>`;
+                    }),
+            [SHEET]: (xml) => {
+                const rows = Array.from({ length: cells }, (_, i) => `<row r="${i + 2}"><c r="A${i + 2}" s="XF"><v>1</v></c></row>`);
+                return xml.replace("</sheetData>", `${rows.join("")}</sheetData>`);
+            },
+        });
+        const build = async (formatCode, cells) => {
+            // a base whose styles.xml has a <numFmts> element and two cell formats
+            const base = await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B1").numFmt = "0.000";
+            });
+            const styles = await readPart(base, "xl/styles.xml");
+            const xfIndex = (styles.match(/<cellXfs[^>]*>(.*?)<\/cellXfs>/s)[1].match(/<xf /g) || []).length;
+            const patches = withNumFmt(formatCode, cells);
+            const sheetPatch = patches[SHEET];
+            patches[SHEET] = (xml) => sheetPatch(xml).replace(/s="XF"/g, `s="${xfIndex}"`);
+            return tamper(base, patches);
+        };
+
+        it("keeps custom formats up to the Excel limit of 255 characters", async () => {
+            const formatCode = `yyyy-mm-dd${" ".repeat(245)}`;
+            const ws = (await load(await build(formatCode))).getWorksheet("Sheet1");
+            expect(ws.getCell("A2").numFmt).to.equal(formatCode);
+            expect(ws.getCell("A2").value).to.be.an.instanceof(Date);
+        });
+
+        it("ignores custom formats longer than 255 characters", async () => {
+            const { result: wb, ms } = await timed(async () => load(await build("[".repeat(20000), 50)));
+            expect(ms).to.be.below(2000);
+            const ws = wb.getWorksheet("Sheet1");
+            expect(ws.getCell("A2").numFmt).to.equal(undefined);
+            expect(ws.getCell("A51").value).to.equal(1);
+        });
+    });
+
     it("clamps <col max> to the last Excel column", async () => {
         const buffer = await tamper(await baseWorkbookBuffer(), {
             [SHEET]: (xml) =>
