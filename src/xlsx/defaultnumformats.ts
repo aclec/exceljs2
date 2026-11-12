@@ -1,6 +1,18 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-export default {
+/** Locales of the locale-specific built-in number formats */
+export type NumFormatLocale = "zh-tw" | "zh-cn" | "ja-jp" | "ko-kr" | "th-th";
+
+/**
+ * A built-in number format: `f` is its format code in every locale; the others have a code per locale.
+ */
+export interface DefaultNumFormat extends Readonly<Partial<Record<NumFormatLocale, string>>> {
+    readonly f?: string;
+}
+
+/**
+ * The built-in number formats, implied by a `numFmtId` without a `<numFmt>` element in the styles part (ECMA-376
+ * Part 1, numFmt), keyed by id.
+ */
+const defaultNumFormats = {
     0: { f: "General" },
     1: { f: "0" },
     2: { f: "0.00" },
@@ -152,4 +164,9 @@ export default {
     70: { "th-th": "t# ??/??" },
 
     81: { "th-th": "d/m/bb" },
-};
+} as const satisfies Readonly<Record<number, DefaultNumFormat>>;
+
+/** id of a built-in number format */
+export type DefaultNumFormatId = keyof typeof defaultNumFormats;
+
+export default defaultNumFormats;
