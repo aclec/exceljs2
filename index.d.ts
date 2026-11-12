@@ -2366,60 +2366,57 @@ export interface Table {
     removeColumns(colIndex: number, count?: number): void;
 }
 
+/**
+ * The streaming API (Node.js and Bun only: not in the browser bundles). `stream.xlsx.WorkbookWriter` writes a workbook
+ * row by row without holding it in memory; `stream.xlsx.WorkbookReader` reads one in a single pass. Their worksheets are
+ * not document {@link Worksheet}s: see {@link stream.xlsx.WorksheetWriter} and {@link stream.xlsx.WorksheetReader}.
+ */
 export namespace stream {
     namespace xlsx {
+        /**
+         * The output and the content options of the streaming {@link WorkbookWriter} (also the base of
+         * {@link XlsxWriteOptions}).
+         */
         interface WorkbookWriterOptions {
             /**
-             * Specifies a writable stream to write the XLSX workbook to.
+             * The writable stream the archive is written to. Without `stream` nor `filename`, the archive is written to
+             * an in-memory stream (`writer.stream`).
              */
-            stream: import("stream").Stream;
+            stream: NodeJS.WritableStream;
 
             /**
-             * 	If stream not specified, this field specifies the path to a file to write the XLSX workbook to.
+             * The path of the file to write the archive to, when there is no `stream`.
              */
             filename: string;
 
             /**
-             * 	Specifies whether to use shared strings in the workbook. Default is false
+             * Write the strings to the shared strings table (smaller file, more memory) instead of inline.
+             * @default false (streaming WorkbookWriter), true (`xlsx.write`, `writeBuffer`, `writeFile`)
              */
             useSharedStrings: boolean;
 
             /**
-             * Specifies whether to add style information to the workbook.
-             * Styles can add some performance overhead. Default is false
+             * Write the styles of the cells (some performance overhead).
+             * @default false (streaming WorkbookWriter), true (`xlsx.write`, `writeBuffer`, `writeFile`)
              */
             useStyles: boolean;
         }
 
         /**
-         * @deprecated use ZipOptions
+         * @deprecated use {@link ZipOptions} (archiver is no longer used)
          */
         type ArchiverZipOptions = ZipOptions;
 
-        interface ZlibOptions {
-            /**
-             * @default constants.Z_NO_FLUSH
-             */
-            flush: number;
-            /**
-             * @default constants.Z_FINISH
-             */
-            finishFlush: number;
-            /**
-             * @default 16*1024
-             */
-            chunkSize: number;
-            windowBits: number;
-            level: number; // compression only
-            memLevel: number; // compression only
-            strategy: number; // compression only
-            dictionary: Buffer | NodeJS.TypedArray | DataView | ArrayBuffer; // deflate/inflate only, empty dictionary by default
-        }
+        /**
+         * @deprecated archiver's `zlib` option (ExcelJS < 5): only `level` is read, see {@link ZipOptions.zlib}
+         */
+        type ZlibOptions = ZipOptions["zlib"];
 
+        /** The options of the {@link WorkbookWriter} constructor (all optional). */
         interface WorkbookStreamWriterOptions extends WorkbookWriterOptions {
             /**
-             * Specifies whether to add style information to the workbook.
-             * Styles can add some performance overhead. Default is false
+             * The zip options (compression level, ZIP64, archive comment).
+             * @default { level: 6 }
              */
             zip: Partial<ZipOptions>;
             /**
@@ -2428,45 +2425,338 @@ export namespace stream {
              * @default 1048576 (one full worksheet)
              */
             maxMergedCells: number;
+            /**
+             * Document property: the creation date.
+             * @default now
+             */
+            created: Date;
+            /**
+             * Document property: the date of the last change.
+             * @default `created`
+             */
+            modified: Date;
+            /**
+             * Document property: the author.
+             * @default "ExcelJS"
+             */
+            creator: string;
+            /**
+             * Document property: the author of the last change.
+             * @default "ExcelJS"
+             */
+            lastModifiedBy: string;
+            /** Document property: the date of the last print. */
+            lastPrinted: Date;
         }
 
-        class WorkbookWriter extends Workbook {
-            constructor(options: Partial<WorkbookStreamWriterOptions>);
-            // commit all worksheets, then add suplimentary files
-            commit(): Promise<void>;
+        /** An image added with {@link WorkbookWriter.addImage}: the image given, with its part name (`image0.png`). */
+        type WorkbookWriterImage = Image & {
+            /** Always `"image"`. */
+            type: "image";
+            /** The name of its part in `xl/media/` (`image0.png`). */
+            name: string;
+        };
+
+        /**
+         * The streaming xlsx writer: each worksheet is written to the archive as its rows are committed, so that a large
+         * workbook is never held in memory. {@link commit} commits the worksheets left, adds the workbook parts and
+         * completes the archive. Node.js and Bun only.
+         */
+        class WorkbookWriter {
+            /**
+             * @throws TypeError for an invalid `maxMergedCells`
+             */
+            constructor(options?: Partial<WorkbookStreamWriterOptions>);
+
+            /** Document property: the creation date (now by default). */
+            created: Date;
+            /** Document property: the date of the last change (`created` by default). */
+            modified: Date;
+            /** Document property: the author ("ExcelJS" by default). */
+            creator: string;
+            /** Document property: the author of the last change ("ExcelJS" by default). */
+            lastModifiedBy: string;
+            /** Document property: the date of the last print. */
+            lastPrinted: Date | undefined;
+            /** The default of the worksheets for writing strings to the shared strings table. */
+            useSharedStrings: boolean;
+            /** The workbook views (windows), written by {@link commit}. */
+            views: WorkbookView[];
+            /** The cap on the cells covered by merges in all the worksheets (`maxMergedCells` option). */
+            maxMergedCells: number;
+            /** Where the archive is written: the `stream` option, the `filename` file, or an in-memory stream. */
+            stream: NodeJS.WritableStream;
+            /** The defined names of the workbook, written by {@link commit}. */
+            readonly definedNames: DefinedNames;
+            /** The id that the next worksheet added gets: the first free one. */
+            readonly nextId: number;
+
+            /**
+             * Commits the worksheets not committed yet, adds the workbook parts and completes the archive.
+             *
+             * @returns resolves with this writer once the output stream has finished
+             * @throws (rejects) on a failure of the zip writer or of the output stream, or an image without data
+             */
+            commit(): Promise<this>;
+
+            /**
+             * Adds an image (`buffer`, `base64` or `filename`), written by {@link commit}.
+             *
+             * @returns its id, for {@link WorksheetWriter.addBackgroundImage}
+             * @throws Error for an extension that is not 1 to 5 letters or digits
+             */
+            addImage(image: Image): number;
+            /** An image added with {@link addImage}, `undefined` for an unknown id. */
+            getImage(id: number): WorkbookWriterImage | undefined;
+
+            /**
+             * Adds a worksheet, written as its rows are committed.
+             *
+             * @param name - default `sheet<id>`
+             */
+            addWorksheet(name?: string, options?: Partial<AddWorksheetWriterOptions>): WorksheetWriter;
+            /**
+             * The first worksheet (no argument), the worksheet with this id, or the one with this name; `undefined` when
+             * there is none.
+             */
+            getWorksheet(id?: number | string): WorksheetWriter | undefined;
+
+            /** A step of {@link commit}: adds the styles part. Not meant to be called directly. */
             addStyles(): Promise<void>;
+            /** A step of {@link commit} (done by the constructor): adds the theme part. Not meant to be called directly. */
             addThemes(): Promise<void>;
+            /**
+             * A step of {@link commit} (done by the constructor): adds the package relationships. Not meant to be called
+             * directly.
+             */
             addOfficeRels(): Promise<void>;
+            /** A step of {@link commit}: adds `[Content_Types].xml`. Not meant to be called directly. */
             addContentTypes(): Promise<void>;
+            /**
+             * A step of {@link commit}: adds the images.
+             *
+             * @throws Error for an image without data (synchronously)
+             */
+            addMedia(): Promise<void[]>;
+            /** A step of {@link commit}: adds the extended properties. Not meant to be called directly. */
             addApp(): Promise<void>;
+            /** A step of {@link commit}: adds the core properties. Not meant to be called directly. */
             addCore(): Promise<void>;
+            /** A step of {@link commit}: adds the shared strings part, when used. Not meant to be called directly. */
             addSharedStrings(): Promise<void>;
+            /** A step of {@link commit}: adds the workbook relationships. Not meant to be called directly. */
             addWorkbookRels(): Promise<void>;
+            /** A step of {@link commit}: adds the workbook part. Not meant to be called directly. */
             addWorkbook(): Promise<void>;
         }
 
+        /** The options of {@link WorkbookWriter.addWorksheet}. */
+        interface AddWorksheetWriterOptions extends AddWorksheetOptions {
+            /**
+             * Write the strings of this worksheet to the shared strings table.
+             * @default the `useSharedStrings` option of the workbook writer
+             */
+            useSharedStrings: boolean;
+            /** The auto filter of the worksheet. */
+            autoFilter: AutoFilter | null;
+            /**
+             * @deprecated use `properties.tabColor`
+             */
+            tabColor: Partial<Color>;
+        }
+
+        /**
+         * A worksheet of the streaming {@link WorkbookWriter} (`writer.addWorksheet()`): not a document
+         * {@link Worksheet}. Rows are written, in order, when they are committed (`row.commit()`) and can no longer be
+         * reached; the rest of the worksheet (merges, validations, conditional formatting, page setup...) is written when
+         * the worksheet is committed.
+         */
+        interface WorksheetWriter {
+            /** The id of the worksheet in the workbook. */
+            readonly id: number;
+            /** The worksheet name (`Sheet<id>` by default). */
+            name: string;
+            /** The visibility of the worksheet. */
+            state: WorksheetState;
+            /** The workbook writer. */
+            readonly workbook: WorkbookWriter;
+            /** True once {@link commit} was called: rows can no longer be added. */
+            readonly committed: boolean;
+            /** The data validations of the cells, written by {@link commit}. */
+            dataValidations: DataValidations;
+            /** The conditional formattings (see {@link addConditionalFormatting}). */
+            conditionalFormatting: ConditionalFormattingOptions[];
+            /** The manual page breaks (`row.addPageBreak()`). */
+            rowBreaks: RowBreak[];
+            /** The worksheet properties (default row height 15, dyDescent 55, outline levels 0, and those given). */
+            properties: Partial<WorksheetProperties> &
+                Pick<WorksheetProperties, "defaultRowHeight" | "dyDescent" | "outlineLevelCol" | "outlineLevelRow">;
+            /** Headers and footers of the printed pages (`null` by default). */
+            headerFooter: WorksheetHeaderFooter;
+            /** For all things printing (margins, orientation, fit to page...): the defaults, and those given. */
+            pageSetup: Partial<PageSetup>;
+            /** Write the strings of this worksheet to the shared strings table. */
+            useSharedStrings: boolean;
+            /** The auto filter, `null` when there is none. */
+            autoFilter: AutoFilter | null;
+            /** The protection set by {@link protect}, `null` when the worksheet is not protected. */
+            sheetProtection:
+                | (Partial<WorksheetProtection> & {
+                      /** Always true: the worksheet is protected. */
+                      sheet?: boolean;
+                      /** `"SHA-512"` when there is a password. */
+                      algorithmName?: string;
+                      /** The hash of the password (base64). */
+                      hashValue?: string;
+                      /** The salt of the hash (base64). */
+                      saltValue?: string;
+                  })
+                | null;
+            /** The range covering the rows added so far. */
+            readonly dimensions: Range;
+            /** The sheet views (the `views` option of `addWorksheet`). */
+            readonly views: Partial<WorksheetView>[];
+
+            /**
+             * Not a valid operation for a streaming writer.
+             *
+             * @throws Error always
+             */
+            destroy(): never;
+
+            /**
+             * Writes the rows not committed yet and the rest of the worksheet. Rows can no longer be added.
+             *
+             * @returns a promise to await before writing more (backpressure)
+             */
+            commit(): Promise<void>;
+
+            /** The columns defined or used, `null` when there is none. */
+            get columns(): Column[] | null;
+            /** Defines the columns (headers, keys, widths...). Any header defined overwrites the values of its cells. */
+            set columns(value: readonly ColumnDefinition[]);
+            /** The column of a key (`column.key`), `undefined` for an unknown key. */
+            getColumnKey(key: string): Column | undefined;
+            /** Registers the column of a key (done by the `column.key` setter). */
+            setColumnKey(key: string, value: Column): void;
+            /** Unregisters a key (done by the `column.key` setter). */
+            deleteColumnKey(key: string): void;
+            /** Calls `callback` with each keyed column and its key. */
+            eachColumnKey(callback: (column: Column, key: string) => void): void;
+            /**
+             * A column by key, letters or 1-based number; it and the columns before it are created if needed.
+             * `undefined` for a number below 1 (an invalid argument).
+             *
+             * @throws Error for letters that are not a column
+             */
+            getColumn(indexOrKey: number | string): Column;
+
+            /** The last row not committed yet, if any. */
+            readonly lastRow: Row | undefined;
+            /** The row (1-based number) if it exists and is not committed. */
+            findRow(rowNumber: number): Row | undefined;
+            /**
+             * The row (1-based number), created if needed.
+             *
+             * @throws Error when the row was committed
+             */
+            getRow(rowNumber: number): Row;
+            /**
+             * Adds a row after the last one, with values (an array by column number, or an object by column key).
+             *
+             * @throws Error when the worksheet was committed
+             */
+            addRow(values: RowValues): Row;
+            /** Calls `callback` with each row not committed yet that has values. */
+            eachRow(callback: (row: Row, rowNumber: number) => void): void;
+            /** Calls `callback` with each row not committed yet (`includeEmpty`: each one, created if needed). */
+            eachRow(options: { includeEmpty?: boolean } | undefined, callback: (row: Row, rowNumber: number) => void): void;
+
+            /** The cell at an address (`"B3"`), if it exists and its row is not committed. */
+            findCell(address: string): Cell | undefined;
+            /** The cell at (row, column), if it exists and its row is not committed. */
+            findCell(row: number, col: number): Cell | undefined;
+            /**
+             * The cell at an address (`"B3"`), created if needed.
+             *
+             * @throws Error when its row was committed
+             */
+            getCell(address: string): Cell;
+            /**
+             * The cell at (row, column), created if needed.
+             *
+             * @throws Error when its row was committed
+             */
+            getCell(row: number, col: number): Cell;
+
+            /**
+             * Merges a range of cells (`"A4:B5"`, a {@link Range} or {@link Location}, or an array of the arguments
+             * below): every cell but the top-left one is merged into it.
+             *
+             * @throws Error when a cell is already merged, a row was committed, or the merged cells exceed the limits
+             */
+            mergeCells(range: string | Range | Location | [string, string, string?] | [number, number, number, number, string?]): void;
+            /** Merges the range from `tl` to `br` (`"A4"`, `"B5"`). */
+            mergeCells(tl: string, br: string, sheetName?: string): void;
+            /** Merges the range of these bounds (1-based numbers). */
+            mergeCells(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
+
+            /** Adds conditional formatting rules, written when the worksheet is committed. */
+            addConditionalFormatting(cf: ConditionalFormattingOptions): void;
+            /** Removes the conditional formatting at an index, those a filter rejects, or (no argument) all of them. */
+            removeConditionalFormatting(filter?: number | ((value: ConditionalFormattingOptions, index: number) => unknown)): void;
+
+            /** Sets the background image (an id of {@link WorkbookWriter.addImage}). */
+            addBackgroundImage(imageId: number): void;
+            /** The id of the background image, if any. */
+            getBackgroundImageId(): number | undefined;
+
+            /**
+             * Protects the worksheet, with a password hashed with SHA-512 (`spinCount` iterations, 100000 by default).
+             * Mutates `options`: `spinCount` is made an integer >= 0.
+             */
+            protect(password?: string, options?: Partial<WorksheetProtection>): Promise<void>;
+            /** Removes the protection. */
+            unprotect(): void;
+        }
+
+        /** The options of the {@link WorkbookReader}: what to do with each kind of part, and the decompression limits. */
         interface WorkbookStreamReaderOptions extends Partial<ZipReadLimits> {
             /**
+             * `emit`: the worksheets are read (`worksheet` events, async iteration); `ignore`: skipped.
              * @default 'emit'
              */
             worksheets?: "emit" | "ignore";
             /**
+             * `cache`: kept for the cells; `emit`: emitted one by one (`shared-strings` events: {@link EmittedSharedString}),
+             * and the cells then hold their index ({@link CellSharedStringValue}); `ignore`: not read, the cells hold their
+             * index.
              * @default 'cache'
              */
             sharedStrings?: "cache" | "emit" | "ignore";
             /**
+             * The hyperlinks of the worksheets: `cache`: the `<hyperlink>` elements in `worksheetReader.hyperlinks` (the
+             * targets of external links, in the relationship parts, are not read); `emit`: `hyperlink` events of the
+             * worksheet readers, and `hyperlinks` events (a {@link HyperlinkReader} per worksheet, for the targets) of the
+             * workbook reader; `ignore`.
              * @default 'ignore'
              */
             hyperlinks?: "cache" | "emit" | "ignore";
             /**
+             * `cache`: the cells get their styles; `ignore`: the styles are not read (dates then come as serial numbers).
              * @default 'ignore'
              */
             styles?: "cache" | "ignore";
             /**
+             * `emit`: an `entry` event for each part read.
              * @default 'ignore'
              */
             entries?: "emit" | "ignore";
         }
+
+        /** The options of a {@link WorkbookReader}, defaults applied. */
+        type WorkbookStreamReaderResolvedOptions = Required<Omit<WorkbookStreamReaderOptions, keyof ZipReadLimits>> &
+            Partial<ZipReadLimits>;
 
         /**
          * A file name, a Node.js stream (or any object with a `pipe` method), a web ReadableStream or an
@@ -2475,51 +2765,261 @@ export namespace stream {
         type WorkbookReaderInput =
             string | import("stream").Stream | import("stream/web").ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
 
-        class WorkbookReader extends Workbook {
-            constructor(input: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>);
+        /** The payload of an `entry` event (`entries: "emit"`): the kind of part, and the number of a worksheet part. */
+        interface WorkbookReaderEntry {
+            /** The kind of part. */
+            type: "workbook" | "shared-strings" | "styles" | "worksheet" | "hyperlinks";
+            /** The number of the worksheet part (`sheet3.xml`: `"3"`), for `worksheet` and `hyperlinks`. */
+            id?: string;
+        }
+
+        /** A shared string emitted by the reader (`sharedStrings: "emit"`): its index in the table and its value. */
+        interface EmittedSharedString {
+            /** The index of the string, as held by the cells ({@link CellSharedStringValue}). */
+            index: number;
+            /** The string or rich text. */
+            text: string | CellRichTextValue;
+        }
+
+        /** The events of a {@link WorkbookReader} (emitted by {@link WorkbookReader.read}), and their arguments. */
+        interface WorkbookReaderEvents {
+            /** A worksheet (`worksheets: "emit"`): listen to its events; it is read once the listeners return. */
+            worksheet: [worksheet: WorksheetReader];
+            /** A shared string (`sharedStrings: "emit"`). */
+            "shared-strings": [sharedString: EmittedSharedString];
+            /** The hyperlink relationships of a worksheet (`hyperlinks: "emit"`); read once the listeners return. */
+            hyperlinks: [hyperlinks: HyperlinkReader];
+            /** A part is read (`entries: "emit"`). */
+            entry: [entry: WorkbookReaderEntry];
+            /** The file was read (followed by `finished`). */
+            end: [];
+            /** The file was read. */
+            finished: [];
+            /** The file could not be read (nothing follows). */
+            error: [error: unknown];
+        }
+
+        /** An event of {@link WorkbookReader.parse}. */
+        type WorkbookReaderEvent =
+            | { readonly eventType: "shared-strings"; readonly value: EmittedSharedString }
+            | { readonly eventType: "worksheet"; readonly value: WorksheetReader }
+            | { readonly eventType: "hyperlinks"; readonly value: HyperlinkReader };
+
+        /**
+         * The streaming xlsx reader: reads the parts as they come out of the zip, in one pass, holding only the shared
+         * strings (when cached), the styles (when cached) and a worksheet at a time (the rows are not kept). Node.js and
+         * Bun only.
+         *
+         * Iterate it (`for await (const worksheet of reader)`), then each worksheet for its rows; or call {@link read}
+         * and listen to its events ({@link WorkbookReaderEvents}). A worksheet that comes before the parts it depends on
+         * is spooled to a temp file.
+         */
+        class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
+            /** The valid values of the options. */
+            static readonly Options: {
+                /** The values of `worksheets`. */
+                worksheets: string[];
+                /** The values of `sharedStrings`. */
+                sharedStrings: string[];
+                /** The values of `hyperlinks`. */
+                hyperlinks: string[];
+                /** The values of `styles`. */
+                styles: string[];
+                /** The values of `entries`. */
+                entries: string[];
+            };
+
+            /**
+             * @param input - what to read (else the input given to {@link read} / {@link parse})
+             */
+            constructor(input?: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>);
+
+            /** The input given to the constructor (read when {@link read} / {@link parse} get none). */
+            input: WorkbookReaderInput | undefined;
+            /** The options, defaults applied. */
+            options: WorkbookStreamReaderResolvedOptions;
+            /** `sharedStrings: "cache"`: the shared strings table, once read. */
+            sharedStrings?: (string | CellRichTextValue)[];
+
+            /**
+             * Reads the whole file, emitting the events ({@link WorkbookReaderEvents}); each worksheet and hyperlinks
+             * part emitted is read once its listeners return.
+             *
+             * @param input - replaces the constructor's
+             * @param options - replace the constructor's, on top of the defaults
+             * @returns resolves once the file is read; errors are emitted (`error`), not thrown
+             */
             read(input?: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>): Promise<void>;
-            [Symbol.asyncIterator](): AsyncGenerator<WorksheetReader>;
-            parse(input?: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>): AsyncIterator<any>;
+            /**
+             * The worksheets of the file, each to be read (iterated) before the next one comes.
+             *
+             * @throws Error on an unrecognised input, an invalid zip, a decompression limit exceeded, or invalid XML
+             */
+            [Symbol.asyncIterator](): AsyncGenerator<WorksheetReader, void, undefined>;
+            /**
+             * Reads the parts of the file as they come.
+             *
+             * @param input - replaces the constructor's
+             * @param options - replace the constructor's, on top of the defaults
+             * @returns the worksheets, shared strings and hyperlinks, as the options select them
+             * @throws Error on an unrecognised input, an invalid zip, a decompression limit exceeded, or invalid XML
+             */
+            parse(
+                input?: WorkbookReaderInput,
+                options?: Partial<WorkbookStreamReaderOptions>
+            ): AsyncGenerator<WorkbookReaderEvent, void, undefined>;
+        }
+
+        /** A `<hyperlink>` of a worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes present. */
+        interface WorksheetHyperlink {
+            /** The cell reference (`"A1"`). */
+            ref: string | undefined;
+            /** The relationship of an external link (`r:id`), see {@link HyperlinkReader}. */
+            rId?: string;
+            /** An internal link: a location in the workbook. */
+            location?: string;
+            /** The tooltip. */
+            tooltip?: string;
+            /** The text displayed. */
+            display?: string;
+        }
+
+        /** The events of a {@link WorksheetReader} (emitted by {@link WorksheetReader.read}), and their arguments. */
+        interface WorksheetReaderEvents {
+            /** A row, with its cells. */
+            row: [row: Row];
+            /** A hyperlink (`hyperlinks: "emit"`). */
+            hyperlink: [hyperlink: WorksheetHyperlink];
+            /** The worksheet was read. */
+            finished: [];
+            /** The worksheet could not be read (nothing follows). */
+            error: [error: unknown];
+        }
+
+        /** An event of {@link WorksheetReader.parse}: a row, or a hyperlink (`hyperlinks: "emit"`). */
+        type WorksheetReaderEvent =
+            { readonly eventType: "row"; readonly value: Row } | { readonly eventType: "hyperlink"; readonly value: WorksheetHyperlink };
+
+        /**
+         * A worksheet of the streaming {@link WorkbookReader}: not a document {@link Worksheet}. Its rows come one at a
+         * time (async iteration, or `row` events with {@link read}) and are not kept; a row read is read-only.
+         */
+        interface WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
+            /** The workbook reader. */
+            readonly workbook: WorkbookReader;
+            /**
+             * The sheetId from the workbook, or the number of the part (a string) if the worksheet could not be matched to
+             * the workbook
+             */
+            id: number | string;
+            /** The worksheet name (`Sheet<id>` if the worksheet could not be matched to the workbook). */
+            name: string;
+            /** The visibility of the worksheet (from the workbook), if known. */
+            state?: WorksheetState;
+            /** The `worksheets` and `hyperlinks` options of the workbook reader. */
+            readonly options: Partial<Pick<WorkbookStreamReaderOptions, "worksheets" | "hyperlinks">>;
+            /**
+             * `hyperlinks: "cache"`: the hyperlinks read so far, keyed by cell reference (an object without prototype).
+             */
+            hyperlinks?: Record<string, WorksheetHyperlink>;
+            /** The sheet format properties (outline levels, default sizes), read from `<sheetFormatPr>`. */
+            properties: Partial<WorksheetProperties> & Pick<WorksheetProperties, "outlineLevelCol" | "outlineLevelRow">;
+            /** The range covering the rows read so far. */
+            readonly dimensions: Range;
+            /** Every column up to the last one read or used (created when it is read), `null` when there is none. */
+            readonly columns: Column[] | null;
+
+            /**
+             * Not a valid operation for a streaming reader.
+             *
+             * @throws Error always
+             */
+            destroy(): never;
+
+            /**
+             * A column by key, letters or 1-based number, created if needed. `undefined` for a number that is not a
+             * positive integer (an invalid argument).
+             *
+             * @throws Error for letters that are not a column
+             */
+            getColumn(indexOrKey: number | string): Column;
+            /** The column of a key (`column.key`), `undefined` for an unknown key. */
+            getColumnKey(key: string): Column | undefined;
+            /** Registers the column of a key (done by the `column.key` setter). */
+            setColumnKey(key: string, value: Column): void;
+            /** Unregisters a key (done by the `column.key` setter). */
+            deleteColumnKey(key: string): void;
+            /** Calls `callback` with each keyed column and its key. */
+            eachColumnKey(callback: (column: Column, key: string) => void): void;
+
+            /**
+             * Reads the whole worksheet, emitting its events ({@link WorksheetReaderEvents}).
+             *
+             * @returns resolves once the worksheet is read; errors are emitted (`error`), not thrown
+             */
+            read(): Promise<void>;
+            /**
+             * The rows of the worksheet.
+             *
+             * @throws Error on malformed XML or a row number outside the grid
+             */
+            [Symbol.asyncIterator](): AsyncGenerator<Row, void, undefined>;
+            /**
+             * Reads the worksheet.
+             *
+             * @returns its events, in batches (one per chunk of the part that has some)
+             * @throws Error on malformed XML or a row number outside the grid
+             */
+            parse(): AsyncGenerator<WorksheetReaderEvent[], void, undefined>;
+        }
+
+        /** A hyperlink relationship of a worksheet, as read. The values come from the file; a missing one is `undefined`. */
+        interface HyperlinkRelationship {
+            /** Always `RelationshipType.Styles` (5), as in ExcelJS < 5 (kept for compatibility). */
+            type: RelationshipType;
+            /** The relationship id, referenced by the `rId` of a {@link WorksheetHyperlink}. */
+            rId: string | undefined;
+            /** The link. */
+            target: string | undefined;
+            /** `"External"` for a link outside the package. */
+            targetMode: string | undefined;
+        }
+
+        /** The events of a {@link HyperlinkReader} (emitted by {@link HyperlinkReader.read}), and their arguments. */
+        interface HyperlinkReaderEvents {
+            /** A hyperlink relationship (`hyperlinks: "emit"`). */
+            hyperlink: [relationship: HyperlinkRelationship];
+            /** The part was read. */
+            finished: [];
+            /** The part could not be read. */
+            error: [error: unknown];
         }
 
         /**
-         * At runtime the WorkbookReader is an EventEmitter ('worksheet', 'shared-strings',
-         * 'hyperlinks', 'entry', 'end', 'finished', 'error')
+         * The hyperlink relationships (link targets) of a worksheet: the `hyperlinks` event of the {@link WorkbookReader},
+         * with `hyperlinks: "emit"`. {@link read} emits them one by one (`hyperlink` events). The cache members
+         * ({@link hyperlinks}, {@link count}, {@link each}) are filled only by a reader of the `"cache"` option, which the
+         * workbook reader never hands out: they stay empty.
          */
-        interface WorkbookReader extends EventEmitter {}
-
-        interface WorksheetReaderOptions {
-            workbook: WorkbookReader;
-            id: number | string;
-            iterator: AsyncIterable<any>;
-            options: WorkbookStreamReaderOptions;
-        }
-
-        class WorksheetReader extends EventEmitter {
-            constructor(options: WorksheetReaderOptions);
+        interface HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
+            /** The workbook reader. */
             readonly workbook: WorkbookReader;
+            /** The number of the worksheet part (`sheet3.xml.rels`: `"3"`). */
+            readonly id: string;
+            /** The `hyperlinks` option of the workbook reader. */
+            readonly options: Pick<WorkbookStreamReaderResolvedOptions, "hyperlinks">;
+            /** `hyperlinks: "cache"`: the relationships read, keyed by relationship id (an object without prototype). */
+            hyperlinks?: Record<string, HyperlinkRelationship>;
+            /** The number of relationships cached (0 before {@link read} and when they are not cached). */
+            readonly count: number;
+            /** Calls `callback` with each cached relationship, in the order of the part. */
+            each(callback: (relationship: HyperlinkRelationship, index: number) => void): void;
             /**
-             * The sheetId from the workbook, or the sheet file number (a string) if the
-             * worksheet could not be matched to the workbook
+             * Reads the relationships (once: later calls return the same promise).
+             *
+             * @returns resolves once the part is read; errors are emitted (`error`), not thrown
              */
-            id: number | string;
-            /**
-             * The worksheet name (`Sheet<id>` if the worksheet could not be matched to the workbook)
-             */
-            name: string;
-            state?: WorksheetState;
-            /**
-             * The dimensions of the rows read so far
-             */
-            readonly dimensions: Range;
-            /**
-             * The column definitions, or null if none have been read (or created by getColumn)
-             */
-            readonly columns: Column[] | null;
             read(): Promise<void>;
-            [Symbol.asyncIterator](): AsyncGenerator<Row>;
-            parse(): AsyncIterator<Array<any>>;
-            getColumn(c: number | string): Column;
         }
     }
 }

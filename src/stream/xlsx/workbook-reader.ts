@@ -59,7 +59,7 @@ export type WorkbookReaderEvent =
     | { readonly eventType: "hyperlinks"; readonly value: HyperlinkReader };
 
 /** The events of a {@link WorkbookReader} (with {@link WorkbookReader.read}). */
-interface WorkbookReaderEvents {
+export interface WorkbookReaderEvents {
     worksheet: [worksheet: WorksheetReader];
     "shared-strings": [sharedString: EmittedSharedString];
     hyperlinks: [hyperlinks: HyperlinkReader];
@@ -241,7 +241,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
     private _sheetIndex?: Map<string | undefined, SheetDefModel | undefined> | null;
     private _stylesParsed?: boolean;
 
-    constructor(input: WorkbookReaderInput | undefined, options: Partial<WorkbookReaderOptions> = {}) {
+    constructor(input?: WorkbookReaderInput, options: Partial<WorkbookReaderOptions> = {}) {
         super();
 
         this.input = input;

@@ -23,46 +23,7 @@ import type DefinedNames from "../doc/defined-names";
 import type Table from "../doc/table";
 import type Worksheet from "../doc/worksheet";
 import type Workbook from "../doc/workbook";
-
-/** The back-references that are not compared (see the file comment). */
-type BackReference = "worksheet" | "workbook" | "master";
-
-/** Depth counter of {@link Erase}. */
-type Previous = [never, 0, 1, 2, 3];
-
-/** A function type compared as a method (bivariant parameters). */
-type Method<A extends readonly unknown[], R> = { method(...args: A): R }["method"];
-
-/**
- * The structure of a type as the checks compare it: without back-references nor `_` members, recursively to depth
- * `D` (`unknown` beyond).
- */
-type Erase<T, D extends number = 3> = [D] extends [never]
-    ? unknown
-    : T extends (...args: infer A) => infer R
-      ? Method<{ [I in keyof A]: Erase<A[I], Previous[D]> }, Erase<R, Previous[D]>>
-      : T extends Date | string | number | boolean | null | undefined
-        ? T
-        : T extends readonly (infer E)[]
-          ? Erase<E, Previous[D]>[]
-          : T extends object
-            ? { [K in keyof T as K extends BackReference | `_${string}` ? never : K]: Erase<T[K], Previous[D]> }
-            : T;
-
-/** The members of `P` that the runtime class `I` lacks (`missing:name`) or does not conform to. */
-type Mismatches<I, P> = {
-    [K in Exclude<keyof P, BackReference>]-?: K extends keyof I
-        ? [Erase<I[K]>] extends [Erase<P[K]>]
-            ? never
-            : K
-        : `missing:${K & string}`;
-}[Exclude<keyof P, BackReference>];
-
-/** `true` when `I` conforms to `P` but for the members `Except`; else the names of the other mismatches. */
-type Check<I, P, Except extends keyof P = never> = [Mismatches<I, Omit<P, Except>>] extends [never] ? true : Mismatches<I, Omit<P, Except>>;
-
-/** Compiles only for `true`: a failing check names its mismatches in the error. */
-type Assert<T extends true> = T;
+import type { Assert, Check } from "./conformance-helpers";
 
 /** The runtime Anchor conforms to index.d.ts `Anchor`. */
 export type AnchorConforms = Assert<Check<Anchor, Public.Anchor>>;

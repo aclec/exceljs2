@@ -34,7 +34,6 @@ import type {
     HeaderFooterModel,
     ListItemOptions,
     MergeCellModel,
-    PageSetupModel,
     SheetProtectionModel,
     StyleRegistry,
 } from "../../types";
@@ -95,7 +94,7 @@ export type WorksheetWriterProperties = Partial<WorksheetProperties> &
 export type WorksheetWriterHeaderFooter = HeaderFooterModel;
 
 /** The page setup of a streamed worksheet: the defaults below (`rowBreaks` / `colBreaks` null), and those given. */
-export type WorksheetWriterPageSetup = PageSetupModel & { rowBreaks?: unknown; colBreaks?: unknown };
+export type WorksheetWriterPageSetup = Partial<PageSetup> & { rowBreaks?: null; colBreaks?: null };
 
 /** The arguments of the {@link WorksheetWriter} constructor (WorkbookWriter.addWorksheet). */
 export interface WorksheetWriterOptions {
