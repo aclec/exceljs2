@@ -116,7 +116,7 @@ describe('WorkbookReader (stream)', () => {
       expect(fs.existsSync(tracker.created[0])).to.equal(false);
     });
 
-    it('closes the spooled worksheet files the consumer skips', async () => {
+    it('closes the spooled worksheet files when the consumer stops early', async () => {
       const opened = [];
       const original = fs.createReadStream;
       fs.createReadStream = (...args) => {
@@ -126,18 +126,35 @@ describe('WorkbookReader (stream)', () => {
       };
       try {
         const buffer = await bigSheetFirstBuffer();
-        const names = [];
         const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer));
+        // skip the first worksheet without reading it, stop at the second
         for await (const worksheet of reader) {
-          names.push(worksheet.name);
+          if (worksheet.name === 'Second') break;
         }
-        expect(names).to.deep.equal(['Sheet1', 'Second']);
       } finally {
         fs.createReadStream = original;
       }
       expect(opened).to.have.length(2);
       opened.forEach(stream => expect(stream.destroyed).to.equal(true));
       expect(fs.existsSync(tracker.created[0])).to.equal(false);
+    });
+
+    it('reads spooled worksheets collected during the iteration', async () => {
+      const buffer = await bigSheetFirstBuffer();
+      const worksheets = [];
+      for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+        worksheets.push(worksheet);
+      }
+      const counts = [];
+      for (const worksheet of worksheets) {
+        let count = 0;
+        // eslint-disable-next-line no-unused-vars
+        for await (const row of worksheet) {
+          count++;
+        }
+        counts.push(count);
+      }
+      expect(counts).to.deep.equal([3000, 1]);
     });
 
     it('rejects and removes the temp dir on a truncated file', async function() {
