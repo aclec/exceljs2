@@ -1,6 +1,6 @@
 // Regression tests for hostile input that used to cost super-linear time or memory
 // (ReDoS, quadratic lookups, per-index traversals of sparse arrays).
-const { Writable } = require("stream");
+const { Readable, Writable } = require("stream");
 const { baseWorkbookBuffer, tamper, readPart, zipParts } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
@@ -300,6 +300,48 @@ describe("hostile input: algorithmic complexity", function () {
             const read = (await load(Buffer.concat(chunks))).getWorksheet(1);
             expect([1, FAR, FAR + 1, FAR + 2].map((r) => read.getCell(r, 1).value)).to.deep.equal(["first", "far", "next", "added"]);
             expect(read.getCell(`XFD${FAR}`).value).to.equal("last");
+        });
+    });
+
+    describe("streaming reader", () => {
+        it("keeps a <col> range spanning every column as a range instead of one object per column", async () => {
+            const SHEETS = 200;
+            const patches = {};
+            for (let i = 1; i <= SHEETS; i++) {
+                patches[`xl/worksheets/sheet${i}.xml`] = (xml) =>
+                    xml
+                        .replace("<sheetData>", '<cols><col min="2" max="16384" width="20" customWidth="1"/></cols><sheetData>')
+                        .replace(/<c r="A1"/, '<c r="XFD1"');
+            }
+            const buffer = await tamper(
+                await baseWorkbookBuffer((wb) => {
+                    for (let i = 2; i <= SHEETS; i++) {
+                        wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+                    }
+                }),
+                patches
+            );
+            const worksheets = [];
+            // one Column object per column of every worksheet: 3.3 million objects
+            const { ms } = await timed(async () => {
+                const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]));
+                for await (const ws of reader) {
+                    for await (const row of ws) {
+                        expect(row.getCell(16384).value).to.not.equal(undefined);
+                    }
+                    worksheets.push(ws);
+                }
+            });
+            expect(ms).to.be.below(1500);
+            // the columns created, held by the worksheets kept here
+            const created = worksheets.reduce((n, ws) => n + Object.keys(ws._columns || []).length, 0);
+            expect(created).to.be.at.most(SHEETS * 2);
+
+            const ws = worksheets[SHEETS - 1];
+            expect([ws.getColumn(1).width, ws.getColumn(2).width, ws.getColumn("XFD").width]).to.deep.equal([undefined, 20, 20]);
+            expect(ws.columns.length).to.equal(16384);
+            expect(ws.columns[99].width).to.equal(20);
+            expect(ws.columns[99]).to.equal(ws.getColumn(100));
         });
     });
 
