@@ -3,6 +3,7 @@
 import { ValueType } from "./enums";
 import colCache, { type CellAddress } from "../utils/col-cache";
 import Cell from "./cell";
+import { isColumnNumber } from "./sheet-reference";
 import type { CellValue, CellWorksheet, StyleName } from "./cell";
 import type Column from "./column";
 import { eachEntry, loopSteps, someEntry } from "../utils/sparse-array";
@@ -235,11 +236,21 @@ class Row {
 
     // ===========================================================================
     // Page Breaks
-    /** Adds a manual page break after this row, from column `lft` to column `rght` (1-based; default: all of them). */
+    /**
+     * Adds a manual page break after this row, from column `lft` to column `rght` (1-based; absent or 0: from the
+     * first column, to the last one).
+     * @throws Error for a column that is not one of the worksheet (an integer from 1 to 16,384)
+     */
     addPageBreak(lft?: number, rght?: number): void {
+        for (const col of [lft, rght]) {
+            if (col !== undefined && col !== 0 && !isColumnNumber(col)) {
+                throw new Error(`Invalid page break column: ${String(col)} (the columns are numbered from 1 to ${colCache.MAX_COLS})`);
+            }
+        }
         const ws = this._worksheet;
-        const left = Math.max(0, (lft ?? 0) - 1) || 0;
-        const right = Math.max(0, (rght ?? 0) - 1) || 16838;
+        // the break model holds 0-based columns: the last one is MAX_COLS - 1
+        const left = Math.max(0, (lft ?? 0) - 1);
+        const right = Math.max(0, (rght ?? 0) - 1) || colCache.MAX_COLS - 1;
         const pb: RowBreakModel = {
             id: this._number,
             max: right,
