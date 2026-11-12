@@ -204,5 +204,42 @@ describe("Worksheet", () => {
             expect(nNumberVals).to.deep.equal(1);
             expect(nMergeVals).to.deep.equal(3);
         });
+
+        it("releases a merge reference only once", () => {
+            const ws = new Excel.Workbook().addWorksheet("s");
+            ws.mergeCells("A1:B2");
+            const master = ws.getCell("A1");
+            const slave = ws.getCell("B2");
+            master.releaseMergeRef(slave);
+            master.releaseMergeRef(slave);
+            master.releaseMergeRef(ws.getCell("C3"));
+            expect(master.isMerged).to.equal(true); // A2 and B1 still reference it
+
+            ws.unMergeCells("A1:B2");
+            ws.unMergeCells("A1:B2");
+            expect(master.isMerged).to.equal(false);
+            expect(slave.isMerged).to.equal(false);
+            slave.value = 1;
+            expect(slave.value).to.equal(1);
+        });
+
+        it("keeps the master of a merged cell whose model is assigned", () => {
+            const ws = new Excel.Workbook().addWorksheet("s");
+            ws.mergeCells("A1:B2");
+            ws.getCell("A1").value = "top";
+            const slave = ws.getCell("B2");
+            const { model } = slave;
+            slave.model = model;
+            slave.model = model;
+            expect(slave.master).to.equal(ws.getCell("A1"));
+            expect(slave.value).to.equal("top");
+
+            ws.unMergeCells("B2");
+            expect(slave.isMerged).to.equal(false);
+            expect(ws.getCell("A1").isMerged).to.equal(false);
+            slave.value = 1;
+            expect(slave.value).to.equal(1);
+            expect(ws.getCell("A1").value).to.equal("top");
+        });
     });
 });

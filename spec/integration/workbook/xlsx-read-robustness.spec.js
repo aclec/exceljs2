@@ -179,15 +179,16 @@ describe("xlsx read robustness", function () {
         // what Excel writes: an anchor in an external target, and an internal link without r:id
         const excelStyle = (xml) =>
             xml
-                .replace('<hyperlink ref="D1" r:id="rId3"/>', '<hyperlink ref="D1" r:id="rId3" location="part2"/>')
-                .replace('<hyperlink ref="E1" r:id="rId4"/>', '<hyperlink ref="E1" location="Sheet2!B3" display="x"/>');
+                .replace('<hyperlink ref="D1" r:id="rId2"/>', '<hyperlink ref="D1" r:id="rId2" location="part2"/>')
+                .replace('<hyperlink ref="E1" r:id="rId3"/>', '<hyperlink ref="E1" location="Sheet2!B3" display="x"/>');
         const expectLinks = (ws) => {
             expect(ws.getCell("B1").hyperlink).to.equal("#'Sheet2'!A1");
             expect(ws.getCell("C1").hyperlink).to.equal("https://example.com/page");
             expect(ws.getCell("D1").hyperlink).to.equal("https://example.com/doc#part2");
             expect(ws.getCell("E1").hyperlink).to.equal("#Sheet2!B3");
             expect(ws.getCell("E1").text).to.equal("location only");
-            expect(ws.getCell("F1").hyperlink).to.equal("Sheet2!D3");
+            // an unprefixed Sheet2!D3 is written as an internal link: it reads back with a '#'
+            expect(ws.getCell("F1").hyperlink).to.equal("#Sheet2!D3");
         };
 
         it("reads the location of internal and external links", async () => {
@@ -228,6 +229,17 @@ describe("xlsx read robustness", function () {
             expect(await readPart(buffer, SHEET)).to.not.match(/<col min="1"/);
             const ws = (await load(buffer)).getWorksheet("Sheet1");
             expect(ws.getColumn(2).width).to.equal(9);
+        });
+
+        it("keeps a width of 9 assigned after the columns were defined without a width", async () => {
+            const buffer = await baseWorkbookBuffer((wb, ws) => {
+                ws.properties.defaultColWidth = 20;
+                ws.columns = [{ key: "a" }, { key: "b" }];
+                ws.getColumn("a").width = 9;
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            expect(ws.getColumn(1).width).to.equal(9);
+            expect(ws.getColumn(2).width).to.equal(undefined);
         });
 
         it("keeps image anchors positioned as before", async () => {
@@ -381,6 +393,32 @@ describe("xlsx read robustness", function () {
             expect(ws.getCell("C1").value).to.equal("link");
             expect(ws.getTables()).to.have.length(0);
             expect(ws.getImages()).to.have.length(0);
+        });
+
+        it("ignores relationships without a Target", async () => {
+            const withBackground = await baseWorkbookBuffer(async (wb, ws) => {
+                ws.addBackgroundImage(wb.addImage({ buffer: PNG, extension: "png" }));
+                ws.addImage(wb.addImage({ buffer: PNG, extension: "png" }), "E5:F6");
+                wb.addWorksheet("Sheet2").getCell("A1").value = "second";
+            });
+            const dropTargets = (xml) => xml.replace(/ Target="[^"]*"/g, "");
+
+            // sheet relationships (drawing, background image) and drawing relationships (image)
+            for (const parts of [[RELS], ["xl/drawings/_rels/drawing1.xml.rels"], [RELS, "xl/drawings/_rels/drawing1.xml.rels"]]) {
+                const patches = Object.fromEntries(parts.map((part) => [part, dropTargets]));
+                const ws = (await load(await tamper(withBackground, patches))).getWorksheet("Sheet1");
+                expect(ws.getCell("A1").value, parts.join()).to.equal("hello");
+                expect(ws.getImages(), parts.join()).to.have.length(0);
+            }
+
+            // workbook relationship of a worksheet: that sheet cannot be located
+            const wb = await load(
+                await tamper(withBackground, {
+                    "xl/_rels/workbook.xml.rels": (xml) => xml.replace(' Target="worksheets/sheet2.xml"', ""),
+                })
+            );
+            expect(wb.getWorksheet("Sheet1").getCell("A1").value).to.equal("hello");
+            expect(wb.getWorksheet("Sheet2")).to.equal(undefined);
         });
 
         it("ignores a drawing part that is not a spreadsheet drawing", async () => {
