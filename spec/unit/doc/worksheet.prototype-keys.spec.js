@@ -86,4 +86,30 @@ describe("Worksheet keys named like Object.prototype members", () => {
         expect(ws2.getTables().map((table) => table.name)).to.deep.equal(["__proto__"]);
         expect(ws2.getTable("toString")).to.equal(undefined);
     });
+
+    it("keeps worksheet.tables a plain object", () => {
+        const ws = new Excel.Workbook().addWorksheet("s");
+        ["T1", "constructor", "__proto__"].forEach((name, i) => {
+            ws.addTable({ name, ref: `A${i * 3 + 1}`, columns: [{ name: "a" }], rows: [[1]] });
+        });
+        expect(ws.tables).to.be.instanceOf(Object);
+        expect(String(ws.tables)).to.equal("[object Object]");
+        expect(ws.tables.hasOwnProperty("T1")).to.equal(true);
+        expect(Object.getPrototypeOf(ws.tables)).to.equal(Object.prototype);
+        expect(Object.keys(ws.tables)).to.deep.equal(["T1", "constructor", "__proto__"]);
+        expect(ws.getTable("constructor").name).to.equal("constructor");
+        expect(ws.getTable("__proto__").name).to.equal("__proto__");
+        expect(ws.getTable("hasOwnProperty")).to.equal(undefined);
+
+        ws.removeTable("__proto__");
+        ws.removeTable("toString");
+        expect(Object.keys(ws.tables)).to.deep.equal(["T1", "constructor"]);
+        expect(Object.getPrototypeOf(ws.tables)).to.equal(Object.prototype);
+
+        const ws2 = new Excel.Workbook().addWorksheet("s2");
+        ws2.model = Object.assign(ws.model, { name: "s2" });
+        expect(ws2.tables.hasOwnProperty("constructor")).to.equal(true);
+        expect(Object.getPrototypeOf(ws2.tables)).to.equal(Object.prototype);
+        expect(ws2.getTable("T1").name).to.equal("T1");
+    });
 });
