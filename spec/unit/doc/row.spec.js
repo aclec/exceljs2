@@ -210,6 +210,27 @@ describe("Row", () => {
             row.splice(4, 3, "four", "five", "six", "six and a half");
             expect(row.values).to.deep.equal([, 1, 2, 3, "four", "five", "six", "six and a half", 7, 8]);
         });
+
+        it("moves a far cell and counts the cells up to it", () => {
+            const sheet = createSheetMock();
+            const row = sheet.getRow(1);
+            row.getCell(1).value = "a";
+            row.getCell(3).value = "c";
+            row.getCell(5000).value = "far";
+            row.getCell(5000).note = "note";
+
+            row.splice(2, 0, "b", "b2");
+            expect([row.getCell(5).value, row.getCell(5002).value, row.getCell(5002).note]).to.deep.equal(["c", "far", "note"]);
+            expect(row.cellCount).to.equal(5002);
+            expect(row.findCell(5000)).to.equal(undefined);
+
+            row.splice(2, 3);
+            expect(row.values).to.deep.equal([, "a", "c"].concat(new Array(4996), ["far"]));
+            expect(row.dimensions).to.deep.equal({ min: 1, max: 4999 });
+            // as with every remove, the cells left at the end are emptied, not deleted
+            expect(row.cellCount).to.equal(5002);
+            expect(row.findCell(5002).value).to.equal(null);
+        });
     });
 
     it("iterates over cells", () => {

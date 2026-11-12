@@ -216,6 +216,57 @@ describe("hostile input: algorithmic complexity", function () {
         });
     });
 
+    describe("cells in the last column", () => {
+        // number of cells a row holds, without traversing every index below the last one
+        const cellsHeld = (row) => Object.keys(row._cells).filter((key) => row._cells[key]).length;
+
+        it("traverses rows whose only cell is in column XFD in time proportional to the cells", async () => {
+            const ROWS = 3000;
+            let data = "";
+            for (let i = 1; i <= ROWS; i++) {
+                data += `<row r="${i}"><c r="XFD${i}"><v>${i}</v></c></row>`;
+            }
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                [SHEET]: (xml) => xml.replace(/<sheetData>.*<\/sheetData>/, `<sheetData>${data}</sheetData>`),
+            });
+            // each of these visited the 16,384 indexes of the cells of every row: 0.2 ms per row
+            const { result, ms } = await timed(async () => {
+                const wb = await load(buffer);
+                const ws = wb.getWorksheet(1);
+                let cells = 0;
+                ws.eachRow((row) => row.eachCell(() => cells++));
+                const counts = [cells, ws.actualColumnCount, ws.dimensions.model.left, ws.getRow(ROWS).values.length];
+                ws.spliceColumns(1, 1);
+                return { counts, written: await wb.xlsx.writeBuffer() };
+            });
+            expect(ms).to.be.below(1500);
+            expect(result.counts).to.deep.equal([ROWS, 1, 16384, 16385]);
+            const ws = (await load(result.written)).getWorksheet(1);
+            expect(ws.getCell(`XFC${ROWS}`).value).to.equal(ROWS);
+            expect(cellsHeld(ws.getRow(ROWS))).to.equal(1);
+        });
+
+        it("moves rows with a cell in column XFC without creating their empty cells", () => {
+            const ws = new ExcelJS.Workbook().addWorksheet("s");
+            for (let i = 1; i <= 10; i++) {
+                ws.getCell(`XFC${i}`).value = i;
+                ws.getCell(`XFC${i}`).font = { name: `f${i}` };
+            }
+            ws.insertRow(1, ["inserted"]);
+            ws.spliceRows(2, 1);
+            ws.duplicateRow(2, 2, true);
+            ws.spliceColumns(2, 0, ["x"]);
+            ws.spliceColumns(3, 1);
+            // moving a row created each of its 16,383 cells in both rows
+            ws.eachRow((row) => expect(cellsHeld(row), `row ${row.number}`).to.be.at.most(3));
+            expect([2, 3, 4, 12].map((r) => ws.getCell(r, 16383).value)).to.deep.equal([2, 2, 2, 10]);
+            expect(ws.getRow(1).values).to.deep.equal([undefined, "inserted", "x"]);
+            expect(ws.getCell("XFC12").font).to.deep.equal({ name: "f10" });
+            expect(ws.getCell("XFC3").font).to.deep.equal({ name: "f2" });
+            expect(ws.getRow(12).cellCount).to.equal(16384);
+        });
+    });
+
     describe("image anchors", () => {
         const PNG = Buffer.from(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
