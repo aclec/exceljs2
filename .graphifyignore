@@ -1,0 +1,18 @@
+# graphify code map scope = the library source (lib/) only.
+# Tests, tooling, docs and build output are excluded so the graph stays small and stable.
+/spec/
+/test/
+/scripts/
+/dist/
+/build/
+/node_modules/
+/graphify-out/
+/.github/
+/.husky/
+/tasks/
+*.md
+/benchmark.js
+/excel.js
+/eslint.config.js
+/index.d.ts
+/TODO.txt

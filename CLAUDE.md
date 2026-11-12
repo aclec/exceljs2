@@ -29,7 +29,11 @@ Done = all of the above green. CI (`.github/workflows/tests.yml`) runs the same 
 - Entry points: `lib/exceljs.nodejs.js` (Node/Bun), `lib/exceljs.browser.js` / `lib/exceljs.bare.js` (bundles via `scripts/build.mjs`,
   esbuild + `scripts/browser-shims/`). Public types: `index.d.ts` (keep in sync with runtime).
 - `spec/unit`, `spec/integration` (incl. `security/` hostile-input regressions), `spec/end-to-end`, `spec/browser`, `spec/typescript`.
-- Code map: `graphify-out/GRAPH_REPORT.md` (communities, god nodes). Refresh after structural changes: `/graphify lib --update`.
+- Code map (graphify, local and gitignored, scope = `lib/` via `.graphifyignore`): read `graphify-out/GRAPH_REPORT.md` before exploring
+  unfamiliar areas; `graphify query "<question>"`, `graphify path "A" "B"`, `graphify explain "X"` for targeted lookups.
+  `.husky/post-commit` and `post-checkout` rebuild it in the background. **Before relying on it, check freshness**: if `graphify-out/` is
+  missing, or the report's "Built from commit" differs from `git rev-parse --short HEAD` (e.g. commits made with `HUSKY=0`), run
+  `graphify update .` (AST only, a few seconds, no LLM).
 
 ## Invariants (do not break)
 
