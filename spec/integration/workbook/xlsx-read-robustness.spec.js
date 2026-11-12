@@ -46,4 +46,55 @@ describe('xlsx read robustness', function() {
       expect(ws.rowCount).to.equal(3);
     });
   });
+
+  describe('table autoFilter content that is not modelled', () => {
+    const TABLE = 'xl/tables/table1.xml';
+    const tableBuffer = () =>
+      baseWorkbookBuffer((wb, ws) => {
+        ws.addTable({
+          name: 'T1',
+          ref: 'A3',
+          headerRow: true,
+          columns: [
+            {name: 'a', filterButton: true},
+            {name: 'b', filterButton: true},
+          ],
+          rows: [[1, 2]],
+        });
+      });
+    const withAutoFilterContent = content => xml =>
+      xml.replace(/<autoFilter ref="([^"]+)">.*<\/autoFilter>/, `<autoFilter ref="$1">${content}</autoFilter>`);
+
+    const filters = {
+      dynamicFilter: '<dynamicFilter type="today"/>',
+      top10: '<top10 top="1" val="5"/>',
+      colorFilter: '<colorFilter dxfId="0"/>',
+      iconFilter: '<iconFilter iconSet="3Arrows" iconId="1"/>',
+      extLst:
+        '<extLst><ext uri="{0}"><x14:filter val="x"/><customFilters><customFilter val="no"/></customFilters></ext></extLst>',
+    };
+    Object.entries(filters).forEach(([name, filter]) => {
+      it(`ignores ${name} in a filterColumn`, async () => {
+        const buffer = await tamper(await tableBuffer(), {
+          [TABLE]: withAutoFilterContent(
+            `<filterColumn colId="0" hiddenButton="0">${filter}</filterColumn><filterColumn colId="1" hiddenButton="0"/>`
+          ),
+        });
+        const table = (await load(buffer)).getWorksheet('Sheet1').getTable('T1');
+        expect(table.table.columns.map(column => column.name)).to.deep.equal(['a', 'b']);
+        expect(table.table.columns[0].filterButton).to.equal(true);
+        expect(table.table.columns[0].customFilters).to.equal(undefined);
+      });
+    });
+
+    it('ignores sortState inside the autoFilter', async () => {
+      const buffer = await tamper(await tableBuffer(), {
+        [TABLE]: withAutoFilterContent(
+          '<filterColumn colId="0" hiddenButton="0"/><sortState ref="A4:B4"><sortCondition ref="A4"/></sortState>'
+        ),
+      });
+      const table = (await load(buffer)).getWorksheet('Sheet1').getTable('T1');
+      expect(table.table.autoFilterRef).to.equal('A3:B4');
+    });
+  });
 });
