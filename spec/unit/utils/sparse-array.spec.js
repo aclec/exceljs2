@@ -1,4 +1,4 @@
-const { eachEntry, someEntry, lastEntryIndex, entryIndices, shiftSteps, spliceEntries } = verquire("utils/sparse-array");
+const { eachEntry, someEntry, lastEntryIndex, entryIndices, shiftSteps, loopSteps, spliceEntries } = verquire("utils/sparse-array");
 
 // the entries forEach visits, without its undefined values
 function forEachEntries(array) {
@@ -124,6 +124,24 @@ describe("sparse-array", () => {
             });
             expect(shiftSteps([0, 1048575], 1, 1048575, -1)).to.deep.equal([1, 1048575]);
             expect(shiftSteps([], 0, 10, 1)).to.deep.equal([]);
+        });
+    });
+
+    describe("loopSteps", () => {
+        it("returns every step of a short loop, and the steps that move an entry of a long one", () => {
+            expect(loopSteps(holey, 1, 2, 10, 1)).to.deep.equal([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            expect(loopSteps(holey, 1, 2, 300, -1)).to.deep.equal([4, 5, 42, 43, 201, 202]);
+            expect(loopSteps(far, 1, 2, 1048576, 2)).to.deep.equal([1048574, 1048576]);
+        });
+    });
+
+    describe("someEntry from an index", () => {
+        it("skips the entries before it", () => {
+            const seen = [];
+            eachEntry(holey, (value, index) => seen.push(index), 4);
+            expect(seen).to.deep.equal([41, 200]);
+            expect(someEntry(far, () => true, 1)).to.equal(true);
+            expect(someEntry(far, () => true, 1048576)).to.equal(false);
         });
     });
 

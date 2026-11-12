@@ -269,8 +269,7 @@ describe("hostile input: algorithmic complexity", function () {
     });
 
     describe("streaming writer", () => {
-        it("commits a far row in time proportional to the rows", async () => {
-            const FAR = 10000;
+        function writer() {
             const chunks = [];
             const stream = new Writable({
                 write(chunk, encoding, callback) {
@@ -278,7 +277,12 @@ describe("hostile input: algorithmic complexity", function () {
                     callback();
                 },
             });
-            const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream });
+            return { wb: new ExcelJS.stream.xlsx.WorkbookWriter({ stream }), chunks };
+        }
+
+        it("commits a far row in time proportional to the rows", async () => {
+            const FAR = 10000;
+            const { wb, chunks } = writer();
             const ws = wb.addWorksheet("s");
             const { ms } = await timed(async () => {
                 ws.getCell("A1").value = "first";
@@ -300,6 +304,49 @@ describe("hostile input: algorithmic complexity", function () {
             const read = (await load(Buffer.concat(chunks))).getWorksheet(1);
             expect([1, FAR, FAR + 1, FAR + 2].map((r) => read.getCell(r, 1).value)).to.deep.equal(["first", "far", "next", "added"]);
             expect(read.getCell(`XFD${FAR}`).value).to.equal("last");
+        });
+
+        it("commits the rows before a far row one by one in time proportional to the rows", async () => {
+            const ROWS = 10000;
+            const { wb, chunks } = writer();
+            const ws = wb.addWorksheet("s");
+            for (let i = 1; i <= ROWS; i++) {
+                ws.getCell(i, 1).value = i;
+            }
+            ws.getCell("A1000000").value = "far";
+            // each commit re-indexed every row still pending
+            const { ms } = await timed(async () => {
+                for (let i = 1; i <= ROWS; i++) {
+                    await ws.getRow(i).commit();
+                }
+            });
+            expect(ms).to.be.below(1000);
+            expect(ws.lastRow.number).to.equal(1000000);
+            await ws.commit();
+            await wb.commit();
+            const read = (await load(Buffer.concat(chunks))).getWorksheet(1);
+            expect([1, ROWS, 1000000].map((r) => read.getCell(r, 1).value)).to.deep.equal([1, ROWS, "far"]);
+            expect(read.actualRowCount).to.equal(ROWS + 1);
+        });
+
+        it("does not write again the rows written before a row that failed", async () => {
+            const { wb, chunks } = writer();
+            const ws = wb.addWorksheet("s");
+            ws.getCell("A1").value = "one";
+            ws.getCell("B2").value = { sharedFormula: "A1", result: 1 };
+            ws.getCell("A200").value = "far";
+            let error;
+            try {
+                await ws.getRow(2).commit();
+            } catch (e) {
+                error = e;
+            }
+            expect(error.message).to.include("Shared Formula master must exist");
+            expect(() => ws.getRow(2)).to.throw("Out of bounds");
+            await ws.commit();
+            await wb.commit();
+            const xml = await readPart(Buffer.concat(chunks), "xl/worksheets/sheet1.xml");
+            expect(xml.match(/<row r="\d+"/g)).to.deep.equal(['<row r="1"', '<row r="200"']);
         });
     });
 
