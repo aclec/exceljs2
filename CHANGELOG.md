@@ -60,6 +60,9 @@ All fixes have regression tests in `spec/integration/security`.
   or names; they are now shared by the whole workbook being loaded.
 - Shared-formula translation was quadratic per clone; `DataValidations.find` and `DefinedNames.model` / `cell.names` were quadratic in the
   number of validations or names. All are linear.
+- Shared parts: a comments part referenced by the relationships of W worksheets was materialised W times (a 61 KiB file gave 400,000 notes
+  and 391 MB of heap). A comments, notes VML, drawing or table part now belongs to the first worksheet that refers to it; the references of
+  other worksheets are ignored.
 - Data validations: every `cell.dataValidation` lookup scanned all the range keys (an unbounded number once 100,000 cells are expanded: 0.75
   ms per lookup with 250,000 keys). Range keys are indexed by position and size; a lookup no longer depends on their number.
 
