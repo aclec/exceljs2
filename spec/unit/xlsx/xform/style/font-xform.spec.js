@@ -43,6 +43,17 @@ const expectations = [
     },
     tests: ['render', 'renderIn', 'parse'],
   },
+  {
+    title: 'boolean flags with an explicit val',
+    create() {
+      return new FontXform();
+    },
+    xml:
+      '<font><b val="0"/><i val="false"/><strike val="1"/><outline val="true"/><shadow/>' +
+      '<condense val="0"/><extend val="false"/><sz val="11"/></font>',
+    parsedModel: {strike: true, outline: true, shadow: true, size: 11},
+    tests: ['parse'],
+  },
 ];
 
 describe('FontXform', () => {
