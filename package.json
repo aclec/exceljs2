@@ -71,6 +71,7 @@
         "format:check": "prettier --check .",
         "audit": "bun audit",
         "benchmark": "bun run build:lib && node --expose-gc benchmark.js",
+        "benchmark:suite": "bun run build:lib && node --expose-gc scripts/bench-suite.mjs",
         "check:install-scripts": "node scripts/check-install-scripts.mjs",
         "prepublishOnly": "bun run build && bun run test:dist",
         "prepare": "husky"
