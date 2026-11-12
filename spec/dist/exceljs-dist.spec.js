@@ -1,26 +1,49 @@
-const fs = require('fs');
+'use strict';
 
-const exists = path => new Promise(resolve => fs.exists(path, resolve));
+// Checks the output of `bun run build` (run it first).
+const fs = require('fs');
+const path = require('path');
+
+const DIST = path.resolve(__dirname, '../../dist');
+const BUNDLES = ['exceljs.js', 'exceljs.min.js', 'exceljs.bare.js', 'exceljs.bare.min.js'];
+const {version} = require('../../package.json');
 
 describe('ExcelJS', () => {
   describe('dist folder', () => {
-    it('should include LICENSE', async () => {
-      expect(await exists('./dist/LICENSE')).to.be.true()
+    it('contains exactly the bundles, their source maps and LICENSE', () => {
+      const expected = ['LICENSE', ...BUNDLES, ...BUNDLES.map(name => `${name}.map`)].sort();
+      expect(fs.readdirSync(DIST).sort()).to.deep.equal(expected);
     });
-    it('should include exceljs.js', async () => {
-      expect(await exists('./dist/exceljs.js')).to.be.true()
+
+    it('no longer contains the ES5 build (dropped in v5)', () => {
+      expect(fs.existsSync(path.join(DIST, 'es5'))).to.be.false();
     });
-    it('should include exceljs.min.js', async () => {
-      expect(await exists('./dist/exceljs.min.js')).to.be.true()
-    });
-    it('should include exceljs.bare.js', async () => {
-      expect(await exists('./dist/exceljs.bare.js')).to.be.true()
-    });
-    it('should include exceljs.bare.min.js', async () => {
-      expect(await exists('./dist/exceljs.bare.min.js')).to.be.true()
-    });
-    it('should include es5/index', async () => {
-      expect(await exists('./dist/es5/index.js')).to.be.true()
+
+    BUNDLES.forEach(name => {
+      describe(name, () => {
+        const file = path.join(DIST, name);
+
+        it('has a version banner and links its source map', () => {
+          const code = fs.readFileSync(file, 'utf8');
+          expect(code.startsWith(`/*! ExcelJS v${version} |`)).to.be.true();
+          expect(code.trimEnd().endsWith(`//# sourceMappingURL=${name}.map`)).to.be.true();
+          const map = JSON.parse(fs.readFileSync(`${file}.map`, 'utf8'));
+          expect(map.sources).to.include('../lib/doc/workbook.js');
+        });
+
+        it('exports ExcelJS through module.exports (UMD) and works', async () => {
+          const ExcelJS = require(file);
+          expect(ExcelJS.Workbook).to.be.a('function');
+          expect(ExcelJS.ValueType.Number).to.equal(2);
+
+          const wb = new ExcelJS.Workbook();
+          wb.addWorksheet('blort').getCell('A1').value = 'Hello, World!';
+          const buffer = await wb.xlsx.writeBuffer();
+          const wb2 = new ExcelJS.Workbook();
+          await wb2.xlsx.load(buffer);
+          expect(wb2.getWorksheet('blort').getCell('A1').value).to.equal('Hello, World!');
+        });
+      });
     });
   });
 });

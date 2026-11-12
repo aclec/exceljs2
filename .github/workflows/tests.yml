@@ -2,92 +2,189 @@ name: Tests
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ '**' ]
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # do not install the husky git hooks on CI runners
+  HUSKY: 0
+  BUN_VERSION: 1.4.4
 
 jobs:
-  test:
-    timeout-minutes: 10
-    name: Node v${{ matrix.node-version }} on ${{ matrix.os }}
+  node:
+    name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        node-version: [10.x, 12.x, 14.x, 16.x, 17.x, 18.x, 19.x, 20.x]
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        os: [ubuntu-latest]
+        node-version: [22.x, 24.x, 26.x]
+        include:
+          - os: macos-latest
+            node-version: 24.x
+          - os: windows-latest
+            node-version: 24.x
     runs-on: ${{ matrix.os }}
-
     steps:
       - name: Set git config
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.symlinks true
-        if: runner.os == 'Windows'
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 #latest v4. TODO upgrade
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@5e21ff4d9bc1a8cf6de233a3057d20ec6b3fb69d #latest  v3. TODO upgrade
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Create the npm cache directory
-        run: mkdir npm-cache && npm config set cache ./npm-cache --global
-      - name: Cache node modules
-        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 #latest v3 TODO upgrade
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          path: ./npm-cache
-          key: v1-${{ runner.os }}-node-${{ matrix.node-version }}-npm-${{ hashFiles('**/package.json') }}
-          restore-keys: |
-            v1-${{ runner.os }}-node-${{ matrix.node-version }}-npm-
-      - run: npm install
-      - run: npm test
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: node --version
+      # bun is only the package manager / script runner here: mocha runs on Node
+      - run: bun run test
         env:
           CI: true
+
+  bun:
+    name: Bun ${{ matrix.bun-version }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        bun-version: [1.4.4, latest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ matrix.bun-version }}
+      - run: bun install --frozen-lockfile
+      - run: bun run test:bun
+        env:
+          CI: true
+
+  browser:
+    name: Browser bundle (Chrome)
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test:dist
+      # uses the Google Chrome preinstalled on the runner image; no browser is downloaded
+      - run: google-chrome --version
+      - run: bun run test:browser
+
+  types:
+    name: TypeScript
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run test:types
+      - run: bun run test:typescript
+
+  lint:
+    name: Lint
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      # TODO: drop continue-on-error once the repository-wide Prettier commit has landed
+      - run: bun run format:check
+        continue-on-error: true
+
+  audit:
+    name: Dependency audit
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      # fails on any known vulnerability, whatever its severity
+      - run: bun run audit
+
+  install-scripts:
+    name: Install-scripts guard
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun run check:install-scripts
+      # no dependency lifecycle script may run, so build and tests must work without any of them
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run build
+      - run: bun run test:unit
 
   benchmark:
-    timeout-minutes: 15
     name: Measure performance impact of changes
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 #latest v4. TODO upgrade
-      - uses: actions/setup-node@5e21ff4d9bc1a8cf6de233a3057d20ec6b3fb69d #latest  v3. TODO upgrade
-        with:
-          node-version: 18
-      - name: Create the npm cache directory
-        run: mkdir npm-cache && npm config set cache ./npm-cache --global
-      - name: Cache node modules
-        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 #latest v3 TODO upgrade
-        with:
-          path: ./npm-cache
-          key: v1-npm-${{ hashFiles('**/package.json') }}
-          restore-keys: |
-            v1-npm-
-      - run: npm install
-      - run: npm run benchmark
-        env:
-          CI: true
-
-  typescript:
     timeout-minutes: 15
-    name: Ensure typescript compatibility
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 #latest v4. TODO upgrade
-      - uses: actions/setup-node@5e21ff4d9bc1a8cf6de233a3057d20ec6b3fb69d #latest  v3. TODO upgrade
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 18
-      - name: Create the npm cache directory
-        run: mkdir npm-cache && npm config set cache ./npm-cache --global
-      - name: Cache node modules
-        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 #latest v3 TODO upgrade
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          path: ./npm-cache
-          key: v1-npm-${{ hashFiles('**/package.json') }}
-          restore-keys: |
-            v1-npm-
-      - run: npm install
-      - run: npm install typescript
-      - run: tsc index.d.ts
+          node-version: 24.x
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run benchmark
         env:
           CI: true

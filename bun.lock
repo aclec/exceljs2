@@ -43,6 +43,7 @@
       },
     },
   },
+  "trustedDependencies": [],
   "overrides": {
     "glob": "^14.0.5",
     "minimatch": "^11.0.8",

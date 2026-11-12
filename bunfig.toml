@@ -1,0 +1,7 @@
+# Bun configuration (https://bun.com/docs/runtime/bunfig)
+
+[install]
+# Supply-chain cooldown: when resolving new versions (bun add / bun update / lockfile changes), only
+# accept releases that have been public for at least 3 days, so a hijacked release is usually
+# detected and unpublished before it can land in bun.lock. Installs from the lockfile are unaffected.
+minimumReleaseAge = 259200
