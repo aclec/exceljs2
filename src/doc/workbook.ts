@@ -50,8 +50,8 @@ class Workbook {
     subject: string | undefined;
     /** Document property: the title ("" by default). */
     title: string | undefined;
-    /** The workbook views (windows). */
-    views: WorkbookViewModel[];
+    /** The workbook views (windows); `undefined` once a file without `<bookViews>` is read. */
+    views: WorkbookViewModel[] | undefined;
     /** The images (`addImage`), indexed by image id. */
     media: MediaModel[];
     /** The pivot tables of the worksheets (`worksheet.addPivotTable`, one at most). */

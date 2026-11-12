@@ -23,6 +23,7 @@ import type DefinedNames from "../doc/defined-names";
 import type Table from "../doc/table";
 import type Worksheet from "../doc/worksheet";
 import type Workbook from "../doc/workbook";
+import type ModelContainer from "../doc/modelcontainer";
 
 /** The back-references that are not compared (see the file comment). */
 type BackReference = "worksheet" | "workbook" | "master";
@@ -98,15 +99,8 @@ export type ColumnConforms = Assert<
         "values" | "eachCell"
     >
 >;
-/** The runtime DefinedNames conforms to index.d.ts `DefinedNames`, but for the known mismatches listed. */
-export type DefinedNamesConforms = Assert<
-    Check<
-        DefinedNames,
-        Public.DefinedNames,
-        // TODO(align)
-        "addEx" | "removeEx"
-    >
->;
+/** The runtime DefinedNames conforms to index.d.ts `DefinedNames`. */
+export type DefinedNamesConforms = Assert<Check<DefinedNames, Public.DefinedNames>>;
 /** The runtime Table conforms to index.d.ts `Table`, but for the known mismatches listed. */
 export type TableConforms = Assert<
     Check<
@@ -152,31 +146,17 @@ export type WorkbookConforms = Assert<
     Check<
         Workbook,
         Public.Workbook,
-        // TODO(align)
-        | "properties"
-        | "calcProperties"
-        | "worksheets"
-        | "definedNames"
-        | "views"
-        | "company"
-        | "manager"
-        | "model"
-        | "creator"
-        | "title"
-        | "subject"
-        | "description"
-        | "keywords"
-        | "category"
-        | "lastModifiedBy"
-        | "lastPrinted"
-        | "created"
-        | "modified"
-        | "xlsx"
-        | "csv"
-        | "addWorksheet"
-        | "removeWorksheetEx"
-        | "getWorksheet"
-        | "eachSheet"
-        | "getImage"
+        // TODO(align) the worksheets: they conform once Worksheet does (see WorksheetConforms); `model` once the
+        // index.d.ts `WorksheetModel` of its `worksheets` does
+        "worksheets" | "addWorksheet" | "getWorksheet" | "eachSheet" | "removeWorksheetEx" | "model"
+    >
+>;
+/** The runtime ModelContainer conforms to index.d.ts `ModelContainer`, but for the known mismatches listed. */
+export type ModelContainerConforms = Assert<
+    Check<
+        ModelContainer,
+        Public.ModelContainer,
+        // TODO(align) `model`: conforms once the index.d.ts `WorksheetModel` of its `worksheets` does
+        "model"
     >
 >;

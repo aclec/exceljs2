@@ -173,13 +173,24 @@ export type WorksheetViewModel = Partial<WorksheetViewCommon & Omit<WorksheetVie
  */
 export type RowStyleOption = "n" | "i" | "i+" | "o" | "o+";
 
+/**
+ * A window of the workbook (`workbook.views`, `<workbookView>`). On write, a missing position is 0, 0 and a missing size
+ * 12000 x 24000; on read, a missing position is 0, 0, a missing size 25000 x 10000 and a missing visibility `"visible"`.
+ */
 export interface WorkbookView {
+    /** The horizontal position of the window, in twips. */
     x: number;
+    /** The vertical position of the window, in twips. */
     y: number;
+    /** The width of the window, in twips. */
     width: number;
+    /** The height of the window, in twips. */
     height: number;
-    firstSheet: number;
-    activeTab: number;
+    /** The 0-based index of the first worksheet tab shown; absent when the file does not set it. */
+    firstSheet?: number;
+    /** The 0-based index of the active worksheet; absent when the file does not set it. */
+    activeTab?: number;
+    /** `"visible"`, `"hidden"` or `"veryHidden"`. */
     visibility: string;
 }
 
@@ -1049,11 +1060,22 @@ export interface WorksheetProtection {
     pivotTables: boolean;
     spinCount: number;
 }
+/**
+ * An image to add to a workbook (`workbook.addImage`): its extension and its data, given by exactly one of `filename`,
+ * `buffer` or `base64` (checked in this order when the workbook is written).
+ */
 export interface Image {
-    extension: "jpeg" | "png" | "gif";
+    /**
+     * The extension of the image file (`xl/media/image1.png`), also its content type (`image/<extension>`): Excel shows
+     * `jpeg`, `png`, `gif`... Writing rejects an extension that is not 1 to 5 letters or digits.
+     */
+    extension: "jpeg" | "png" | "gif" | (string & {});
+    /** The image as base64: plain, or a data URL (`data:image/png;base64,...`: the text up to the first comma is dropped). */
     base64?: string;
+    /** The path of the image file, read when the workbook is written (Node.js and Bun only). */
     filename?: string;
-    buffer?: ArrayBuffer | globalThis.Buffer;
+    /** The bytes of the image (a Node Buffer is a Uint8Array). */
+    buffer?: ArrayBuffer | Uint8Array;
 }
 export interface IAnchor {
     col: number;
@@ -1669,6 +1691,10 @@ export interface Worksheet {
     removeConditionalFormatting(filter: any): void;
 }
 
+/**
+ * The calculation properties of a workbook (`workbook.calcProperties`, `<calcPr>`): written, never read from a file (a
+ * loaded workbook has `{}`).
+ */
 export interface CalculationProperties {
     /**
      * Whether the application shall perform a full recalculation when the workbook is opened
@@ -1724,6 +1750,10 @@ export interface AddWorksheetOptions {
     state: WorksheetState;
 }
 
+/**
+ * The properties of a workbook (`workbook.properties`, `<workbookPr>`): empty for a new workbook; a loaded workbook has
+ * `date1904` when the file has a `<workbookPr>`.
+ */
 export interface WorkbookProperties {
     /**
      * Set workbook dates to 1904 date system
@@ -1795,9 +1825,10 @@ export interface ZipReadLimits {
     maxCompressionRatio: number;
 }
 
+/** The options of `xlsx.load`, `read` and `readFile`. */
 export interface XlsxReadOptions extends ZipReadLimits {
     /**
-     * The list of XML node names to ignore while parsing an XLSX file
+     * The names of the worksheet XML elements to skip while parsing (e.g. `["dataValidations"]`)
      */
     ignoreNodes: string[];
     /**
@@ -1809,56 +1840,116 @@ export interface XlsxReadOptions extends ZipReadLimits {
     maxMergedCells: number;
 }
 
-export interface XlsxWriteOptions extends stream.xlsx.WorkbookWriterOptions {
+/** The options of `xlsx.load`: {@link XlsxReadOptions}, and `base64` for data given as base64 text. */
+export interface XlsxLoadOptions extends XlsxReadOptions {
+    /** The data is the base64 text of the file (a string, or the bytes of that text). */
+    base64: boolean;
+}
+
+/** The options of `xlsx.write`, `writeBuffer` and `writeFile`. */
+export interface XlsxWriteOptions {
+    /**
+     * Whether to write the strings of the cells in a shared strings table (else inline in the cells)
+     * @default true
+     */
+    useSharedStrings: boolean;
+    /**
+     * Whether to write the styles of the cells (else every cell has the default style)
+     * @default true
+     */
+    useStyles: boolean;
     /**
      * Zip options
      */
     zip: Partial<ZipOptions>;
 }
 
-export interface Xlsx {
+/**
+ * An output of `xlsx.write`: a Node.js writable stream, or any object with `write(chunk)` and `end()` (`on` /
+ * `removeListener`, when present, are used to wait for `"drain"` and to report errors).
+ */
+export interface XlsxOutput {
+    /** Writes a chunk of the file; returning `false` (with `on`) waits for `"drain"`. */
+    write(chunk: Buffer): unknown;
+    /** Ends the output (`xlsx.write` does not call it). */
+    end(): unknown;
+}
+
+/**
+ * The xlsx reader and writer of a workbook (`workbook.xlsx`) or of a {@link ModelContainer} (`container.xlsx`).
+ * @typeParam T - the object read into and written from, which the read methods resolve with
+ */
+export interface Xlsx<T = Workbook> {
     /**
-     * read from a file
+     * Reads a file into the workbook (Node.js and Bun only).
+     * @returns the workbook, once read
+     * @throws (rejects) when the file does not exist, or as {@link Xlsx.load}
      */
-    readFile(path: string, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
+    readFile(path: string, options?: Partial<XlsxReadOptions>): Promise<T>;
 
     /**
-     * read from a stream
-     * @param stream
+     * Reads the bytes of a file from a stream (anything with `pipe`), or from an async iterable of byte chunks (e.g. a
+     * web `ReadableStream`), into the workbook.
+     * @returns the workbook, once read
+     * @throws (rejects) on an error of the stream, or as {@link Xlsx.load}
      */
-    read(stream: import("stream").Stream, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
+    read(
+        stream: import("stream").Stream | NodeJS.ReadableStream | AsyncIterable<Uint8Array>,
+        options?: Partial<XlsxReadOptions>
+    ): Promise<T>;
 
     /**
-     * load from a Buffer, an ArrayBuffer or a Uint8Array
-     * @param buffer
+     * Loads a file into the workbook from its bytes (a Buffer, a Uint8Array or any ArrayBufferView, an ArrayBuffer, an
+     * array of byte values) or a Blob (e.g. the `File` of an `<input type="file">`).
+     * @returns the workbook, once read
+     * @throws (rejects) on an invalid zip or XML, a decompression limit or a limit of the worksheets exceeded
      */
-    load(buffer: ArrayBuffer | Uint8Array, options?: Partial<XlsxReadOptions>): Promise<Workbook>;
+    load(data: ArrayBuffer | ArrayBufferView | Blob | number[], options?: Partial<XlsxReadOptions>): Promise<T>;
+    /**
+     * Loads a file into the workbook from its base64 text (`base64: true`).
+     * @returns the workbook, once read
+     * @throws (rejects) as the other form
+     */
+    load(data: string | Uint8Array, options: Partial<XlsxLoadOptions> & { base64: true }): Promise<T>;
 
     /**
-     * write to a buffer
+     * Writes the workbook as an xlsx file in memory.
+     * @returns the bytes of the file
+     * @throws (rejects) as {@link Xlsx.write}
      */
     writeBuffer(options?: Partial<XlsxWriteOptions>): Promise<Buffer>;
 
     /**
-     * write to a file
+     * Writes the workbook to a file (Node.js and Bun only); resolves once the file is closed.
+     * @throws (rejects) as {@link Xlsx.write}, or on an error of the file
      */
     writeFile(path: string, options?: Partial<XlsxWriteOptions>): Promise<void>;
 
     /**
-     * write to a stream
+     * Writes the workbook as an xlsx file to an output; resolves once the archive is written (the output is not ended:
+     * call `end()` afterwards).
+     * @throws (rejects) for an image extension that is not 1 to 5 letters or digits (before anything is written), an
+     * image without data, or a failure of the output
      */
-    write(stream: import("stream").Stream, options?: Partial<XlsxWriteOptions>): Promise<void>;
+    write(stream: XlsxOutput | NodeJS.WritableStream, options?: Partial<XlsxWriteOptions>): Promise<void>;
 }
 
 // https://c2fo.github.io/fast-csv/docs/parsing/options
 
+/** The header names of the CSV parser: `undefined` (or `null`) skips the column. */
 type HeaderArray = (string | undefined | null)[];
+/** Renames the header names read from the first row (`parserOptions.headers`). */
 type HeaderTransformFunction = (headers: HeaderArray) => HeaderArray;
+/** The options of the fast-csv parser (`csv.read` / `readFile` `parserOptions`). */
 export interface FastCsvParserOptionsArgs {
     objectMode: boolean;
     delimiter: string;
     quote: string | null;
     escape: string;
+    /**
+     * `true`: the first row holds the header names; an array: the header names; a function: renames the header names of
+     * the first row. The names become the first row of the worksheet and the column keys (made unique).
+     */
     headers: boolean | HeaderTransformFunction | HeaderArray;
     renameHeaders: boolean;
     ignoreEmpty: boolean;
@@ -1874,24 +1965,33 @@ export interface FastCsvParserOptionsArgs {
     skipRows: number;
 }
 
+/** Columns to quote, by header name. */
 interface QuoteColumnMap {
     [s: string]: boolean;
 }
+/** Whether to quote all the columns, or the ones of an array (by index) or of a map (by header name). */
 declare type QuoteColumns = boolean | boolean[] | QuoteColumnMap;
 
+/** A row of the CSV formatter as an object: its values by header name. */
 interface RowMap {
-    [key: string]: any;
+    [key: string]: unknown;
 }
-declare type RowHashArray = [string, any][];
-declare type RowArray = string[];
+/** A row of the CSV formatter as `[header, value]` pairs. */
+declare type RowHashArray = [string, unknown][];
+/** A row of the CSV formatter as its values: what `csv.write` gives (the results of `map`). */
+declare type RowArray = unknown[];
+/** A row of the CSV formatter. */
 declare type Rows = RowArray | RowMap | RowHashArray;
+/** The callback of an asynchronous row transform: the transformed row, or an error. */
 declare type RowTransformCallback = (error?: Error | null, row?: Rows) => void;
-interface RowTransformFunction {
-    (row: Rows, callback: RowTransformCallback): void;
-    (row: Rows): Rows;
-}
+/**
+ * Transforms each row before it is formatted: synchronously (one parameter: returns the row) or asynchronously (two
+ * parameters: calls back with the row). `csv.write` gives each row as the array of its mapped values.
+ */
+declare type RowTransformFunction = ((row: RowArray) => Rows) | ((row: RowArray, callback: RowTransformCallback) => void);
 
 // https://c2fo.github.io/fast-csv/docs/formatting/options/
+/** The options of the fast-csv formatter (`csv.write` / `writeFile` / `writeBuffer` `formatterOptions`). */
 export interface FastCsvFormatterOptionsArgs {
     objectMode: boolean;
     delimiter: string;
@@ -1901,62 +2001,119 @@ export interface FastCsvFormatterOptionsArgs {
     quoteColumns: QuoteColumns;
     quoteHeaders: QuoteColumns;
     headers: null | boolean | string[];
+    writeHeaders: boolean;
     includeEndRowDelimiter: boolean;
     writeBOM: boolean;
     transform: RowTransformFunction;
     alwaysWriteHeaders: boolean;
 }
 
+/** The options of `csv.read` and `readFile`. */
 export interface CsvReadOptions {
+    /**
+     * The formats (dayjs, strict parsing) of the dates of the default `map`
+     * @default ["YYYY-MM-DD[T]HH:mm:ssZ", "YYYY-MM-DD[T]HH:mm:ss", "MM-DD-YYYY", "YYYY-MM-DD"]
+     */
     dateFormats: string[];
-    map(value: any, index: number): any;
+    /**
+     * Maps each field to the value of its cell. By default an empty field is null, a number a number (an integer that
+     * would lose digits stays text), a date in one of `dateFormats` a Date, `true` / `false` a boolean, `#N/A`... an
+     * error value, anything else text.
+     * @param value - the text of the field
+     * @param index - the 0-based index of the column
+     */
+    map(value: string, index: number): CellValue;
+    /** The name of the new worksheet (default `sheet<id>`). */
     sheetName: string;
+    /** The options of the parser. */
     parserOptions: Partial<FastCsvParserOptionsArgs>;
 }
 
+/** The options of `csv.write`, `writeFile` and `writeBuffer`. */
 export interface CsvWriteOptions {
+    /** The dayjs format of the dates of the default `map` (default ISO 8601). */
     dateFormat: string;
+    /** Whether the default `map` writes the dates in UTC (else in local time). */
     dateUTC: boolean;
+    /** The worksheet to write, by name (else `sheetId`, else the first worksheet). */
     sheetName: string;
+    /** The worksheet to write, by id. */
     sheetId: number;
+    /**
+     * The encoding of the file (`writeFile` only)
+     * @default "utf8"
+     */
     encoding: string;
-    map(value: any, index: number): any;
+    /**
+     * Maps each cell value to the field written. By default a hyperlink is its link, a formula its result, a date ISO
+     * 8601 (or `dateFormat`), an error its text, another object its JSON.
+     * @param value - the value of the cell
+     * @param index - the 0-based index of the column
+     */
+    map(value: CellValue, index: number): unknown;
+    /**
+     * Whether to write an empty line for each row without values between two rows
+     * @default true
+     */
     includeEmptyRows: boolean;
+    /** The options of the formatter. */
     formatterOptions: Partial<FastCsvFormatterOptionsArgs>;
 }
 
+/** The CSV reader and writer of a workbook (`workbook.csv`): one worksheet per file. */
 export interface Csv {
     /**
-     * read from a file
+     * Reads a CSV file into a new worksheet (Node.js and Bun only).
+     * @returns the new worksheet
+     * @throws (rejects) when the file does not exist, or as {@link Csv.read}
      */
     readFile(path: string, options?: Partial<CsvReadOptions>): Promise<Worksheet>;
 
     /**
-     * read from a stream
+     * Reads CSV text from a readable stream into a new worksheet.
+     * @returns the new worksheet
+     * @throws (rejects) on an error of the stream or of the parser, or a header of more than 16,384 names
      */
-    read(stream: import("stream").Stream, options?: Partial<CsvReadOptions>): Promise<Worksheet>;
+    read(stream: NodeJS.ReadableStream, options?: Partial<CsvReadOptions>): Promise<Worksheet>;
 
     /**
-     * write to a buffer
+     * Writes a worksheet as CSV in memory.
+     * @returns the CSV bytes
      */
     writeBuffer(options?: Partial<CsvWriteOptions>): Promise<Buffer>;
 
     /**
-     * write to a file
+     * Writes a worksheet to a CSV file (Node.js and Bun only); resolves once the file is written.
+     * @throws (rejects) on an error of the file or of the formatter
      */
     writeFile(path: string, options?: Partial<CsvWriteOptions>): Promise<void>;
 
     /**
-     * write to a stream
+     * Writes a worksheet as CSV to a writable stream, which is ended; resolves on its `"finish"` event.
+     * @throws (rejects) on an error of the stream or of the formatter
      */
-    write(stream: import("stream").Stream, options?: Partial<CsvWriteOptions>): Promise<void>;
+    write(stream: NodeJS.WritableStream, options?: Partial<CsvWriteOptions>): Promise<void>;
 }
 
+/**
+ * An image of a workbook (`workbook.getImage(id)`, `workbook.model.media`): an {@link Image} as added, or as read from a
+ * file (`name`, `extension` and `buffer`).
+ */
 export interface Media {
-    type: string; // image,background
-    name: string;
+    /** Always `"image"`. */
+    type: "image";
+    /** The name of the image part (`image1`): set when the workbook is read or written. */
+    name?: string;
+    /** The extension of the image file (`png`, `jpeg`...; as named in the file for a loaded workbook). */
     extension: string;
-    buffer: Buffer;
+    /** The bytes of the image; `null` for an empty image part of a loaded file. */
+    buffer?: ArrayBuffer | Uint8Array | null;
+    /** The image as base64 (see {@link Image.base64}). */
+    base64?: string;
+    /** The path of the image file (see {@link Image.filename}). */
+    filename?: string;
+    /** The index of the image part, set when a workbook is read. */
+    index?: number;
 }
 
 export interface Address {
@@ -1984,13 +2141,17 @@ export interface Location {
     right: number;
 }
 
+/** A defined name and its ranges (`definedNames.getRanges(name)`, an entry of `definedNames.model`). */
 export interface DefinedNamesRanges {
+    /** The name. */
     name: string;
+    /** Its cells and ranges, as `$`-absolute references (`"Sheet1!$A$1:$B$2"`). */
     ranges: string[];
     /** The 0-based index of the worksheet a name is local to (absent: a workbook-level name). */
     localSheetId?: number;
 }
 
+/** The defined names of a workbook (`definedNames.model`); setting it loads only the `$`-absolute references. */
 export type DefinedNamesModel = DefinedNamesRanges[];
 
 /** A cell of a defined name: its worksheet and address (`row` / `col` 1-based, `address` without `$`). */
@@ -2002,16 +2163,29 @@ export interface DefinedNameCell {
     $col$row?: string;
 }
 
-/** The defined names of a workbook (`workbook.definedNames`). */
+/**
+ * The defined names of a workbook (`workbook.definedNames`). The cells of a name follow the rows and columns inserted or
+ * removed; a range of more than 100,000 cells is kept as a whole (removing any of its cells removes the range).
+ */
 export interface DefinedNames {
-    /** Adds a name to a cell or a range, given as `"Sheet1!$A$1"` or `"Sheet1!$A$1:$B$2"`. */
+    /**
+     * Adds a name to a cell or a range, given as `"Sheet1!$A$1"` or `"Sheet1!$A$1:$B$2"`.
+     * @throws Error when a column or a row is out of bounds
+     */
     add(locStr: string, name: string): void;
-    /** Adds a name to a cell, or to the cells of a range given by its bounds (`top`, `left`, `bottom`, `right`). */
+    /**
+     * Adds a name to a cell, or to the cells of a range given by its 1-based bounds (`top`, `left`, `bottom`, `right`,
+     * e.g. a decoded range reference).
+     */
     addEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
 
-    /** Removes a name from a cell or a range, given as a reference (`"Sheet1!$A$1"`). */
+    /**
+     * Removes a name from a cell, given as a reference (`"Sheet1!$A$1"`). A range reference removes nothing.
+     * @throws Error when a column or a row is out of bounds
+     */
     remove(locStr: string, name: string): void;
-    removeEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
+    /** Removes a name from a cell (and the range of more than 100,000 cells of the name that contains it). */
+    removeEx(location: DefinedNameCell, name: string): void;
     /** Removes every name of a cell. */
     removeAllNames(location: DefinedNameCell): void;
 
@@ -2023,56 +2197,127 @@ export interface DefinedNames {
     /** The names of a cell. */
     getNamesEx(address: DefinedNameCell): string[];
 
-    /** The ranges of a name, as references (`"Sheet1!$A$1:$B$2"`). */
+    /** The ranges of a name, as references (`"Sheet1!$A$1:$B$2"`); none for an unknown name. */
     getRanges(name: string): DefinedNamesRanges;
 
+    /** The names with their ranges (names without range are left out); setting it replaces every name. */
     model: DefinedNamesModel;
 }
 
+/**
+ * A `<sheet>` of the workbook part: the `sheets` of the model that `xlsx` reads into a {@link ModelContainer}.
+ */
+export interface WorkbookSheetModel {
+    /** The sheet id (`NaN` when the file's is not a number). */
+    id: number;
+    /** The worksheet name. */
+    name: string;
+    /** `"visible"` (absent), `"hidden"` or `"veryHidden"`. */
+    state?: string;
+    /** The relationship id of the worksheet part. */
+    rId?: string;
+}
+
+/**
+ * The model of a workbook (`workbook.model`, `ModelContainer.model`): the document properties, the worksheet models and
+ * the settings. The document properties are absent when unset (the getter gives `"Unknown"` for an unset `creator` /
+ * `lastModifiedBy`); setting `workbook.model` reads `sheets` only to order the worksheets.
+ */
 export interface WorkbookModel {
-    creator: string;
-    lastModifiedBy: string;
-    lastPrinted: Date;
-    created: Date;
-    modified: Date;
-    properties: WorkbookProperties;
-    worksheets: Worksheet[];
-    sheets: WorksheetModel[];
+    /** Document property: the author. */
+    creator?: string;
+    /** Document property: the author of the last change. */
+    lastModifiedBy?: string;
+    /** Document property: the date of the last print. */
+    lastPrinted?: Date;
+    /** Document property: the creation date. */
+    created?: Date;
+    /** Document property: the date of the last change. */
+    modified?: Date;
+    /** The workbook properties. */
+    properties: Partial<WorkbookProperties>;
+    /** The calculation properties. */
+    calcProperties: Partial<CalculationProperties>;
+    /** The worksheets, in their order. */
+    worksheets: WorksheetModel[];
+    /** The worksheet models again (getter), or the `<sheet>` elements read by a {@link ModelContainer}. */
+    sheets?: WorksheetModel[] | WorkbookSheetModel[];
+    /** The defined names. */
     definedNames: DefinedNamesModel;
-    views: WorkbookView[];
-    company: string;
-    manager: string;
-    title: string;
-    subject: string;
-    keywords: string;
-    category: string;
-    description: string;
-    language: string;
-    revision: Date;
-    contentStatus: string;
-    themes: string[];
+    /** The workbook windows. */
+    views: WorkbookView[] | undefined;
+    /** Document property: the company. */
+    company?: string;
+    /** Document property: the manager. */
+    manager?: string;
+    /** Document property: the title. */
+    title?: string;
+    /** Document property: the subject. */
+    subject?: string;
+    /** Document property: the keywords. */
+    keywords?: string;
+    /** Document property: the category. */
+    category?: string;
+    /** Document property: the description. */
+    description?: string;
+    /** Document property: the identifier (read and written by a {@link ModelContainer} only). */
+    identifier?: string;
+    /** Document property: the language. */
+    language?: string;
+    /** Document property: the revision number (`NaN` when the file's is not a number). */
+    revision?: number;
+    /** Document property: the content status (`"Draft"`, `"Final"`...). */
+    contentStatus?: string;
+    /** Document property: the content type (read and written by a {@link ModelContainer} only). */
+    contentType?: string;
+    /** The themes read from a file: part name (`theme1`) → XML, written back as they are. */
+    themes?: Record<string, string>;
+    /** The images, by image id. */
     media: Media[];
 }
 
+/**
+ * A workbook: its worksheets, defined names, images, properties and document properties; `xlsx` and `csv` read and
+ * write it.
+ */
 export class Workbook {
-    category: string;
-    company: string;
-    creator: string;
-    description: string;
-    keywords: string;
-    lastModifiedBy: string;
-    created: Date;
-    manager: string;
-    modified: Date;
-    lastPrinted: Date;
-    properties: WorkbookProperties;
-    subject: string;
-    title: string;
+    /** Document property: the category (`""` for a new workbook; `undefined` after loading a file without it). */
+    category: string | undefined;
+    /** Document property: the company (`""` for a new workbook; `undefined` after loading a file without it). */
+    company: string | undefined;
+    /** Document property: the author (written as `"Unknown"` when unset). */
+    creator: string | undefined;
+    /** Document property: the description (`""` for a new workbook; `undefined` after loading a file without it). */
+    description: string | undefined;
+    /** Document property: the keywords (`""` for a new workbook; `undefined` after loading a file without it). */
+    keywords: string | undefined;
+    /** Document property: the author of the last change (written as `"Unknown"` when unset). */
+    lastModifiedBy: string | undefined;
+    /** Document property: the creation date (now for a new workbook; `undefined` after loading a file without it). */
+    created: Date | undefined;
+    /** Document property: the manager (`""` for a new workbook; `undefined` after loading a file without it). */
+    manager: string | undefined;
+    /** Document property: the date of the last change (now for a new workbook; `undefined` after loading a file without it). */
+    modified: Date | undefined;
+    /** Document property: the date of the last print. */
+    lastPrinted: Date | undefined;
+    /** Document property: the subject (`""` for a new workbook; `undefined` after loading a file without it). */
+    subject: string | undefined;
+    /** Document property: the title (`""` for a new workbook; `undefined` after loading a file without it). */
+    title: string | undefined;
+    /** Document property: the language. */
+    language: string | undefined;
+    /** Document property: the revision number (`NaN` after loading a file whose revision is not a number). */
+    revision: number | undefined;
+    /** Document property: the content status (`"Draft"`, `"Final"`...). */
+    contentStatus: string | undefined;
+    /** The workbook properties (`{}` for a new workbook). */
+    properties: Partial<WorkbookProperties>;
 
     /**
-     * Workbook calculation Properties
+     * Workbook calculation Properties (`{}` for a new or a loaded workbook)
      */
-    calcProperties: CalculationProperties;
+    calcProperties: Partial<CalculationProperties>;
 
     /**
      * xlsx file format operations
@@ -2084,8 +2329,10 @@ export class Workbook {
      */
     readonly csv: Csv;
 
+    /** The id that the next worksheet added gets: the first free id (from 1). */
     readonly nextId: number;
 
+    /** The defined names. */
     readonly definedNames: DefinedNames;
 
     /**
@@ -2095,28 +2342,40 @@ export class Workbook {
      */
     maxMergedCells: number;
 
+    /**
+     * The model of the workbook (the worksheet models and the settings); setting it replaces the workbook.
+     * @throws Error (setter) for an invalid worksheet name, or when the merges exceed `maxMergedCells`
+     */
     model: WorkbookModel;
 
     /**
-     * The Workbook views controls how many separate windows Excel will open when viewing the workbook.
+     * The Workbook views controls how many separate windows Excel will open when viewing the workbook. `[]` for a new
+     * workbook; `undefined` after loading a file without `<bookViews>` (such as one written with no views).
      */
-    views: WorkbookView[];
+    views: WorkbookView[] | undefined;
+
+    /** The images (`addImage`, or read from a file), by image id. */
+    media: Media[];
 
     /**
-     * return a clone of worksheets in order
+     * The worksheets, in their order (a new array)
      */
-    worksheets: Worksheet[];
+    readonly worksheets: Worksheet[];
 
     /**
      * Add a new worksheet and return a reference to it
+     * @param name - the name (default `sheet<id>`)
+     * @throws Error for an invalid or duplicate name
      */
     addWorksheet(name?: string, options?: Partial<AddWorksheetOptions>): Worksheet;
 
+    /** Removes a worksheet (a worksheet removed twice does not remove the worksheet that took its id). */
     removeWorksheetEx(worksheet: Worksheet): void;
+    /** Removes a worksheet by id or name (nothing for an unknown one). */
     removeWorksheet(indexOrName: number | string): void;
 
     /**
-     * fetch sheet by name or id
+     * fetch sheet by name or id; without argument, the first worksheet (by id)
      */
     getWorksheet(indexOrName?: number | string): Worksheet | undefined;
 
@@ -2127,14 +2386,32 @@ export class Workbook {
      */
     eachSheet(callback: (worksheet: Worksheet, id: number) => void): void;
 
+    /** Drops the themes read from a file (the default theme is then written). */
     clearThemes(): void;
 
     /**
-     * Add Image to Workbook and return the id
+     * Add Image to Workbook and return the id (a copy of `img`, checked only when the workbook is written)
      */
     addImage(img: Image): number;
 
-    getImage(id: number): Image;
+    /** An image by id: as added (with `type`), or as read from a file; `undefined` for an unknown id. */
+    getImage(id: number): Media | undefined;
+}
+
+/**
+ * A workbook model without a Workbook (Node.js and Bun only: not in the browser bundles): `xlsx` reads a file into
+ * `model` without creating worksheets, and writes `model`.
+ */
+export class ModelContainer {
+    /** @param model - the model to write (`undefined` before reading a file into the container) */
+    constructor(model: WorkbookModel);
+    /**
+     * The workbook model: what `xlsx` writes, and what it sets when reading (then the parsed model, whose worksheets
+     * hold their parsed rows and cells).
+     */
+    model: WorkbookModel;
+    /** The xlsx reader and writer of the model (its read methods resolve with the container). */
+    readonly xlsx: Xlsx<ModelContainer>;
 }
 
 export interface TableStyleProperties {

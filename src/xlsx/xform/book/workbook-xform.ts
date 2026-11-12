@@ -78,7 +78,7 @@ export interface WorkbookXformWriteModel {
     worksheets: WorkbookSheetWriteModel[];
     sheets?: readonly WorkbookSheetWriteModel[];
     definedNames: DefinedNameModel[];
-    views: readonly WorkbookViewModel[];
+    views: readonly WorkbookViewModel[] | undefined;
     properties: Partial<WorkbookProperties>;
     calcProperties: Partial<CalculationProperties>;
     media?: readonly MediaModel[];
