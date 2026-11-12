@@ -74,4 +74,16 @@ describe("hostile input: algorithmic complexity", function () {
         const { ms } = await timed(() => load(zipParts(parts)));
         expect(ms).to.be.below(1500);
     });
+
+    it("joins many Print_Area names of a worksheet in linear time", async () => {
+        const name = '<definedName name="_xlnm.Print_Area" localSheetId="0">Sheet1!$A$1:$B$2</definedName>';
+        const buffer = await tamper(await baseWorkbookBuffer(), {
+            "xl/workbook.xml": (xml) => xml.replace("</sheets>", `</sheets><definedNames>${name.repeat(100000)}</definedNames>`),
+        });
+        const { result: wb, ms } = await timed(() => load(buffer));
+        const { printArea } = wb.getWorksheet(1).pageSetup;
+        expect(printArea.startsWith("A1:B2&&A1:B2&&")).to.equal(true);
+        expect(printArea.length).to.equal(100000 * "A1:B2&&".length - 2);
+        expect(ms).to.be.below(1500);
+    });
 });
