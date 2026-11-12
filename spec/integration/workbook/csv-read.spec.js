@@ -167,6 +167,13 @@ describe("CSV read", () => {
             expect(["a", "a_3", "a_2", "a_4"].map((key) => ws.getColumn(key).number)).to.deep.equal([1, 2, 3, 4]);
         });
 
+        it("keeps the values of a column with a null header name, like fast-csv", async () => {
+            const ws = await readCsv("x,y\n1,2\n", { parserOptions: { headers: ["p", null] } });
+            expect(ws.getRow(2).values.slice(1)).to.deep.equal(["x", "y"]);
+            expect(ws.getRow(3).values.slice(1)).to.deep.equal([1, 2]);
+            expect(ws.getColumn("null").number).to.equal(2);
+        });
+
         it("keeps the values of duplicate names returned by a header transform", async () => {
             const ws = await readCsv("x,y\n1,2\n", { parserOptions: { headers: () => ["k", "k"] } });
             expect(ws.getRow(1).values.slice(1)).to.deep.equal(["k", "k"]);
