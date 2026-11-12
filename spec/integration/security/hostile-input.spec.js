@@ -132,6 +132,42 @@ describe("hostile input", function () {
         });
     });
 
+    describe("row numbers", () => {
+        const withRow = (r) => ({ [SHEET]: (xml) => xml.replace("</sheetData>", `<row r="${r}"/></sheetData>`) });
+
+        it("rejects an empty row beyond the last Excel row instead of creating a sparse row array", async () => {
+            for (const r of ["1048577", "4294967294", "0", "-3"]) {
+                const buffer = await tamper(await baseWorkbookBuffer(), withRow(r));
+                const error = await load(buffer).catch((e) => e);
+                expect(error, r).to.be.an("error");
+                expect(error.message).to.match(/Out of bounds. Excel supports rows from 1 to 1048576/);
+            }
+        });
+
+        it("rejects it in the streaming reader too", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), withRow("4294967294"));
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]));
+            const read = async () => {
+                for await (const ws of reader) {
+                    for await (const row of ws) {
+                        expect(row.number).to.equal(1);
+                    }
+                }
+            };
+            const error = await read().catch((e) => e);
+            expect(error).to.be.an("error");
+            expect(error.message).to.match(/Out of bounds. Excel supports rows from 1 to 1048576/);
+        });
+
+        it("still reads the last Excel row", async () => {
+            const buffer = await tamper(await baseWorkbookBuffer(), {
+                [SHEET]: (xml) => xml.replace("</sheetData>", '<row r="1048576"><c r="A1048576"><v>5</v></c></row></sheetData>'),
+            });
+            const ws = (await load(buffer)).getWorksheet("Sheet1");
+            expect(ws.getCell("A1048576").value).to.equal(5);
+        });
+    });
+
     describe("sheet ids", () => {
         const withSheetIds = (...ids) => ({
             "xl/workbook.xml": (xml) => {
