@@ -281,4 +281,22 @@ describe('WorkbookReader (stream)', () => {
       expect(hidden).to.deep.equal([false, true, false]);
     });
   });
+
+  it('names worksheets whose relationship targets are absolute paths', async () => {
+    const buffer = await baseWorkbookBuffer(wb => {
+      wb.addWorksheet('Named').getCell('A1').value = 'two';
+    });
+    const tampered = await tamper(buffer, {
+      // openpyxl style absolute targets, plus a relationship without Target
+      'xl/_rels/workbook.xml.rels': xml =>
+        xml
+          .replace(/Target="worksheets\//g, 'Target="/xl/worksheets/')
+          .replace(
+            '</Relationships>',
+            '<Relationship Id="rId99" Type="http://example.com/none"/></Relationships>'
+          ),
+    });
+    const sheets = await readAll(chunkedStream(tampered));
+    expect(sheets.map(sheet => sheet.name)).to.deep.equal(['Sheet1', 'Named']);
+  });
 });
