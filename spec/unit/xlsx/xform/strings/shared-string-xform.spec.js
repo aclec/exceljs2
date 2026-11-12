@@ -107,6 +107,17 @@ const expectations = [
     parsedModel: 'Hello,\nWorld!',
     tests: ['render', 'renderIn', 'parse'],
   },
+  {
+    title: 'plain text followed by rich text runs',
+    create() {
+      return new SharedStringXform();
+    },
+    xml: '<si><t>Plain </t><r><rPr><b/></rPr><t>bold</t></r><r><t> end</t></r></si>',
+    parsedModel: {
+      richText: [{text: 'Plain '}, {font: {bold: true}, text: 'bold'}, {text: ' end'}],
+    },
+    tests: ['parse'],
+  },
 ];
 
 describe('SharedStringXform', () => {

@@ -135,6 +135,26 @@ const expectations = [
     options: {hyperlinkMap: fakeHyperlinkMap, styles: fakeStyles},
   },
   {
+    title: 'Inline String with plain text followed by rich text runs',
+    create() {
+      return new CellXform();
+    },
+    xml:
+      '<c r="A1" t="inlineStr"><is><t>Plain </t><r><rPr><b/></rPr><t>bold</t></r></is></c>',
+    parsedModel: {
+      address: 'A1',
+      type: Enums.ValueType.String,
+      value: {richText: [{text: 'Plain '}, {font: {bold: true}, text: 'bold'}]},
+    },
+    reconciledModel: {
+      address: 'A1',
+      type: Enums.ValueType.RichText,
+      value: {richText: [{text: 'Plain '}, {font: {bold: true}, text: 'bold'}]},
+    },
+    tests: ['parse', 'reconcile'],
+    options: {hyperlinkMap: fakeHyperlinkMap, styles: fakeStyles},
+  },
+  {
     title: 'Inline String with RichText',
     create() {
       return new CellXform();
