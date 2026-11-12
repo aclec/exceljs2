@@ -160,23 +160,53 @@ describe("Table validation", () => {
             expect(table.height).to.equal(2);
         });
 
-        it("cannot be changed by the table methods (its rows are the cells of the worksheet)", async () => {
+        it("keeps its model until it is changed (no ref nor rows of its own)", async () => {
             const table = await loadedTable();
-            const message = 'Table "U" was read from a file: change the cells of its worksheet';
-            expect(() => table.addRow([3])).to.throw(Error, message);
-            expect(() => table.removeRows(0)).to.throw(Error, message);
-            expect(() => table.addColumn({ name: "B" }, [])).to.throw(Error, message);
-            expect(() => table.removeColumns(0)).to.throw(Error, message);
-            expect(() => {
-                table.ref = "C3";
-            }).to.throw(Error, message);
-            expect(() => {
-                table.getColumn(0).name = "B";
-            }).to.throw(Error, message);
             expect(table.model.ref).to.equal(undefined);
-            expect(table.getColumn(0).name).to.equal("A");
+            expect(table.model.rows).to.equal(undefined);
             // nothing changed: nothing to commit
             table.commit();
+            expect(table.model.ref).to.equal(undefined);
+        });
+
+        it("is changed by the table methods: its first change reads its data rows from its cells", async () => {
+            const table = await loadedTable();
+            const ws = table.worksheet;
+            ws.getCell("E3").value = 20;
+            table.addRow([3]);
+            expect(table.model.ref).to.equal("E1");
+            expect(table.model.rows).to.deep.equal([[1], [20], [3]]);
+            table.commit();
+            expect(cellValues(ws, "E1:E4")).to.deep.equal([["A"], [1], [20], [3]]);
+            expect(table.model.tableRef).to.equal("E1:E4");
+
+            table.removeRows(0, 2);
+            table.addColumn({ name: "B" }, ["b"]);
+            table.getColumn(0).name = "AA";
+            table.commit();
+            expect(cellValues(ws, "E1:F4")).to.deep.equal([
+                ["AA", "B"],
+                [3, "b"],
+                [null, null],
+                [null, null],
+            ]);
+
+            table.ref = "C3";
+            table.commit();
+            expect(cellValues(ws, "C3:D4")).to.deep.equal([
+                ["AA", "B"],
+                [3, "b"],
+            ]);
+            expect(cellValues(ws, "E1:F2")).to.deep.equal([
+                [null, null],
+                [null, null],
+            ]);
+        });
+
+        it("without range cannot be changed", async () => {
+            const table = await loadedTable({ "xl/tables/table1.xml": (xml) => xml.replace(/ ref="[^"]*"/, "") });
+            expect(() => table.addRow([3])).to.throw(Error, 'Table "U" has no range (ref)');
+            expect(table.model.rows).to.equal(undefined);
         });
 
         it("without table style has no theme, and gets a style when one is set", async () => {

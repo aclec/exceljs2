@@ -1510,7 +1510,8 @@ export type WorksheetMediumModel =
 /**
  * A table as `worksheet.model` holds it: the {@link TableProperties} given to `addTable` once validated, with the
  * ranges of the table (`tableRef`, e.g. `"A1:C5"`) and of its auto filter. A table read from a file has no `ref` nor
- * `rows` (its cells hold them), and a `null` style when the file has none.
+ * `rows` (its cells hold them) until it is first changed by the table methods, which read them from its range and its
+ * cells; it has a `null` style when the file has none.
  */
 export interface WorksheetTableModel {
     /** The name of the table. */
@@ -3214,8 +3215,8 @@ export interface TableColumn {
 
 /**
  * A table of a worksheet (`worksheet.addTable`, `worksheet.getTable`). Its rows and columns live in the cells of the
- * worksheet: change them with the methods below, then `commit()`. A table read from a file has no data rows of its own
- * (they are the cells of its worksheet): the methods that change its rows, columns or position throw an Error.
+ * worksheet: change them with the methods below, then `commit()`. A table read from a file is changed the same way: its
+ * first change reads its data rows from the cells of its range.
  */
 export interface Table {
     /** The table name (unique in the workbook, used in structured references). */
@@ -3248,12 +3249,13 @@ export interface Table {
     commit(): void;
     /**
      * Remove rows of data (0-based index; 1 row by default)
-     * @throws Error for a table read from a file
+     * @throws Error for a table read from a file without range
      */
     removeRows(rowIndex: number, count?: number): void;
     /**
      * Add a row of data, either insert at rowNumber (0-based) or append
      * @throws Error for more values than the table has columns (the table is not changed); for a table read from a file
+     *   without range
      */
     addRow(values: CellValue[], rowNumber?: number): void;
     /**
@@ -3265,11 +3267,12 @@ export interface Table {
      * Add a new column, including column defn and values (one per data row); inserts at colIndex (0-based) or adds to
      * the right
      * @throws Error for more values than the table has rows (the table is not changed); for a table read from a file
+     *   without range
      */
     addColumn(column: TableColumnProperties, values: CellValue[], colIndex?: number): void;
     /**
      * Remove columns with their data (0-based index; 1 column by default)
-     * @throws Error for a table read from a file
+     * @throws Error for a table read from a file without range
      */
     removeColumns(colIndex: number, count?: number): void;
 }

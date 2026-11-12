@@ -7,6 +7,7 @@ import { isColumnNumber } from "./sheet-reference";
 import type { CellValue, CellWorksheet, StyleName } from "./cell";
 import type Column from "./column";
 import { eachEntry, loopSteps, someEntry } from "../utils/sparse-array";
+import { copyStyle } from "../utils/copy-style";
 import type { CellModel, RowBreakModel, RowModel, StyleModel } from "../types";
 
 /**
@@ -208,8 +209,11 @@ class Row {
     eachCell(options: EachCellOptions | null | undefined, iteratee: CellIteratee): void;
     eachCell(optionsOrIteratee: EachCellOptions | CellIteratee | null | undefined, iteratee?: CellIteratee): void {
         // eachCell(iteratee) or eachCell(options, iteratee)
-        const callback = iteratee || (optionsOrIteratee as CellIteratee);
-        const options = iteratee ? (optionsOrIteratee as EachCellOptions | null | undefined) : null;
+        const options = typeof optionsOrIteratee === "function" ? undefined : optionsOrIteratee;
+        const callback = typeof optionsOrIteratee === "function" ? optionsOrIteratee : iteratee;
+        if (typeof callback !== "function") {
+            throw new Error("eachCell needs an iteratee function");
+        }
         if (options && options.includeEmpty) {
             const n = this._cells.length;
             for (let i = 1; i <= n; i++) {
@@ -449,10 +453,10 @@ class Row {
 
     // =========================================================================
     /**
-     * The model of the row (the models of its cells: see `Cell.model`), or null when it has neither height nor cells
-     * with a model.
+     * The model of the row (the models of its cells: see `Cell.model`, and the first and last columns with a cell, 0
+     * without cells), or null when it has neither height nor cells with a model.
      */
-    get model(): RowModel | null {
+    get model(): (RowModel & { min: number; max: number }) | null {
         const cells: CellModel[] = [];
         let min = 0;
         let max = 0;
@@ -515,9 +519,11 @@ class Row {
                     $col$row: `$${colCache.n2l(col)}$${row}`,
                 };
             }
+            if (!address) {
+                throw new Error(`The first cell of row ${value.number} has no address`);
+            }
             previousAddress = address;
-            // a first cell without address throws, as it always did
-            const cell = this.getCellEx(address!);
+            const cell = this.getCellEx(address);
             cell.model = cellModel;
         }
 
@@ -530,7 +536,7 @@ class Row {
         this.hidden = value.hidden;
         this.outlineLevel = value.outlineLevel || 0;
 
-        this.style = (value.style && (JSON.parse(JSON.stringify(value.style)) as StyleModel)) || {};
+        this.style = (value.style && copyStyle(value.style)) || {};
     }
 }
 
