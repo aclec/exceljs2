@@ -2,8 +2,8 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { WorksheetState } from "../../../../index";
 import type { SheetDefModel } from "../../../types";
-import { xmlDecode } from "../../../utils/utils";
-import BaseXform, { isOneOf } from "../base-xform";
+import { isOneOf, xmlDecode } from "../../../utils/utils";
+import BaseXform from "../base-xform";
 
 // ECMA-376 ST_SheetState
 const SHEET_STATES: Readonly<Record<WorksheetState, true>> = { visible: true, hidden: true, veryHidden: true };

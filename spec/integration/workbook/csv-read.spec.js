@@ -188,6 +188,13 @@ describe("CSV read", () => {
             expect(ws.getRow(2).values.slice(1)).to.deep.equal(["x", "y"]);
             expect(ws.getRow(3).values.slice(1)).to.deep.equal([1, 2]);
             expect(ws.getColumn("null").number).to.equal(2);
+            // a column without header (it had a null header, which ColumnDefinition does not admit), but its header cell is there
+            expect(ws.getColumn("null").header).to.equal(undefined);
+            expect(ws.getColumn("p").header).to.equal("p");
+            expect(ws.getRow(1).cellCount).to.equal(2);
+            // the header row is there even when no column has a header
+            const unnamed = await readCsv("x,y\n", { parserOptions: { headers: [null, null] } });
+            expect(unnamed.getRow(2).values.slice(1)).to.deep.equal(["x", "y"]);
         });
 
         it("keeps the values of duplicate names returned by a header transform", async () => {

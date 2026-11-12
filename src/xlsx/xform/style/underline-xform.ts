@@ -2,7 +2,8 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { XmlAttributes } from "../../../utils/xml-stream";
 import type { FontModel } from "../../../types";
-import BaseXform, { isOneOf } from "../base-xform";
+import { isOneOf } from "../../../utils/utils";
+import BaseXform from "../base-xform";
 
 /** The underline of a font: `true` (single) or an underline style. */
 export type UnderlineModel = NonNullable<FontModel["underline"]>;

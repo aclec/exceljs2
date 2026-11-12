@@ -1562,8 +1562,8 @@ function hasRichTextValue(model: StringCellModel): model is StringCellModel & { 
 /**
  * The holder of a cell model (but a merged cell's, see the Cell model setter), which adopts the model by reference. A
  * String or RichText model holds a string or a rich text, whatever its type: the model of a rich text value has the type
- * String (see {@link RichTextValue}); with another value (a malformed file: a shared string index without a shared
- * strings part), the cell is empty (a Null model, not adopted).
+ * String (see {@link RichTextValue}); with another value (a model of the application against its type: the reader
+ * gives none), the cell is empty (a Null model, not adopted).
  * @throws Error for an unknown type
  */
 function modelHolder(cell: Cell, model: Exclude<CellModel, MergeCellModel>): AnyValue {

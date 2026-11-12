@@ -17,11 +17,12 @@ import BaseXform, { type AnyXform } from "./base-xform";
  *         return "dataBar";
  *     }
  *     override createNewModel(node: SaxTag): DatabarModel {
- *         return { cfvo: [], showValue: BaseXform.toBoolValue(node.attributes.showValue) };
+ *         return { cfvo: [], showValue: parseOptionalBoolean(node.attributes.showValue) };
  *     }
- *     override onParserClose(name: string): void {
+ *     override onParserClose(name: string, model: DatabarModel): void {
  *         // read the child through its typed reference, not the untyped `parser`
- *         if (name === "cfvo") this.model!.cfvo.push(this.map.cfvo.model!);
+ *         const cfvo = this.map.cfvo.model;
+ *         if (name === "cfvo" && cfvo) model.cfvo.push(cfvo);
  *     }
  * }
  *
@@ -71,20 +72,25 @@ abstract class CompositeXform<TModel = unknown> extends BaseXform<TModel> {
     }
 
     /**
-     * Called when the child being parsed has closed: stores its model in this one.
+     * Called when the child being parsed has closed, inside the element: stores the model of the child (read through its
+     * typed reference in `map`) in the model of the element. Not called for a child outside the element (the parent
+     * delegates any element of `map` to this xform, before or without its start tag): there is no model to fill.
      *
      * @param name - the name of the child element (a key of `map`)
-     * @param parser - its xform
+     * @param model - the model of the element, created by its start tag
      */
-    abstract onParserClose(name: string, parser: AnyXform): void;
+    abstract onParserClose(name: string, model: NonNullable<TModel>): void;
 
     /** @returns `false` when the element of {@link tag} is closed, else `true` */
     override parseClose(name: string): boolean {
         // Default implementation
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.onParserClose(name, this.parser);
                 this.parser = undefined;
+                const { model } = this;
+                if (model !== null && model !== undefined) {
+                    this.onParserClose(name, model);
+                }
             }
             return true;
         }

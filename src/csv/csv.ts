@@ -190,17 +190,21 @@ class CSV {
                     guard(() => {
                         // the header names become the first row, and the column keys (the parser emits 'headers' only
                         // with the headers option, which setHeaders handles: headers is set)
-                        worksheet.columns = (headers || []).map((header) =>
-                            header
-                                ? {
-                                      // a null header name (index.d.ts HeaderArray) is kept as is: the Column gets a
-                                      // null header and an empty header cell
-                                      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- documented above: ColumnDefn.header lacks null
-                                      header: header[0] as string,
-                                      key: header[1],
-                                  }
-                                : {}
-                        );
+                        const columns = headers || [];
+                        worksheet.columns = columns.map((header) => {
+                            if (!header) {
+                                return {};
+                            }
+                            const [name, key] = header;
+                            return name === null ? { key } : { header: name, key };
+                        });
+                        // a null header name (index.d.ts HeaderArray) names a column without header: its header cell
+                        // is empty (the header row is there, as for the other columns)
+                        columns.forEach((header, index) => {
+                            if (header && header[0] === null) {
+                                worksheet.getCell(1, index + 1).value = null;
+                            }
+                        });
                     })
                 )
                 .on(
@@ -267,10 +271,12 @@ class CSV {
             csvStream.pipe(stream);
 
             const { dateFormat, dateUTC } = writeOptions;
-            // index.d.ts types the values given to a user map as its CellValue: the values of the cells (the doc CellValue
-            // also admits any object, which no cell value is)
+            // index.d.ts types the value given to a user map as its CellValue, which leaves out on purpose what only an
+            // untyped value or a malformed file gives (DocRules in src/types/doc-conformance.ts): the JSON value of a
+            // cell (any other object, returned as is) and the `{ result }` of a formula cell without formula. The map
+            // gets them as Cell.value gives them, outside its declared parameter type
             const map: (value: DocCellValue, index: number) => unknown =
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- documented above
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the deliberate deviation of index.d.ts CellValue described above (Cell.value has the same one)
                 (writeOptions.map as ((value: DocCellValue, index: number) => unknown) | undefined) ||
                 ((value: DocCellValue): unknown => {
                     if (value && typeof value === "object") {

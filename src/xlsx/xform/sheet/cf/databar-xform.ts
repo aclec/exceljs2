@@ -3,7 +3,7 @@ import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel, ColorModel, DataBarRuleModel } from "../../../../types";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
-import { parseOptionalBoolean } from "../attribute-values";
+import { parseOptionalBoolean } from "../../../../utils/utils";
 
 import ColorXform from "../../style/color-xform";
 import CfvoXform from "./cfvo-xform";
@@ -80,12 +80,8 @@ class DatabarXform extends CompositeXform<DatabarModel> {
         };
     }
 
-    override onParserClose(name: string): void {
+    override onParserClose(name: string, model: DatabarModel): void {
         // the element was opened before its children (createNewModel)
-        const { model } = this;
-        if (!model) {
-            return;
-        }
         switch (name) {
             case "cfvo": {
                 // set by the start tag of <cfvo>

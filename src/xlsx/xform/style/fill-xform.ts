@@ -2,7 +2,8 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { FillGradientPath, FillPatterns } from "../../../../index";
 import type { FillModel, GradientStopModel } from "../../../types";
-import BaseXform, { isOneOf, ownEntry } from "../base-xform";
+import { isOneOf } from "../../../utils/utils";
+import BaseXform, { ownEntry } from "../base-xform";
 
 import ColorXform from "./color-xform";
 

@@ -9,7 +9,8 @@ import IntegerXform from "../simple/integer-xform";
 import StringXform from "../simple/string-xform";
 import UnderlineXform from "./underline-xform";
 
-import BaseXform, { isOneOf, ownEntry, type AnyXform } from "../base-xform";
+import { isOneOf } from "../../../utils/utils";
+import BaseXform, { ownEntry, type AnyXform } from "../base-xform";
 
 /** The options of a {@link FontXform}: the names of its element and of its font name element. */
 export interface FontXformOptions {

@@ -290,17 +290,28 @@ describe("prototype-named keys in xlsx parts", function () {
                 "xl/worksheets/sheet1.xml": (xml) => xml.replace('r="A1"', 'r="toString"'),
             });
             const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), { hyperlinks: "cache", sharedStrings: "cache" });
-            const cells = [];
-            for await (const ws of reader) {
-                for await (const row of ws) {
-                    // used to throw: the inherited toString was taken for the cell's hyperlink
-                    row.eachCell((cell) => cells.push([cell.value, cell.hyperlink]));
+            const read = async () => {
+                for await (const ws of reader) {
+                    for await (const row of ws) {
+                        // used to throw a TypeError: the inherited toString was taken for the cell's hyperlink
+                        row.eachCell(() => {});
+                    }
                 }
-            }
-            expect(cells).to.deep.equal([
-                ["hello", undefined],
-                ["x", undefined],
-            ]);
+            };
+            // not a cell reference: rejected before any lookup, as the document reader does (the streaming reader put
+            // the cell in column S, the only capital letter of the text)
+            const error = await read().then(
+                () => undefined,
+                (e) => e
+            );
+            expect(error).to.be.an.instanceOf(Error);
+            expect(error.message).to.equal("Invalid Address: toString");
+            const loaded = await new ExcelJS.Workbook().xlsx.load(buffer).then(
+                () => undefined,
+                (e) => e
+            );
+            expect(loaded).to.be.an.instanceOf(Error);
+            expect(loaded.message).to.equal("Invalid Address: toString");
         });
     });
 

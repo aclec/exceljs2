@@ -4,7 +4,7 @@ import type { CfvoModel, ColorModel, DataBarRuleModel } from "../../../../types"
 import { parseBoolean } from "../../../../utils/utils";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
-import { isLiteralOf } from "../attribute-values";
+import { isOneOf } from "../../../../utils/utils";
 
 import ColorXform from "../../style/color-xform";
 import CfvoExtXform from "./cfvo-ext-xform";
@@ -13,9 +13,13 @@ import CfvoExtXform from "./cfvo-ext-xform";
 type DatabarExtColor = "borderColor" | "negativeFillColor" | "negativeBorderColor" | "axisColor";
 
 /** [MS-XLSX] ST_DataBarAxisPosition. */
-const isAxisPosition = isLiteralOf<NonNullable<DataBarRuleModel["axisPosition"]>>({ auto: true, middle: true, none: true });
+const AXIS_POSITIONS: Readonly<Record<NonNullable<DataBarRuleModel["axisPosition"]>, true>> = { auto: true, middle: true, none: true };
 /** [MS-XLSX] ST_DataBarDirection. */
-const isDirection = isLiteralOf<NonNullable<DataBarRuleModel["direction"]>>({ context: true, leftToRight: true, rightToLeft: true });
+const DIRECTIONS: Readonly<Record<NonNullable<DataBarRuleModel["direction"]>, true>> = {
+    context: true,
+    leftToRight: true,
+    rightToLeft: true,
+};
 
 /**
  * The model of `<x14:dataBar>` (merged into the rule): the parsed attributes, with the defaults of [MS-XLSX] CT_DataBar
@@ -149,17 +153,13 @@ class DatabarExtXform extends CompositeXform<DatabarExtModel> {
             gradient: parseBoolean(attributes.gradient, true),
             negativeBarColorSameAsPositive: parseBoolean(attributes.negativeBarColorSameAsPositive, false),
             negativeBarBorderColorSameAsPositive: parseBoolean(attributes.negativeBarBorderColorSameAsPositive, true),
-            axisPosition: isAxisPosition(attributes.axisPosition) ? attributes.axisPosition : "auto",
-            direction: isDirection(attributes.direction) ? attributes.direction : "context",
+            axisPosition: isOneOf(AXIS_POSITIONS, attributes.axisPosition) ? attributes.axisPosition : "auto",
+            direction: isOneOf(DIRECTIONS, attributes.direction) ? attributes.direction : "context",
         };
     }
 
-    override onParserClose(name: string): void {
+    override onParserClose(name: string, model: DatabarExtModel): void {
         // the element was opened before its children (createNewModel)
-        const { model } = this;
-        if (!model) {
-            return;
-        }
         switch (name) {
             case "x14:cfvo": {
                 // set by the start tag of <x14:cfvo>

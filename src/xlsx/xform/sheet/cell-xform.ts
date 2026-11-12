@@ -63,9 +63,18 @@ function getValueType(v: unknown): ValueType {
     throw new Error("I could not understand type of value");
 }
 
-/** The type of a cell for its number format: the type of the result of a formula. */
+/**
+ * The type of a cell for its number format: the type of the result of a formula, Date for a hyperlink on a date (both are
+ * written as serial numbers: without a number format of their own, they get the default date format).
+ */
 function getEffectiveCellType(cell: CellModel): ValueType {
-    return cell.type === ValueType.Formula ? getValueType(cell.result) : cell.type;
+    if (cell.type === ValueType.Formula) {
+        return getValueType(cell.result);
+    }
+    if (cell.type === ValueType.Hyperlink && cell.text instanceof Date) {
+        return ValueType.Date;
+    }
+    return cell.type;
 }
 
 function isRichText(value: unknown): value is RichTextValue {
@@ -78,17 +87,11 @@ function isErrorValue(value: unknown): value is CellErrorValue {
 }
 
 /**
- * The shared string of the text of a hyperlink: a string or a rich text; a Date (read from a file) is written as its
- * text, as it always was. `undefined` for a number, boolean or error text, written with its own type.
+ * The shared string of the text of a hyperlink: a string or a rich text. `undefined` for a number, Date, boolean or error
+ * text, written with its own type.
  */
 function sharedStringText(text: HyperlinkCellModel["text"] | null | undefined): SharedStringValue | undefined {
-    if (typeof text === "string" || isRichText(text)) {
-        return text;
-    }
-    if (text instanceof Date) {
-        return String(text);
-    }
-    return undefined;
+    return typeof text === "string" || isRichText(text) ? text : undefined;
 }
 
 /** A value converted to text as XmlStream and the string functions do (`toString()`): any value but null / undefined. */
@@ -172,7 +175,10 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                 break;
 
             case ValueType.Hyperlink:
-                // a link on a number, boolean or error cell (as read from a file) keeps its value type
+                // a link on a number, Date, boolean or error cell (as read from a file) keeps its value type
+                if (options.date1904 && model.text instanceof Date) {
+                    model.date1904 = true;
+                }
                 if (options.sharedStrings) {
                     const text = sharedStringText(model.text);
                     if (text !== undefined) {
@@ -369,6 +375,8 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
             case ValueType.Hyperlink:
                 if (typeof model.text === "number") {
                     xmlStream.leafNode("v", undefined, model.text);
+                } else if (model.text instanceof Date) {
+                    xmlStream.leafNode("v", undefined, utils.dateToExcel(model.text, model.date1904));
                 } else if (typeof model.text === "boolean") {
                     xmlStream.addAttribute("t", "b");
                     xmlStream.leafNode("v", undefined, model.text ? "1" : "0");
@@ -626,14 +634,19 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
         switch (model.type) {
             case ValueType.String:
                 if (typeof model.value === "number") {
-                    if (options.sharedStrings) {
-                        const index = model.value;
-                        const value = options.sharedStrings.getString(index);
-                        if (value === undefined) {
-                            throw new Error(`Cell ${String(model.address)}: shared string ${index} is not in the shared strings table`);
-                        }
-                        model.value = value;
+                    if (!options.sharedStrings) {
+                        // a t="s" cell of a workbook without shared strings part: its string is missing, the cell is
+                        // empty (as the document always showed it)
+                        model.type = ValueType.Null;
+                        delete model.value;
+                        break;
                     }
+                    const index = model.value;
+                    const value = options.sharedStrings.getString(index);
+                    if (value === undefined) {
+                        throw new Error(`Cell ${String(model.address)}: shared string ${index} is not in the shared strings table`);
+                    }
+                    model.value = value;
                 }
                 if (isRichText(model.value)) {
                     model.type = ValueType.RichText;

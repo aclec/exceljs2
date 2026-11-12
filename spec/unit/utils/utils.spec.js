@@ -146,10 +146,25 @@ describe("utils", () => {
         });
     });
 
+    describe("parseOptionalBoolean", () => {
+        it('reads "1" and "true" as true, any other value as false, and an absent attribute as undefined', () => {
+            expect(["1", "true", "0", "false", "TRUE", ""].map(utils.parseOptionalBoolean)).to.deep.equal([
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ]);
+            expect(utils.parseOptionalBoolean(undefined)).to.equal(undefined);
+        });
+    });
+
     describe("isOneOf", () => {
-        it("is a type guard for a list of literals", () => {
-            const isState = utils.isOneOf(["visible", "hidden"]);
-            expect(["visible", "hidden", "bogus", undefined, 1].map(isState)).to.deep.equal([true, true, false, false, false]);
+        it("tells the own keys of the record of the members of a union of literals", () => {
+            const states = { visible: true, hidden: true };
+            const values = ["visible", "hidden", "bogus", undefined, "constructor", "__proto__", "toString"];
+            expect(values.map((value) => utils.isOneOf(states, value))).to.deep.equal([true, true, false, false, false, false, false]);
         });
     });
 

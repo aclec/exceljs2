@@ -4,15 +4,15 @@ import type { SheetViewModel } from "../../../types";
 import colCache from "../../../utils/col-cache";
 import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
-import { isLiteralOf } from "./attribute-values";
+import { isOneOf } from "../../../utils/utils";
 
 /** A pane of a sheet view (ECMA-376 ST_Pane). */
 type Pane = NonNullable<SheetViewModel["activePane"]>;
 
-const isPane = isLiteralOf<Pane>({ topLeft: true, topRight: true, bottomLeft: true, bottomRight: true });
+const PANES: Readonly<Record<Pane, true>> = { topLeft: true, topRight: true, bottomLeft: true, bottomRight: true };
 
 /** The presentations of ST_SheetViewType other than `normal` (the default, read as no style). */
-const isViewStyle = isLiteralOf<NonNullable<SheetViewModel["style"]>>({ pageBreakPreview: true, pageLayout: true });
+const VIEW_STYLES: Readonly<Record<NonNullable<SheetViewModel["style"]>, true>> = { pageBreakPreview: true, pageLayout: true };
 
 /** The attributes of `<sheetView>`, kept until the element is closed. */
 interface SheetViewAttributes {
@@ -175,7 +175,7 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
                     zoomScale: parseInt(attributes.zoomScale || "100", 10),
                     zoomScaleNormal: parseInt(attributes.zoomScaleNormal || "100", 10),
                     // ST_SheetViewType: normal (the default) or an unknown value is no style
-                    style: isViewStyle(attributes.view) ? attributes.view : undefined,
+                    style: isOneOf(VIEW_STYLES, attributes.view) ? attributes.view : undefined,
                 };
                 this.pane = undefined;
                 this.selections = new Map();
@@ -187,7 +187,7 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
                     ySplit: parseInt(attributes.ySplit || "0", 10),
                     topLeftCell: attributes.topLeftCell,
                     // ST_Pane: topLeft (the default) when absent or unknown
-                    activePane: isPane(attributes.activePane) ? attributes.activePane : "topLeft",
+                    activePane: isOneOf(PANES, attributes.activePane) ? attributes.activePane : "topLeft",
                     state: attributes.state,
                 };
                 return true;

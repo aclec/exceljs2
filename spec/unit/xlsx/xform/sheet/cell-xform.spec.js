@@ -589,3 +589,21 @@ describe("CellXform formula cells", () => {
         }
     });
 });
+
+describe("CellXform reconcile of a shared string", () => {
+    const options = { styles: fakeStyles, hyperlinkMap: {}, formulae: {} };
+
+    it('reads the string of a t="s" cell from the shared strings', () => {
+        const sharedStrings = new SharedStringsXform();
+        sharedStrings.add("hello");
+        const model = { address: "A1", type: Enums.ValueType.String, value: 0 };
+        new CellXform().reconcile(model, { ...options, sharedStrings });
+        expect(model).to.deep.equal({ address: "A1", type: Enums.ValueType.String, value: "hello" });
+    });
+
+    it('makes a t="s" cell of a workbook without shared strings part an empty cell (its string is missing)', () => {
+        const model = { address: "A1", type: Enums.ValueType.String, value: 0 };
+        new CellXform().reconcile(model, options);
+        expect(model).to.deep.equal({ address: "A1", type: Enums.ValueType.Null });
+    });
+});

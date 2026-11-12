@@ -4,7 +4,7 @@ import type { PageSetup } from "../../../../index";
 import type { PageSetupModel } from "../../../types";
 import { parseBoolean } from "../../../utils/utils";
 import BaseXform from "../base-xform";
-import { isLiteralOf } from "./attribute-values";
+import { isOneOf } from "../../../utils/utils";
 
 function booleanToXml(model: unknown): "1" | undefined {
     return model ? "1" : undefined;
@@ -47,10 +47,10 @@ function pageSizeToModel(value: string | undefined): number | undefined {
     return value !== undefined ? parseInt(value, 10) : undefined;
 }
 // The enumerations of CT_PageSetup: a value that is not one of them reads as the default of the document
-const isOrientation = isLiteralOf<PageSetup["orientation"]>({ default: true, portrait: true, landscape: true });
-const isPageOrder = isLiteralOf<PageSetup["pageOrder"]>({ downThenOver: true, overThenDown: true });
-const isCellComments = isLiteralOf<PageSetup["cellComments"]>({ None: true, none: true, atEnd: true, asDisplayed: true });
-const isErrors = isLiteralOf<PageSetup["errors"]>({ displayed: true, blank: true, dash: true, NA: true });
+const ORIENTATIONS: Readonly<Record<PageSetup["orientation"], true>> = { default: true, portrait: true, landscape: true };
+const PAGE_ORDERS: Readonly<Record<PageSetup["pageOrder"], true>> = { downThenOver: true, overThenDown: true };
+const CELL_COMMENTS: Readonly<Record<PageSetup["cellComments"], true>> = { None: true, none: true, atEnd: true, asDisplayed: true };
+const PRINT_ERRORS: Readonly<Record<PageSetup["errors"], true>> = { displayed: true, blank: true, dash: true, NA: true };
 /**
  * `useFirstPageNumber`, written when the pages are numbered from a first page number: when one is set and the model
  * does not say that it is not used (a file read with `firstPageNumber` but without `useFirstPageNumber`), or when the
@@ -118,14 +118,14 @@ class PageSetupXform extends BaseXform<PageSetupModel> {
                 const { orientation, pageOrder, cellComments, errors } = attributes;
                 this.model = {
                     paperSize: pageSizeToModel(attributes.paperSize),
-                    orientation: isOrientation(orientation) ? orientation : "portrait",
+                    orientation: isOneOf(ORIENTATIONS, orientation) ? orientation : "portrait",
                     horizontalDpi: parseInt(attributes.horizontalDpi || "4294967295", 10),
                     verticalDpi: parseInt(attributes.verticalDpi || "4294967295", 10),
-                    pageOrder: isPageOrder(pageOrder) ? pageOrder : "downThenOver",
+                    pageOrder: isOneOf(PAGE_ORDERS, pageOrder) ? pageOrder : "downThenOver",
                     blackAndWhite: parseBoolean(attributes.blackAndWhite),
                     draft: parseBoolean(attributes.draft),
-                    cellComments: isCellComments(cellComments) ? cellComments : "None",
-                    errors: isErrors(errors) ? errors : "displayed",
+                    cellComments: isOneOf(CELL_COMMENTS, cellComments) ? cellComments : "None",
+                    errors: isOneOf(PRINT_ERRORS, errors) ? errors : "displayed",
                     scale: parseInt(attributes.scale || "100", 10),
                     fitToWidth: parseInt(attributes.fitToWidth || "1", 10),
                     fitToHeight: parseInt(attributes.fitToHeight || "1", 10),

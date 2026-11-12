@@ -58,12 +58,10 @@ class ConditionalFormattingXform extends CompositeXform<ParsedConditionalFormatt
         };
     }
 
-    override onParserClose(): void {
-        // the element was opened before its children (createNewModel); the rule model is set by its start tag (null for
-        // a rule that is not read)
-        const { model } = this;
+    override onParserClose(_name: string, model: ParsedConditionalFormattingModel | ConditionalFormattingModel): void {
+        // the rule model is set by its start tag (null for a rule that is not read)
         const rule = this.map.cfRule.model;
-        if (model && rule) {
+        if (rule) {
             model.rules.push(rule);
         }
     }

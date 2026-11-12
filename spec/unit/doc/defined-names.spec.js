@@ -276,4 +276,16 @@ describe("DefinedNames", () => {
             { name: "range", ranges: ["Sheet3!$A$2:$F$2228"] },
         ]);
     });
+
+    it("does not mutate the decoded addresses that colCache shares (a name without sheet)", () => {
+        const pristine = { address: "A1", col: 1, row: 1, $col$row: "$A$1" };
+        const dn = new DefinedNames();
+        dn.add("A1", "n");
+        dn.add("$B$2", "n");
+        expect(dn.model).to.deep.equal([{ name: "n", ranges: ["$A$1", "$B$2"] }]);
+        // the cells of the name are its own objects: getRanges marks them, splices move them
+        expect(colCache.decodeAddress("A1")).to.deep.equal(pristine);
+        expect(colCache.decodeAddress("$A$1")).to.deep.equal(pristine);
+        expect(colCache.decodeEx("B2")).to.deep.equal({ address: "B2", col: 2, row: 2, $col$row: "$B$2" });
+    });
 });

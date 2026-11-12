@@ -3,11 +3,11 @@ import type XmlStream from "../../../utils/xml-stream";
 import type { DataValidationFormula, DataValidationModel, DataValidationsModel, WorksheetLoadBudget } from "../../../types";
 import _ from "../../../utils/under-dash";
 import utils from "../../../utils/utils";
-import colCache from "../../../utils/col-cache";
+import colCache, { type DecodedEx } from "../../../utils/col-cache";
 import BaseXform from "../base-xform";
 import Range from "../../../doc/range";
 import { wholeRangeAddress } from "../../../doc/data-validations";
-import { isLiteralOf } from "./attribute-values";
+import { isOneOf } from "../../../utils/utils";
 
 const addressRegex = /^[A-Z]{1,3}\d+$/;
 const rangeRegex = /^[A-Z]{1,3}\d+:[A-Z]{1,3}\d+$/;
@@ -95,7 +95,7 @@ type StringAttribute = "promptTitle" | "prompt" | "errorStyle" | "errorTitle" | 
 type BooleanAttribute = "allowBlank" | "showInputMessage" | "showErrorMessage";
 
 /** ST_DataValidationType, but `none` (the default), which is read as `any`. */
-const isDataValidationType = isLiteralOf<DataValidationModel["type"]>({
+const DATA_VALIDATION_TYPES: Readonly<Record<DataValidationModel["type"], true>> = {
     any: true,
     whole: true,
     decimal: true,
@@ -104,10 +104,10 @@ const isDataValidationType = isLiteralOf<DataValidationModel["type"]>({
     time: true,
     textLength: true,
     custom: true,
-});
+};
 
 /** ST_DataValidationOperator. */
-const isOperator = isLiteralOf<NonNullable<DataValidationModel["operator"]>>({
+const OPERATORS: Readonly<Record<NonNullable<DataValidationModel["operator"]>, true>> = {
     between: true,
     notBetween: true,
     equal: true,
@@ -116,7 +116,7 @@ const isOperator = isLiteralOf<NonNullable<DataValidationModel["operator"]>>({
     lessThanOrEqual: true,
     greaterThan: true,
     greaterThanOrEqual: true,
-});
+};
 
 function assign(
     dataValidation: DataValidationModel,
@@ -137,6 +137,18 @@ function assignBool(
     const value = attributes[name];
     if (value !== undefined) {
         dataValidation[name] = utils.parseBoolean(value);
+    }
+}
+
+/**
+ * The reference of a key of the model (see colCache.decodeEx).
+ * @throws Error for a key that is not a reference (`a1`, `foo`)
+ */
+function decodeKey(address: string): DecodedEx {
+    try {
+        return colCache.decodeEx(address);
+    } catch (error) {
+        throw new Error(`Invalid data validation address: ${address}`, { cause: error });
     }
 }
 
@@ -182,7 +194,7 @@ function optimiseDataValidations(dvs: DataValidationsModel | undefined): SqrefDa
         if (dv.marked) {
             continue;
         }
-        const addr = colCache.decodeEx(dv.address);
+        const addr = decodeKey(dv.address);
         if ("dimensions" in addr) {
             if (!dvMap.has(addr.dimensions)) {
                 // not a range in its normal form (e.g. "$A$1:B2", "B2:A1")
@@ -358,7 +370,7 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
                 this._address = attributes.sqref;
                 // ST_DataValidationType: none (the default) or an unknown type is any
                 const dataValidation: DataValidationModel = {
-                    type: isDataValidationType(attributes.type) ? attributes.type : "any",
+                    type: isOneOf(DATA_VALIDATION_TYPES, attributes.type) ? attributes.type : "any",
                     formulae: [],
                 };
 
@@ -381,7 +393,7 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
                     default: {
                         // ST_DataValidationOperator: between (the default) when absent or unknown
                         const { operator } = attributes;
-                        dataValidation.operator = isOperator(operator) ? operator : "between";
+                        dataValidation.operator = isOneOf(OPERATORS, operator) ? operator : "between";
                         break;
                     }
                 }

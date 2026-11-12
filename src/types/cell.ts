@@ -89,8 +89,10 @@ export interface HyperlinkCellModel extends CellModelBase {
     /** The link target. */
     hyperlink: string;
     tooltip?: string;
-    /** prepare: the shared string index of a non-scalar text. */
+    /** prepare: the shared string index of a string or rich text. */
     ssId?: number;
+    /** prepare: set (to `true`) for a Date text in a workbook with the 1904 date system. */
+    date1904?: true;
 }
 
 /**

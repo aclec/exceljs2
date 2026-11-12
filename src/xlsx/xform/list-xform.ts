@@ -5,11 +5,11 @@ import type { ListItemOptions } from "../../types";
 import BaseXform from "./base-xform";
 
 /** The options of a {@link ListXform}. */
-export interface ListXformOptions<TItem> {
+export interface ListXformOptions<TItem, TParsed extends TItem = TItem> {
     /** The list element, e.g. `cols`. */
     readonly tag: string;
     /** The xform of one item (one child element); its `tag`, if any, names the items in the `maxItems` error. */
-    readonly childXform: ItemXform<TItem>;
+    readonly childXform: ItemXform<TItem, TParsed>;
     /** Render the list element even when the list is empty or missing. */
     readonly always?: boolean;
     /** Write the number of items as an attribute (named by `$count`). */
@@ -24,8 +24,14 @@ export interface ListXformOptions<TItem> {
     readonly maxItems?: number;
 }
 
-/** The xform of the items of a {@link ListXform}. */
-export type ItemXform<TItem> = BaseXform<TItem> & { readonly tag?: string };
+/**
+ * The xform of the items of a {@link ListXform}: it renders a `TItem`, and parses a `TParsed` (its `model`, narrower when
+ * the parse gives a model of its own, e.g. a row of raw cells).
+ */
+export type ItemXform<TItem, TParsed extends TItem = TItem> = BaseXform<TItem> & {
+    readonly tag?: string;
+    readonly model: TParsed | null | undefined;
+};
 
 /** The state of a ListXform item step: an item has been processed (the caller may pause). */
 type Steps = Generator<void, void, undefined>;
@@ -45,8 +51,12 @@ function runSteps(steps: Steps): void {
  * Holes of a sparse array are skipped. Parsing skips an item whose xform gives no model (`null` / `undefined`).
  *
  * @typeParam TItem - the model of one item
+ * @typeParam TParsed - the model of one parsed item (see {@link ItemXform}): the parsed model is a `TParsed[]`
  */
-class ListXform<TItem> extends BaseXform<TItem[]> {
+class ListXform<TItem, TParsed extends TItem = TItem> extends BaseXform<TItem[]> {
+    /** The parsed items (prepare and render take `TItem` items: see the type parameters). */
+    declare model: TParsed[] | null | undefined;
+
     /** The list element. */
     readonly tag: string;
     /** See {@link ListXformOptions.always}. */
@@ -60,11 +70,11 @@ class ListXform<TItem> extends BaseXform<TItem[]> {
     /** See {@link ListXformOptions.$}. */
     readonly $: XmlAttributes | undefined;
     /** The xform of one item. */
-    readonly childXform: ItemXform<TItem>;
+    readonly childXform: ItemXform<TItem, TParsed>;
     /** See {@link ListXformOptions.maxItems}. */
     readonly maxItems: number | undefined;
 
-    constructor(options: ListXformOptions<TItem>) {
+    constructor(options: ListXformOptions<TItem, TParsed>) {
         super();
 
         this.tag = options.tag;

@@ -17,7 +17,7 @@ import type {
 import type { CellIsOperators, TimePeriodTypes } from "../../../../../index";
 import BaseXform from "../../base-xform";
 import CompositeXform from "../../composite-xform";
-import { isLiteralOf, parseOptionalBoolean } from "../attribute-values";
+import { isOneOf, parseOptionalBoolean } from "../../../../utils/utils";
 
 import Range from "../../../../doc/range";
 
@@ -166,7 +166,7 @@ const referencesOtherSheet = (formula: unknown): boolean => {
     return false;
 };
 
-const isCellIsOperator = isLiteralOf<CellIsOperators>({
+const CELL_IS_OPERATORS: Readonly<Record<CellIsOperators, true>> = {
     equal: true,
     notEqual: true,
     greaterThan: true,
@@ -175,9 +175,9 @@ const isCellIsOperator = isLiteralOf<CellIsOperators>({
     lessThanOrEqual: true,
     between: true,
     notBetween: true,
-});
+};
 
-const isTimePeriod = isLiteralOf<TimePeriodTypes>({
+const TIME_PERIODS: Readonly<Record<TimePeriodTypes, true>> = {
     lastWeek: true,
     thisWeek: true,
     nextWeek: true,
@@ -188,7 +188,7 @@ const isTimePeriod = isLiteralOf<TimePeriodTypes>({
     lastMonth: true,
     thisMonth: true,
     nextMonth: true,
-});
+};
 
 /**
  * The rule of a `<cfRule>` / `<x14:cfRule>` from the attributes common to both (`priority`, `stopIfTrue` and those of its
@@ -210,7 +210,7 @@ function ruleOfAttributes(this: void, attributes: Readonly<Record<string, string
             return { type, priority, stopIfTrue };
         case "cellIs": {
             const { operator } = attributes;
-            return { type, priority, stopIfTrue, operator: isCellIsOperator(operator) ? operator : undefined };
+            return { type, priority, stopIfTrue, operator: isOneOf(CELL_IS_OPERATORS, operator) ? operator : undefined };
         }
         case "top10":
             return {
@@ -234,7 +234,7 @@ function ruleOfAttributes(this: void, attributes: Readonly<Record<string, string
             return { type: "containsText", priority, stopIfTrue, operator: type, text: attributes.text };
         case "timePeriod": {
             const { timePeriod } = attributes;
-            return { type, priority, stopIfTrue, timePeriod: isTimePeriod(timePeriod) ? timePeriod : undefined };
+            return { type, priority, stopIfTrue, timePeriod: isOneOf(TIME_PERIODS, timePeriod) ? timePeriod : undefined };
         }
         case undefined:
         default:
@@ -533,12 +533,8 @@ class CfRuleXform extends CompositeXform<ConditionalFormattingRuleModel | null> 
     }
 
     /** Merges the model of a child into the rule: the settings of a data bar, color scale or icon set into a rule of that type. */
-    override onParserClose(name: string): void {
+    override onParserClose(name: string, model: ConditionalFormattingRuleModel): void {
         // the element was opened before its children (createNewModel); null for a rule that is not read
-        const { model } = this;
-        if (!model) {
-            return;
-        }
         switch (name) {
             case "dataBar":
                 if (model.type === "dataBar") {

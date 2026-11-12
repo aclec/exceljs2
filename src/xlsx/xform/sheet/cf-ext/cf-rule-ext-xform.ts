@@ -209,12 +209,8 @@ class CfRuleExtXform extends CompositeXform<ConditionalFormattingRuleModel | nul
     }
 
     /** Merges the model of a child into the rule: the settings of a data bar or icon set into a rule of that type. */
-    override onParserClose(name: string): void {
+    override onParserClose(name: string, model: ConditionalFormattingRuleModel): void {
         // the element was opened before its children (createNewModel); null for a rule that is not read
-        const { model } = this;
-        if (!model) {
-            return;
-        }
         switch (name) {
             case "xm:f": {
                 // set by the start tag of <xm:f>
