@@ -205,6 +205,17 @@ describe("Worksheet splice", () => {
             expect(ws.getCell(FAR, 2).font).to.deep.equal({ name: "far" });
         });
 
+        it("inserts the values given for rows past the last one, and keeps falsy values", () => {
+            const ws = new Excel.Workbook().addWorksheet("s");
+            ws.spliceColumns(2, 0, ["a", 0, false, ""]);
+            expect([1, 2, 3, 4].map((r) => ws.getCell(r, 2).value)).to.deep.equal(["a", 0, false, ""]);
+
+            const filled = sheetWithFarRow();
+            filled.spliceColumns(1, 0, [0, false]);
+            expect([1, 2].map((r) => filled.getCell(r, 1).value)).to.deep.equal([0, false]);
+            expect(filled.getCell(1, 2).value).to.equal("r1");
+        });
+
         it("duplicates a row that does not exist as empty rows", () => {
             const ws = sheetWithFarRow();
             ws.duplicateRow(2, 2, true);

@@ -624,22 +624,22 @@ class Worksheet {
         }
         this._detachMerges(merges.touched);
         const rows = this._rows;
-        const nRows = rows.length;
         if (inserts.length > 0) {
-            // the rows that exist and the ones an insert gives a value: a missing row would only get empty cells
+            // the rows that exist and the ones an insert gives a value (also past the last row; 0, false and "" are
+            // values): a missing row without value would only get empty cells
             const spliced: boolean[] = [];
             eachEntry(rows, (row, i) => {
                 spliced[i] = true;
             });
             inserts.forEach((insert) => {
                 eachEntry(insert, (value, i) => {
-                    if (value && i < nRows) {
+                    if (value !== null && value !== undefined) {
                         spliced[i] = true;
                     }
                 });
             });
             eachEntry(spliced, (value, i) => {
-                const rowInserts = inserts.map((insert) => insert[i] || null);
+                const rowInserts = inserts.map((insert) => insert[i] ?? null);
                 const row = this.getRow(i + 1);
 
                 row.splice(start, count, ...rowInserts);
