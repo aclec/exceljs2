@@ -114,8 +114,9 @@ class CSV {
 
             const dateFormats = readOptions.dateFormats || DEFAULT_DATE_FORMATS;
             const mayBeDate = (datum: string): boolean => dateFormats !== DEFAULT_DATE_FORMATS || DEFAULT_DATE_SHAPE.test(datum);
-            // the value of the cell (a user map may return anything: the Cell setter stores objects as JSON values)
-            const map: (datum: string, index: number) => DocCellValue =
+            // the value of the cell (a user map may return anything: the Cell setter stores objects as JSON values;
+            // undefined leaves the cell empty)
+            const map: (datum: string, index: number) => DocCellValue | undefined =
                 readOptions.map ||
                 function (datum: string): CsvCellValue {
                     if (datum === "") {
@@ -255,8 +256,9 @@ class CSV {
             csvStream.pipe(stream);
 
             const { dateFormat, dateUTC } = writeOptions;
+            // index.d.ts types the values given to a user map as its CellValue
             const map: (value: DocCellValue, index: number) => unknown =
-                writeOptions.map ||
+                (writeOptions.map as ((value: DocCellValue, index: number) => unknown) | undefined) ||
                 ((value: DocCellValue): unknown => {
                     if (value && typeof value === "object") {
                         // the properties of the value objects of index.d.ts (hyperlink, formula, error)

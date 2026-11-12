@@ -23,6 +23,7 @@ import type DefinedNames from "../doc/defined-names";
 import type Table from "../doc/table";
 import type Worksheet from "../doc/worksheet";
 import type Workbook from "../doc/workbook";
+import type ModelContainer from "../doc/modelcontainer";
 
 /** The back-references that are not compared (see the file comment). */
 type BackReference = "worksheet" | "workbook" | "master";
@@ -115,15 +116,8 @@ export type ColumnConforms = Assert<
         "values"
     >
 >;
-/** The runtime DefinedNames conforms to index.d.ts `DefinedNames`, but for the known mismatches listed. */
-export type DefinedNamesConforms = Assert<
-    Check<
-        DefinedNames,
-        Public.DefinedNames,
-        // TODO(align)
-        "addEx" | "removeEx"
-    >
->;
+/** The runtime DefinedNames conforms to index.d.ts `DefinedNames`. */
+export type DefinedNamesConforms = Assert<Check<DefinedNames, Public.DefinedNames>>;
 /** The runtime Table conforms to index.d.ts `Table`. */
 export type TableConforms = Assert<Check<Table, Public.Table>>;
 /** The runtime Worksheet conforms to index.d.ts `Worksheet`, but for the known mismatches listed. */
@@ -141,31 +135,15 @@ export type WorksheetConforms = Assert<
         | "lastRow"
     >
 >;
-/** The runtime Workbook conforms to index.d.ts `Workbook`, but for the known mismatches listed. */
-export type WorkbookConforms = Assert<
+/** The runtime Workbook conforms to index.d.ts `Workbook`. */
+export type WorkbookConforms = Assert<Check<Workbook, Public.Workbook>>;
+/** The runtime ModelContainer conforms to index.d.ts `ModelContainer`, but for the known mismatches listed. */
+export type ModelContainerConforms = Assert<
     Check<
-        Workbook,
-        Public.Workbook,
-        // TODO(align)
-        | "properties"
-        | "calcProperties"
-        | "definedNames"
-        | "views"
-        | "company"
-        | "manager"
-        | "model"
-        | "creator"
-        | "title"
-        | "subject"
-        | "description"
-        | "keywords"
-        | "category"
-        | "lastModifiedBy"
-        | "lastPrinted"
-        | "created"
-        | "modified"
-        | "xlsx"
-        | "csv"
-        | "getImage"
+        ModelContainer,
+        Public.ModelContainer,
+        // `model` holds the model given to the constructor or parsed by `xlsx`: a parsed worksheet model lacks what only
+        // the Worksheet getter sets (`state`, `rowBreaks`, `merges`, `dimensions` as a Range)
+        "model"
     >
 >;

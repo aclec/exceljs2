@@ -66,7 +66,7 @@ export interface CoreModel {
  * (a data URL or plain base64). On write, WorkbookXform.prepare sets `name` (`image1`...). On read: `{ type, name,
  * extension, buffer }`, then `index` (WorkbookXform.reconcile). The stream writer's names include the extension.
  *
- * Differs from index.d.ts `Media` (required `buffer`, no `base64` / `filename` / `index`).
+ * Index.d.ts `Media`.
  */
 export interface MediaModel {
     type: "image";
@@ -200,7 +200,7 @@ export interface PivotTableModel {
  *
  * Getter only: `sheets` (the worksheet models again, separate objects), `themes` may be undefined. Setter: reads
  * `sheets` only to order the worksheets; ignores `identifier`, `version`, `contentType`.
- * Index.d.ts `WorkbookModel` differs (`worksheets: Worksheet[]`, `revision: Date`, `themes: string[]`).
+ * Index.d.ts `WorkbookModel` (without `pivotTables`).
  */
 export interface WorkbookModel extends CoreModel {
     properties: Partial<WorkbookProperties>;
@@ -208,7 +208,8 @@ export interface WorkbookModel extends CoreModel {
     worksheets: WorksheetModel[];
     sheets?: WorksheetModel[] | SheetDefModel[];
     definedNames: DefinedNameModel[];
-    views: WorkbookViewModel[];
+    /** `undefined` once a file without `<bookViews>` is read */
+    views: WorkbookViewModel[] | undefined;
     company?: string;
     manager?: string;
     /** theme part name (`theme1`) → XML */

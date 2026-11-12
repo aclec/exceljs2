@@ -7,7 +7,7 @@
 //  Manage scaffolding for contained objects to write to/read from
 
 import type { CalculationProperties, WorkbookProperties } from "../../index";
-import Worksheet, { type WorksheetOptions } from "./worksheet";
+import Worksheet, { type DocumentWorksheetModel, type WorksheetOptions } from "./worksheet";
 import DefinedNames from "./defined-names";
 import XLSX from "../xlsx/xlsx";
 import CSV from "../csv/csv";
@@ -17,6 +17,9 @@ import type { ColorModel, MediaModel, WorkbookModel, WorkbookViewModel } from ".
 
 /** The options of `addWorksheet` (index.d.ts `AddWorksheetOptions`). */
 export type AddWorksheetOptions = Partial<Omit<WorksheetOptions, "workbook" | "id" | "name" | "orderNo">>;
+
+/** The model of a Workbook (its `model` getter): a {@link WorkbookModel} whose worksheet models come from Worksheet. */
+export type DocumentWorkbookModel = Omit<WorkbookModel, "worksheets"> & { worksheets: DocumentWorksheetModel[] };
 
 /** An image added to the workbook (`workbook.addImage`): its extension and its data (a file name, a buffer or base64). */
 export type ImageInput = Omit<MediaModel, "type" | "name" | "index">;
@@ -50,8 +53,8 @@ class Workbook {
     subject: string | undefined;
     /** Document property: the title ("" by default). */
     title: string | undefined;
-    /** The workbook views (windows). */
-    views: WorkbookViewModel[];
+    /** The workbook views (windows); `undefined` once a file without `<bookViews>` is read. */
+    views: WorkbookViewModel[] | undefined;
     /** The images (`addImage`), indexed by image id. */
     media: MediaModel[];
     /** The pivot tables of the worksheets (`worksheet.addPivotTable`, one at most). */
@@ -261,7 +264,7 @@ class Workbook {
     }
 
     /** The model of the workbook (for the xlsx writer): the worksheet models and the settings (by reference). */
-    get model(): WorkbookModel {
+    get model(): DocumentWorkbookModel {
         return {
             creator: this.creator || "Unknown",
             lastModifiedBy: this.lastModifiedBy || "Unknown",

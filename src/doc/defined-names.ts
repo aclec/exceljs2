@@ -1,6 +1,6 @@
 // The defined names of a workbook (`workbook.definedNames`): named cells and ranges, e.g. `MyRange` = `Sheet1!$A$1:$B$2`.
 
-import colCache from "../utils/col-cache";
+import colCache, { type RangeBounds } from "../utils/col-cache";
 import CellMatrix, { type MatrixCell, type MatrixLocation } from "../utils/cell-matrix";
 import Range from "./range";
 import type { DefinedNameModel } from "../types";
@@ -26,6 +26,12 @@ export interface LargeNameRange {
     bottom: number;
     right: number;
 }
+
+/**
+ * A location given to {@link DefinedNames.addEx}: a cell, a decoded reference (`colCache.decodeEx`), or a range given by
+ * its bounds only (index.d.ts `Location & { sheetName }`).
+ */
+export type NameLocation = MatrixLocation | (RangeBounds & { sheetName?: string | undefined });
 
 /** The cells still allowed to be expanded, shared by several calls of {@link DefinedNames.addEx}. */
 export interface ExpansionBudget {
@@ -102,7 +108,7 @@ class DefinedNames {
      * Adds a cell or a range to a name: a range larger than the budget (and than 100,000 cells) is kept as a rectangle.
      * @param budget - the cells still allowed to be expanded, shared by several calls (decremented)
      */
-    addEx(location: MatrixLocation, name: string, budget: ExpansionBudget = { cells: MAX_EXPANDED_CELLS }): void {
+    addEx(location: NameLocation, name: string, budget: ExpansionBudget = { cells: MAX_EXPANDED_CELLS }): void {
         // a range (a range starting at row 0 is added as a cell, as it always was)
         const range = "top" in location && location.top ? location : undefined;
         const count = range ? (1 + range.bottom - range.top) * (1 + range.right - range.left) : 1;
@@ -127,7 +133,8 @@ class DefinedNames {
                 }
             }
         } else {
-            matrix.addCellEx(location);
+            // a cell (a range starting at row 0, an invalid location, is filed as CellMatrix files it, as it always was)
+            matrix.addCellEx(location as MatrixLocation);
         }
     }
 
