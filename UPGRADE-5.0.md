@@ -159,8 +159,10 @@ worksheet.getCell("A1").value;
 
 On write, a hyperlink that starts with `#` (`'#Sheet2!A1'`, `"#'My Sheet'!B2:C3"`, `'#MyDefinedName'`) is written as Excel writes internal
 links: `location="Sheet2!A1"`, without `#` and without an external relationship. 4.x wrote a relationship to `#...` (and, for `Sheet!A1`
-targets, a location with the `#`). The legacy form without `#` (`'Sheet2!A1'`) is also written as an internal link, so it reads back as
-`'#Sheet2!A1'`.
+targets, a location with the `#`). The legacy form without `#` (`'Sheet2!A1'`, `"'My Sheet'!B2:C3"`: a sheet name, `!`, then a cell or a
+range) is also written as an internal link, so it reads back as `'#Sheet2!A1'`. An unquoted sheet name in that form cannot contain `:`, `/`,
+`\`, `?` or `#`, so URLs and paths whose end looks like a sheet reference (`'https://example.com/#!page1'`, `'../book.xlsx#Sheet1!A1'`) stay
+external links; prefix the target with `#`, or quote the sheet name, for any other sheet name.
 
 ## Styles are copied on write
 

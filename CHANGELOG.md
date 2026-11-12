@@ -87,7 +87,8 @@ upstream PR code was merged) and has a regression test.
     - empty rich-text runs (#2737); distinct rich-text shared strings in the streaming writer (#2588); dxf number format written as
       `[object Object]` (#2698);
     - internal hyperlinks (`#Sheet!A1`, `#DefinedName`) written as a `location` without an external relationship, by both writers (#2002);
-      `inset="NaNmm,..."` written for notes whose VML textbox had no inset.
+      URLs and paths ending like a sheet reference (`https://example.com/#!page1`) stay external links; `inset="NaNmm,..."` written for
+      notes whose VML textbox had no inset.
 - Data lost or wrong on read:
     - rows/cells without an `r` attribute (#2962, both readers); `t="d"` ISO 8601 date cells (#2702, both readers);
     - falsy formula results (#3048); only numeric formula results converted to dates (#3111);
