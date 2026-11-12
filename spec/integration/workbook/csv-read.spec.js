@@ -23,6 +23,21 @@ describe('CSV read', () => {
       expect(ws.getCell('E1').value).to.equal(null); // empty cells stay empty
     });
 
+    it('keeps integers beyond Number.MAX_SAFE_INTEGER as strings (#1743)', async () => {
+      const values = await readCells([
+        '56343416020533614003',
+        '9007199254740993',
+        '-9007199254740993',
+        '9007199254740992',
+      ]);
+      expect(values).to.deep.equal([
+        '56343416020533614003',
+        '9007199254740993',
+        '-9007199254740993',
+        '9007199254740992',
+      ]);
+    });
+
     it('still reads safe integers and other numeric forms as numbers', async () => {
       const values = await readCells([
         '9007199254740991',
