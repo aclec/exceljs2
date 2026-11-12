@@ -364,6 +364,34 @@ describe("WorkbookReader (stream)", () => {
         expect(sheets[0].rows[0].values[2]).to.equalTime(date);
     });
 
+    it("reads error and boolean formula results like the document reader", async () => {
+        const buffer = await tamper(
+            await baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("A1").value = { formula: "NA()", result: { error: "#N/A" } };
+                ws.getCell("A2").value = { formula: "1=1", result: true };
+                ws.getCell("A3").value = { formula: "1=2", result: false };
+                ws.getCell("A4").value = { formula: "1+1", result: 2 };
+                ws.getCell("A5").value = { formula: '"a"', result: "a" };
+            }),
+            {
+                // as Excel writes them
+                "xl/worksheets/sheet1.xml": (xml) => {
+                    expect(xml).to.match(/<c r="A1" t="e"><f>NA\(\)<\/f><v>#N\/A<\/v><\/c>/);
+                    expect(xml).to.match(/<c r="A2" t="b"><f>1=1<\/f><v>1<\/v><\/c>/);
+                    return xml;
+                },
+            }
+        );
+        const doc = new ExcelJS.Workbook();
+        await doc.xlsx.load(buffer);
+        const expected = doc.getWorksheet("Sheet1").getColumn(1).values.slice(1, 6);
+        expect(expected.map((value) => value.result)).to.deep.equal([{ error: "#N/A" }, true, false, 2, "a"]);
+
+        const [sheet] = await readAll(chunkedStream(buffer));
+        const streamed = sheet.rows.filter((row) => row.number <= 5).map((row) => row.values[1]);
+        expect(streamed).to.deep.equal(expected);
+    });
+
     describe("columns and rows", () => {
         it("reads column widths, styles and hidden flags", async () => {
             const buffer = await baseWorkbookBuffer((wb, ws) => {

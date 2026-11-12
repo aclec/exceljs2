@@ -147,6 +147,8 @@ upstream PR code was merged) and has a regression test.
 - Notes on cells without a value were lost on read: Excel (and ExcelJS) write no `<c>` element for such cells. The cells, and their rows
   when missing, are now created.
 - Streaming writer: notes on the cells of a row without values were dropped (the row was skipped).
+- Streaming reader: error and boolean formula results (`t="e"`, `t="b"`) were read as `NaN` and `1` / `0`; they are read as
+  `{error: '#N/A'}` and `true` / `false`, as the document reader does.
 - Hyperlink tooltips were lost on read (document reader). The streaming reader's `hyperlink` events now carry `location`, `tooltip` and
   `display` too (an internal link was an event without target).
 - Streaming writer: memory grew with the number of rows (about 0.5 KB per row: 170 MB for 300,000 rows) because rows were committed faster
