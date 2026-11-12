@@ -8,8 +8,9 @@
 //  Manage column widths and row heights
 
 import type { WorksheetProtection, WorksheetState } from "../../index";
-import colCache, { type CellAddress, type DecodedRange } from "../utils/col-cache";
-import Range, { type RangeArgs } from "./range";
+import colCache from "../utils/col-cache";
+import Range from "./range";
+import { findCellAddress, isRowNumber, resolveCellAddress, resolveRange, type SheetRangeArgs } from "./sheet-reference";
 import Row, { type RowValues } from "./row";
 import Column, { type ColumnDefn, type ColumnRanges, type ColumnSegment } from "./column";
 import { ValueType } from "./enums";
@@ -139,11 +140,6 @@ function insertedRowValues(worksheet: Worksheet, values: RowValues | null | unde
         }
     });
     return (col) => byColumn.get(col);
-}
-
-// colCache.getAddress for the (row, col) and (address) forms: without a column, r is an address
-function addressOf(r: number | string, c?: number): CellAddress {
-    return c ? colCache.getAddress(r as number, c) : colCache.getAddress(r as string);
 }
 
 /**
@@ -700,7 +696,7 @@ class Worksheet {
         return undefined;
     }
 
-    /** A row (1-based number) if it exists. */
+    /** A row (1-based number) if it exists (`undefined` for a number that is not a row: 0, -1, 1.5...). */
     findRow(r: number): Row | undefined {
         return this._rows[r - 1];
     }
@@ -725,8 +721,14 @@ class Worksheet {
         return count;
     }
 
-    /** A row (1-based number), created if needed. */
+    /**
+     * A row (1-based number), created if needed.
+     * @throws Error for a number that is not a row (an integer from 1 to 1,048,576)
+     */
     getRow(r: number): Row {
+        if (!isRowNumber(r)) {
+            throw new Error(`Invalid row number: ${String(r)} (the rows are numbered from 1 to ${colCache.MAX_ROWS})`);
+        }
         let row = this._rows[r - 1];
         if (!row) {
             row = this._rows[r - 1] = new Row(this, r);
@@ -734,7 +736,10 @@ class Worksheet {
         return row;
     }
 
-    /** The rows `start`..`start + length - 1`, created if needed; undefined when `length` < 1. */
+    /**
+     * The rows `start`..`start + length - 1`, created if needed; undefined when `length` < 1.
+     * @throws Error for a number that is not a row (see {@link Worksheet.getRow})
+     */
     getRows(start: number, length: number): Row[] | undefined {
         if (length < 1) return undefined;
         const rows = [];
@@ -1007,23 +1012,29 @@ class Worksheet {
     // =========================================================================
     // Cells
 
-    /** The cell at (row, col) (1-based) or at an address (`"B2"`) if it exists. */
+    /**
+     * The cell at (row, col) (1-based) or at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`) if it exists: `undefined` for
+     * an address that is not a cell of this worksheet (invalid, out of bounds, or on another sheet), as for a cell that
+     * does not exist.
+     */
     findCell(address: string): Cell | undefined;
     findCell(r: number, c: number): Cell | undefined;
     findCell(r: number | string, c?: number): Cell | undefined {
-        const address = addressOf(r, c);
-        const row = this._rows[address.row - 1];
+        const address = findCellAddress(this.name, r, c);
+        const row = address && this._rows[address.row - 1];
         return row ? row.findCell(address.col) : undefined;
     }
 
     /**
-     * The cell at (row, col) (1-based) or at an address (`"B2"`), created if needed.
-     * @throws Error for an invalid address
+     * The cell at (row, col) (1-based) or at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`: a sheet name must be this
+     * worksheet's), created if needed.
+     * @throws Error for an invalid address: rows are 1 to 1,048,576, columns 1 (`A`) to 16,384 (`XFD`), the column
+     * letters upper case; or a cell of another sheet
      */
     getCell(address: string): Cell;
     getCell(r: number, c: number): Cell;
     getCell(r: number | string, c?: number): Cell {
-        const address = addressOf(r, c);
+        const address = resolveCellAddress(this.name, r, c);
         const row = this.getRow(address.row);
         return row.getCellEx(address);
     }
@@ -1032,19 +1043,21 @@ class Worksheet {
     // Merge
 
     /**
-     * Merges a range (`"A1:B2"`, `"A1", "B2"`, `1, 1, 2, 2`...: see {@link RangeArgs}) into its top-left cell, which
-     * gives its style to the other cells.
-     * @throws Error when a cell is already merged, or the merges would exceed the cap
+     * Merges a range (`"A1:B2"`, `"A1", "B2"`, `1, 1, 2, 2`...: see {@link SheetRangeArgs}) into its top-left cell, which
+     * gives its style to the other cells. A sheet name in the arguments must be this worksheet's (case-insensitive).
+     * @throws Error for an invalid range or a range of another sheet (nothing is merged), when a cell is already merged,
+     * or when the merges would exceed the cap
      */
-    mergeCells(...cells: RangeArgs): void {
-        const dimensions = new Range(cells);
-        this._mergeCellsInternal(dimensions);
+    mergeCells(...cells: SheetRangeArgs): void {
+        this._mergeCellsInternal(resolveRange(this.name, "merge", cells));
     }
 
-    /** Merges a range into its top-left cell, the cells keeping their style (see {@link Worksheet.mergeCells}). */
-    mergeCellsWithoutStyle(...cells: RangeArgs): void {
-        const dimensions = new Range(cells);
-        this._mergeCellsInternal(dimensions, true);
+    /**
+     * Merges a range into its top-left cell, the cells keeping their style (see {@link Worksheet.mergeCells}).
+     * @throws Error as {@link Worksheet.mergeCells}
+     */
+    mergeCellsWithoutStyle(...cells: SheetRangeArgs): void {
+        this._mergeCellsInternal(resolveRange(this.name, "merge", cells), true);
     }
 
     /** @throws Error when a cell is already merged, or the merges would exceed the cap */
@@ -1175,11 +1188,12 @@ class Worksheet {
     }
 
     /**
-     * Unmerges the merges that have a cell in a range (see {@link RangeArgs}): merges are atomic, either they're all
-     * merged or all un-merged. Unmerging breaks the style links.
+     * Unmerges the merges that have a cell in a range (see {@link Worksheet.mergeCells}): merges are atomic, either
+     * they're all merged or all un-merged. Unmerging breaks the style links.
+     * @throws Error for an invalid range or a range of another sheet (nothing is unmerged)
      */
-    unMergeCells(...cells: RangeArgs): void {
-        const dimensions = new Range(cells);
+    unMergeCells(...cells: SheetRangeArgs): void {
+        const dimensions = resolveRange(this.name, "unmerge", cells);
 
         // find any cells in that range and unmerge them
         for (let i = dimensions.top; i <= dimensions.bottom; i++) {
@@ -1201,15 +1215,17 @@ class Worksheet {
     // ===========================================================================
     // Shared/Array Formula
     /**
-     * Sets a formula on a range (`"A1:B3"`): the top-left cell gets it (a shared formula, or an array formula with
-     * `shareType` "array"), the other cells are its clones (a shared formula) or get their result (an array formula).
+     * Sets a formula on a range (`"A1:B3"`, `"C3"`; a sheet name must be this worksheet's): the top-left cell gets it (a
+     * shared formula, or an array formula with `shareType` "array") with the range as `ref` (`"A1:B3"`, `"C3"`, without
+     * sheet name nor `$`), the other cells are its clones (a shared formula) or get their result (an array formula).
      * @param results - the results of the cells (by cell, by row then column, or in a flat array)
+     * @throws Error for an invalid range or a range of another sheet (nothing is filled)
      */
     fillFormula(range: string, formula: string, results?: FillFormulaResults, shareType: "shared" | "array" = "shared"): void {
         // Define formula for top-left cell and share to rest
-        const decoded = colCache.decode(range);
-        // a single cell has no bounds: nothing is filled, as it always was
-        const { top, left, bottom, right } = decoded as DecodedRange;
+        const bounds = resolveRange(this.name, "fill a formula", [range]);
+        const { top, left, bottom, right } = bounds;
+        const ref = bounds.count > 1 ? bounds.range : bounds.tl;
         const width = right - left + 1;
         const masterAddress = colCache.encodeAddress(top, left);
         const isShared = shareType === "shared";
@@ -1236,7 +1252,7 @@ class Worksheet {
                     this.getCell(r, c).value = {
                         shareType,
                         formula,
-                        ref: range,
+                        ref,
                         result: getResult(r, c),
                     };
                     first = false;
@@ -1469,12 +1485,16 @@ class Worksheet {
         });
     }
 
-    /** Replaces the merges with those of the model (`mergeCells`), the cells keeping their style. */
+    /**
+     * Replaces the merges with those of the model, the cells keeping their style: `mergeCells` (a model read from a
+     * file), else `merges` (the getter's).
+     * @throws Error for an invalid range, or a range of another sheet
+     */
     _parseMergeCells(model: WorksheetModel): void {
         // the merges of the model replace those of the worksheet (whose rows were replaced)
         this._merges = {};
         this._addMergedCells(-this._mergedCellCount);
-        model.mergeCells?.forEach((merge) => {
+        (model.mergeCells ?? model.merges)?.forEach((merge) => {
             // Do not merge styles when importing an Excel file
             // since each cell may have different styles intentionally.
             this.mergeCellsWithoutStyle(merge);

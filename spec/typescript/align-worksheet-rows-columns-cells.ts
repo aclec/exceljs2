@@ -69,10 +69,16 @@ function merges(location: ExcelJS.Location): void {
     worksheet.mergeCellsWithoutStyle("A1:B2");
     worksheet.unMergeCells("A1");
     worksheet.unMergeCells(1, 1, 2, 2);
-    // @ts-expect-error two numbers are not a range (silently merges garbage at run time)
+    // @ts-expect-error two numbers are not a range (throws at run time)
     worksheet.mergeCells(1, 2);
     // @ts-expect-error three numbers are not a range
     worksheet.unMergeCells(1, 2, 3);
+    // @ts-expect-error a merge needs a range (throws at run time)
+    worksheet.mergeCells();
+    // @ts-expect-error an unmerge needs a range (throws at run time)
+    worksheet.unMergeCells();
+    // @ts-expect-error a merge needs a range (throws at run time)
+    worksheet.mergeCellsWithoutStyle();
 }
 
 // --- fillFormula: a range reference, results by cell, by row or flat, shared or array ----------

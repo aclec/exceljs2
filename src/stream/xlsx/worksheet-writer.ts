@@ -4,7 +4,8 @@ import colCache from "../../utils/col-cache";
 import Encryptor from "../../utils/encryptor";
 import { checkMergedCells } from "../../utils/merge-limits";
 import { eachEntry, someEntry } from "../../utils/sparse-array";
-import Range, { type RangeArgs } from "../../doc/range";
+import Range from "../../doc/range";
+import { findCellAddress, isRowNumber, resolveCellAddress, resolveRange, type SheetRangeArgs } from "../../doc/sheet-reference";
 import StringBuf from "../../utils/string-buf";
 
 import Row from "../../doc/row";
@@ -591,9 +592,12 @@ class WorksheetWriter {
     /**
      * A row (1-based number), created if needed.
      *
-     * @throws Error when the row was committed
+     * @throws Error for a number that is not a row (an integer from 1 to 1,048,576), or when the row was committed
      */
     getRow(rowNumber: number): Row {
+        if (!isRowNumber(rowNumber)) {
+            throw new Error(`Invalid row number: ${String(rowNumber)} (the rows are numbered from 1 to ${colCache.MAX_ROWS})`);
+        }
         // may fail if rows have been comitted
         if (rowNumber < this._rowZero) {
             throw new Error("Out of bounds: this row has been committed");
@@ -621,37 +625,43 @@ class WorksheetWriter {
     // ================================================================================
     // Cells
 
-    /** The cell at an address (`B3`) or at (row, col), if it exists. */
+    /**
+     * The cell at an address (`B3`, `$B$3`, `Sheet1!B3`) or at (row, col), if it exists and is not committed: `undefined`
+     * for an address that is not a cell of this worksheet (see the document `Worksheet.findCell`).
+     */
     findCell(address: string): Cell | undefined;
     findCell(row: number, col: number): Cell | undefined;
     findCell(r: number | string, c?: number): Cell | undefined {
-        const address = typeof c === "number" ? colCache.getAddress(r as number, c) : colCache.getAddress(r as string);
-        const row = this.findRow(address.row);
+        const address = findCellAddress(this.name, r, c);
+        const row = address && this.findRow(address.row);
         return row ? row.findCell(address.col) : undefined;
     }
 
     /**
-     * The cell at an address (`B3`) or at (row, col), created if needed.
+     * The cell at an address (`B3`, `$B$3`, `Sheet1!B3`: a sheet name must be this worksheet's) or at (row, col),
+     * created if needed.
      *
-     * @throws Error when its row was committed
+     * @throws Error for an invalid address or the address of a cell of another sheet (see the document
+     * `Worksheet.getCell`), or when its row was committed
      */
     getCell(address: string): Cell;
     getCell(row: number, col: number): Cell;
     getCell(r: number | string, c?: number): Cell {
-        const address = typeof c === "number" ? colCache.getAddress(r as number, c) : colCache.getAddress(r as string);
+        const address = resolveCellAddress(this.name, r, c);
         const row = this.getRow(address.row);
         return row.getCellEx(address);
     }
 
     /**
-     * Merges a range of cells (same arguments as `new Range(...)`): every cell but the top-left one is merged into it.
+     * Merges a range of cells (same arguments as the document `Worksheet.mergeCells`: a sheet name must be this
+     * worksheet's): every cell but the top-left one is merged into it.
      *
-     * @throws Error when a cell is already merged, a row was committed, or the merged cells exceed the limits
-     * (utils/merge-limits)
+     * @throws Error for an invalid range or a range of another sheet, when a cell is already merged, a row was committed,
+     * or the merged cells exceed the limits (utils/merge-limits)
      */
-    mergeCells(...cells: RangeArgs): void {
+    mergeCells(...cells: SheetRangeArgs): void {
         // may fail if rows have been comitted
-        const dimensions = new Range(cells);
+        const dimensions = resolveRange(this.name, "merge", cells);
 
         // every cell of a merge is materialised: same caps as the document model (utils/merge-limits)
         const workbook = this._workbook;

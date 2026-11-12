@@ -240,4 +240,31 @@ describe("WorkbookWriter (stream)", () => {
         expect(ws.getCell("C1").note).to.equal("same row as a value");
         expect(ws.getCell("B3").note).to.equal("row without values");
     });
+
+    it("writes merges without sheet name, and rejects a merge of another sheet or an invalid one", async () => {
+        const buffer = await writeBuffer((wb) => {
+            const ws = wb.addWorksheet("s");
+            ws.mergeCells("s!A1:B2");
+            ws.mergeCells(8, 1, 9, 2, "S");
+            expect(() => ws.mergeCells('y"/><x!A4:B5')).to.throw(Error, /on the worksheet "y\\"\/><x", not "s"/);
+            expect(() => ws.mergeCells({ top: 5, left: 1, bottom: 6, right: 2, sheetName: "x" })).to.throw(Error, /worksheet "x"/);
+            expect(() => ws.mergeCells(10, 10)).to.throw(Error, /^Cannot merge: invalid range/);
+            expect(() => ws.mergeCells()).to.throw(Error, /^Cannot merge: invalid range/);
+        });
+        const xml = await readPart(buffer, "xl/worksheets/sheet1.xml");
+        expect(xml).to.contain('<mergeCells count="2"><mergeCell ref="A1:B2"/><mergeCell ref="A8:B9"/></mergeCells>');
+    });
+
+    it("rejects a cell or a row out of the worksheet", async () => {
+        await writeBuffer((wb) => {
+            const ws = wb.addWorksheet("s");
+            for (const args of [["A0"], [0, 1], [1, 0], ["foo"]]) {
+                expect(() => ws.getCell(...args), JSON.stringify(args)).to.throw(Error, /^Invalid cell/);
+                expect(ws.findCell(...args), JSON.stringify(args)).to.be.undefined();
+            }
+            expect(() => ws.getCell("y!A1")).to.throw(Error, 'The cell y!A1 is not on the worksheet "s"');
+            expect(() => ws.getRow(0)).to.throw(Error, /^Invalid row number/);
+            expect(ws.getCell("s!B2").address).to.equal("B2");
+        });
+    });
 });

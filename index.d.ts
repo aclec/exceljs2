@@ -2076,6 +2076,8 @@ export interface Worksheet {
 
     /**
      * Get or create row by 1-based index
+     *
+     * @throws Error for a number that is not a row (an integer from 1 to 1,048,576)
      */
     getRow(index: number): Row;
 
@@ -2083,6 +2085,7 @@ export interface Worksheet {
      * The rows `start`..`start + length - 1` (1-based), created if needed.
      *
      * @returns `undefined` when `length` < 1
+     * @throws Error for a number that is not a row (see `getRow`)
      */
     getRows(start: number, length: number): Row[] | undefined;
 
@@ -2103,58 +2106,70 @@ export interface Worksheet {
      */
     getSheetValues(): (CellValue[] | undefined)[];
 
-    /** The cell at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`) if it exists. */
+    /**
+     * The cell at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`) if it exists: `undefined` for an address that is not a
+     * cell of this worksheet (invalid, out of bounds, or with the name of another sheet), as for a cell that does not
+     * exist.
+     */
     findCell(address: string): Cell | undefined;
     /**
-     * The cell at (row, col) (1-based numbers) if it exists.
-     *
-     * @throws Error for a column out of bounds
+     * The cell at (row, col) (1-based numbers) if it exists: `undefined` for numbers out of bounds, as for a cell that
+     * does not exist.
      */
     findCell(row: number, col: number): Cell | undefined;
 
     /**
-     * The cell at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`), created if needed.
+     * The cell at an address (`"B2"`, `"$B$2"`, `"Sheet1!B2"`: a sheet name must be this worksheet's, case-insensitive),
+     * created if needed.
      *
-     * @throws Error for an invalid address, or a row or a column out of bounds
+     * @throws Error for an invalid address (the column letters upper case, the rows from 1 to 1,048,576, the columns from
+     * `A` to `XFD`), or the address of a cell of another sheet
      */
     getCell(address: string): Cell;
     /**
      * The cell at (row, col) (1-based numbers), created if needed.
      *
-     * @throws Error for a row or a column out of bounds
+     * @throws Error for a row (1 to 1,048,576) or a column (1 to 16,384) out of bounds, or a number that is not an
+     * integer
      */
     getCell(row: number, col: number): Cell;
 
     /**
      * Merges a range into its top-left cell, which gives its style to the other cells. The range is given as for a
-     * {@link Range} (see {@link RangeArguments}): `"A4:B5"`, `"G10", "H11"`, `10, 11, 12, 13` (top, left, bottom, right),
-     * a {@link Location} or a Range.
+     * {@link Range} (see {@link RangeArguments}), but not empty: `"A4:B5"`, `"G10", "H11"`, `10, 11, 12, 13` (top,
+     * left, bottom, right), a {@link Location} or a Range. A sheet name, wherever given, must be this worksheet's
+     * (case-insensitive): the merge has none.
      *
-     * @throws Error when a cell is already merged, or the merges would exceed the cap
+     * @throws Error for an invalid range (no arguments, bounds that are not rows 1 to 1,048,576 and columns 1 to 16,384,
+     * an unparsable reference) or a range of another sheet, nothing being merged; when a cell is already merged, or the
+     * merges would exceed the cap
      */
-    mergeCells(...cells: RangeArguments): void;
+    mergeCells(...cells: Exclude<RangeArguments, []>): void;
     /**
      * Merges a range into its top-left cell, the cells keeping their own style (see `mergeCells`).
      *
-     * @throws Error when a cell is already merged, or the merges would exceed the cap
+     * @throws Error as `mergeCells`
      */
-    mergeCellsWithoutStyle(...cells: RangeArguments): void;
+    mergeCellsWithoutStyle(...cells: Exclude<RangeArguments, []>): void;
 
     /**
      * Unmerges the merges that have a cell in the range (given as for `mergeCells`): a merge is unmerged as a whole.
      * Unmerging breaks the style links.
+     *
+     * @throws Error for an invalid range, or a range of another sheet (nothing is unmerged)
      */
-    unMergeCells(...cells: RangeArguments): void;
+    unMergeCells(...cells: Exclude<RangeArguments, []>): void;
 
     /**
-     * Sets a formula on a range (`"A1:B3"`): the top-left cell gets it (a shared formula, or an array formula with
-     * `shareType` `"array"`), the other cells are its clones (shared formula) or get their result (array formula). A
-     * single cell (`"A1"`), or a string that is not a range, fills nothing.
+     * Sets a formula on a range (`"A1:B3"`, or a single cell `"C3"`; a sheet name must be this worksheet's): the
+     * top-left cell gets it (a shared formula, or an array formula with `shareType` `"array"`) with the range as `ref`
+     * (`"A1:B3"`, `"C3"`: without sheet name nor `$`), the other cells are its clones (shared formula) or get their
+     * result (array formula).
      *
      * @param results - the cached results of the cells: by cell (1-based row and column), by row then column of the
      *   range, or flat (row by row)
      * @param shareType - `"shared"` (the default) or `"array"`
-     * @throws Error for a range out of bounds
+     * @throws Error for an invalid range (as `mergeCells`) or a range of another sheet: nothing is filled
      */
     fillFormula(
         range: string,
@@ -3504,7 +3519,8 @@ export namespace stream {
             /**
              * The row (1-based number), created if needed.
              *
-             * @throws Error when the row was committed
+             * @throws Error for a number that is not a row (an integer from 1 to 1,048,576), or when the row was
+             * committed
              */
             getRow(rowNumber: number): Row;
             /**
@@ -3518,28 +3534,36 @@ export namespace stream {
             /** Calls `callback` with each row not committed yet (`includeEmpty`: each one, created if needed). */
             eachRow(options: { includeEmpty?: boolean } | undefined, callback: (row: Row, rowNumber: number) => void): void;
 
-            /** The cell at an address (`"B3"`), if it exists and its row is not committed. */
+            /**
+             * The cell at an address (`"B3"`, `"$B$3"`, `"Sheet1!B3"`), if it exists and its row is not committed:
+             * `undefined` for an address that is not a cell of this worksheet (see the document `Worksheet.findCell`).
+             */
             findCell(address: string): Cell | undefined;
-            /** The cell at (row, column), if it exists and its row is not committed. */
+            /** The cell at (row, column), if it exists and its row is not committed (`undefined` out of bounds). */
             findCell(row: number, col: number): Cell | undefined;
             /**
-             * The cell at an address (`"B3"`), created if needed.
+             * The cell at an address (`"B3"`, `"$B$3"`, `"Sheet1!B3"`: a sheet name must be this worksheet's), created
+             * if needed.
              *
-             * @throws Error when its row was committed
+             * @throws Error for an invalid address or a cell of another sheet (see the document `Worksheet.getCell`), or
+             * when its row was committed
              */
             getCell(address: string): Cell;
             /**
              * The cell at (row, column), created if needed.
              *
-             * @throws Error when its row was committed
+             * @throws Error for a row or a column out of bounds, or when its row was committed
              */
             getCell(row: number, col: number): Cell;
 
             /**
              * Merges a range of cells (`"A4:B5"`, a {@link Range} or {@link Location}, or an array of the arguments
-             * below): every cell but the top-left one is merged into it.
+             * below): every cell but the top-left one is merged into it. A sheet name, wherever given, must be this
+             * worksheet's (case-insensitive): the merge has none.
              *
-             * @throws Error when a cell is already merged, a row was committed, or the merged cells exceed the limits
+             * @throws Error for an invalid range or a range of another sheet (see the document
+             * `Worksheet.mergeCells`), when a cell is already merged, a row was committed, or the merged cells exceed
+             * the limits
              */
             mergeCells(range: string | Range | Location | [string, string, string?] | [number, number, number, number, string?]): void;
             /** Merges the range from `tl` to `br` (`"A4"`, `"B5"`). */
