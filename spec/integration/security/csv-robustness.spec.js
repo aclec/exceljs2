@@ -1,5 +1,8 @@
-// CSV reading must stay fast on text fields.
-const { Readable } = require("stream");
+// CSV reading must stay fast on text fields, and CSV writing must report the errors of its destination.
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { Readable, Writable } = require("stream");
 
 const ExcelJS = verquire("exceljs");
 
@@ -34,6 +37,57 @@ describe("CSV robustness", function () {
             const ws = await readCsv("Jan 5 2020,abc\n", { dateFormats: ["MMM D YYYY"] });
             expect(ws.getCell("A1").value).to.be.an.instanceof(Date);
             expect(ws.getCell("B1").value).to.equal("abc");
+        });
+    });
+
+    describe("write", () => {
+        function workbook() {
+            const wb = new ExcelJS.Workbook();
+            wb.addWorksheet("s").addRow(["a", "b"]);
+            return wb;
+        }
+
+        it("rejects when the destination stream fails", async () => {
+            const destination = new Writable({
+                write(chunk, encoding, callback) {
+                    callback(new Error("disk full"));
+                },
+            });
+            let error;
+            await workbook()
+                .csv.write(destination)
+                .catch((e) => {
+                    error = e;
+                });
+            expect(error).to.be.an("error");
+            expect(error.message).to.equal("disk full");
+        });
+
+        it("rejects when the file cannot be created", async () => {
+            const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "exceljs-csv-"));
+            try {
+                let error;
+                await workbook()
+                    .csv.writeFile(path.join(dir, "missing", "out.csv"))
+                    .catch((e) => {
+                        error = e;
+                    });
+                expect(error).to.be.an("error");
+                expect(error.code).to.equal("ENOENT");
+            } finally {
+                await fs.promises.rm(dir, { recursive: true, force: true });
+            }
+        });
+
+        it("still writes a file", async () => {
+            const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "exceljs-csv-"));
+            try {
+                const file = path.join(dir, "out.csv");
+                await workbook().csv.writeFile(file);
+                expect(await fs.promises.readFile(file, "utf8")).to.equal("a,b");
+            } finally {
+                await fs.promises.rm(dir, { recursive: true, force: true });
+            }
         });
     });
 });
