@@ -1,19 +1,22 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { SheetPartRefModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-class TablePartXform extends BaseXform {
-    get tag() {
+/** `<tablePart r:id="…"/>`: a table of a worksheet (an item of `<tableParts>`). */
+class TablePartXform extends BaseXform<SheetPartRefModel> {
+    get tag(): string {
         return "tablePart";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: SheetPartRefModel | undefined): void {
         if (model) {
             xmlStream.leafNode(this.tag, { "r:id": model.rId });
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<tablePart>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 this.model = {
@@ -25,9 +28,9 @@ class TablePartXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

@@ -1,22 +1,23 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type XmlStream from "../../../utils/xml-stream";
+import type { RowBreak } from "../../../../index";
 import PageBreaksXform from "./page-breaks-xform";
 
 import ListXform from "../list-xform";
 
-class RowBreaksXform extends ListXform {
+/**
+ * `<rowBreaks count="n" manualBreakCount="n"><brk …/>…</rowBreaks>`: the manual page breaks between rows (index.d.ts
+ * `RowBreak`, see PageBreaksXform). Nothing is rendered without a break.
+ */
+class RowBreaksXform extends ListXform<Partial<RowBreak> | string> {
     constructor() {
-        const options = {
+        super({
             tag: "rowBreaks",
             count: true,
             childXform: new PageBreaksXform(),
-        };
-        super(options);
+        });
     }
 
-    // get tag() { return 'rowBreaks'; }
-
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: readonly Partial<RowBreak>[] | undefined): void {
         if (model && model.length) {
             xmlStream.openNode(this.tag, this.$);
             if (this.count) {

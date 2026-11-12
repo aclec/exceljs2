@@ -1,32 +1,38 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { PageSetup } from "../../../../index";
 import BaseXform from "../base-xform";
 
-function booleanToXml(model) {
+/** The print options of a worksheet: part of the page setup (index.d.ts `PageSetup`). */
+export type PrintOptionsModel = Pick<PageSetup, "showRowColHeaders" | "showGridLines" | "horizontalCentered" | "verticalCentered">;
+
+function booleanToXml(model: boolean | undefined): "1" | undefined {
     return model ? "1" : undefined;
 }
 
-class PrintOptionsXform extends BaseXform {
-    get tag() {
+/**
+ * `<printOptions headings="1" gridLines="1" horizontalCentered="1" verticalCentered="1"/>`: rendered when an option is
+ * set (the model may be the whole page setup); parsing gives every option.
+ */
+class PrintOptionsXform extends BaseXform<PrintOptionsModel> {
+    get tag(): string {
         return "printOptions";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: Partial<PrintOptionsModel> | undefined): void {
         if (model) {
-            const attributes = {
-                headings: booleanToXml(model.showRowColHeaders),
-                gridLines: booleanToXml(model.showGridLines),
-                horizontalCentered: booleanToXml(model.horizontalCentered),
-                verticalCentered: booleanToXml(model.verticalCentered),
-            };
-            if (_.some(attributes, (value) => value !== undefined)) {
-                xmlStream.leafNode(this.tag, attributes);
+            const headings = booleanToXml(model.showRowColHeaders);
+            const gridLines = booleanToXml(model.showGridLines);
+            const horizontalCentered = booleanToXml(model.horizontalCentered);
+            const verticalCentered = booleanToXml(model.verticalCentered);
+            if (headings || gridLines || horizontalCentered || verticalCentered) {
+                xmlStream.leafNode(this.tag, { headings, gridLines, horizontalCentered, verticalCentered });
             }
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<printOptions>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
             case this.tag:
                 this.model = {
@@ -41,9 +47,9 @@ class PrintOptionsXform extends BaseXform {
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

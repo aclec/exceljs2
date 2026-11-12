@@ -151,4 +151,12 @@ const expectations = [
 
 describe("DataValidationsXform", () => {
     testXformHelper(expectations);
+
+    it("rejects a key that is not a cell address or a range in its normal form", () => {
+        // these keys made the writer fail with a TypeError
+        for (const key of ["$A$1:B2", "B2:A1", "a1", "foo", "#REF!", "Sheet1!#REF!"]) {
+            const xform = new DataValidationsXform();
+            expect(() => xform.toXml({ [key]: { type: "list", formulae: ['"a"'] } }), key).to.throw(/Invalid data validation address/);
+        }
+    });
 });

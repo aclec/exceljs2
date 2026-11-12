@@ -1,49 +1,61 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type XmlStream from "../../../../utils/xml-stream";
 import CompositeXform from "../../composite-xform";
 
 import CfRuleExtXform from "./cf-rule-ext-xform";
-import ConditionalFormattingExtXform from "./conditional-formatting-ext-xform";
+import ConditionalFormattingExtXform, { type ConditionalFormattingExtModel } from "./conditional-formatting-ext-xform";
 
-class ConditionalFormattingsExtXform extends CompositeXform {
+/**
+ * `<x14:conditionalFormattings>` of the worksheet extension: the conditional formattings that have x14 rules. Nothing is
+ * rendered when none has.
+ */
+class ConditionalFormattingsExtXform extends CompositeXform<ConditionalFormattingExtModel[]> {
+    /** The xform of one conditional formatting. */
+    readonly cfXform = new ConditionalFormattingExtXform();
+
+    declare map: { readonly "x14:conditionalFormatting": ConditionalFormattingExtXform };
+
     constructor() {
         super();
 
         this.map = {
-            "x14:conditionalFormatting": (this.cfXform = new ConditionalFormattingExtXform()),
+            "x14:conditionalFormatting": this.cfXform,
         };
     }
 
-    get tag() {
+    get tag(): string {
         return "x14:conditionalFormattings";
     }
 
-    hasContent(model) {
+    /** @returns whether a rule of the conditional formattings is written in the extension */
+    hasContent(model: readonly ConditionalFormattingExtModel[]): boolean {
         // not cached on the model: it is the worksheet's own list, which may change between writes
         return model.some((cf) => cf.rules.some(CfRuleExtXform.isExt));
     }
 
-    prepare(model, options) {
-        model.forEach((cf) => {
-            this.cfXform.prepare(cf, options);
-        });
+    /** Gives the x14 rules their `x14Id` (mutates the rules). */
+    override prepare(model: readonly ConditionalFormattingExtModel[]): void {
+        for (const cf of model) {
+            this.cfXform.prepare(cf);
+        }
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: readonly ConditionalFormattingExtModel[]): void {
         if (this.hasContent(model)) {
             xmlStream.openNode(this.tag);
-            model.forEach((cf) => this.cfXform.render(xmlStream, cf));
+            for (const cf of model) {
+                this.cfXform.render(xmlStream, cf);
+            }
             xmlStream.closeNode();
         }
     }
 
-    createNewModel() {
+    override createNewModel(): ConditionalFormattingExtModel[] {
         return [];
     }
 
-    onParserClose(name, parser) {
-        // model is array of conditional formatting objects
-        this.model.push(parser.model);
+    override onParserClose(): void {
+        // model is array of conditional formatting objects; the element was opened before its children (createNewModel)
+        this.model!.push(this.cfXform.model!);
     }
 }
 

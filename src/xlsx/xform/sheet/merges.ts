@@ -1,57 +1,50 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
-
+import type { MergeCellModel } from "../../../types";
 import Range from "../../../doc/range";
-import colCache from "../../../utils/col-cache";
-import Enums from "../../../doc/enums";
 
+// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
+const RangeOf = Range as unknown as new (range: string) => Range;
+
+/**
+ * The merged ranges of a worksheet being written, collected from its merged cells (worksheet-xform prepare passes it as
+ * `options.merges` to the cell xforms): each merged cell expands the range of its master.
+ */
 class Merges {
-    constructor() {
-        // optional mergeCells is array of ranges (like the xml)
-        this.merges = {};
-    }
+    /** The range of each merge, by the address of its master (top left) cell, in the order the masters were added. */
+    readonly merges = new Map<string, Range>();
 
-    add(merge) {
+    /**
+     * Adds a merged cell: creates the range of its master, or expands it to the cell.
+     *
+     * @param merge - a merged cell (`master` is the address of the master cell)
+     */
+    add(merge: Pick<MergeCellModel, "address" | "master">): void {
         // merge is {address, master}
-        if (this.merges[merge.master]) {
-            this.merges[merge.master].expandToAddress(merge.address);
+        const master = String(merge.master);
+        const range = this.merges.get(master);
+        if (range) {
+            range.expandToAddress(merge.address);
         } else {
-            const range = `${merge.master}:${merge.address}`;
-            this.merges[merge.master] = new Range(range);
+            this.merges.set(master, new RangeOf(`${master}:${merge.address}`));
         }
     }
 
-    get mergeCells() {
-        return _.map(this.merges, (merge) => merge.range);
+    /** The merged ranges (`A1:B2`), as the `<mergeCells>` of the worksheet. */
+    get mergeCells(): string[] {
+        return Array.from(this.merges.values(), (merge) => merge.range);
     }
 
-    reconcile(mergeCells, rows) {
-        // reconcile merge list with merge cells
-        _.each(mergeCells, (merge) => {
-            const dimensions = colCache.decode(merge);
-            for (let i = dimensions.top; i <= dimensions.bottom; i++) {
-                const row = rows[i - 1];
-                for (let j = dimensions.left; j <= dimensions.right; j++) {
-                    const cell = row.cells[j - 1];
-                    if (!cell) {
-                        // nulls are not included in document - so if master cell has no value - add a null one here
-                        row.cells[j] = {
-                            type: Enums.ValueType.Null,
-                            address: colCache.encodeAddress(i, j),
-                        };
-                    } else if (cell.type === Enums.ValueType.Merge) {
-                        cell.master = dimensions.tl;
-                    }
-                }
+    /**
+     * @param address - a cell address (`B2`)
+     * @returns the address of the master cell of the merged range holding the cell, or `undefined` when it is not merged
+     */
+    getMasterAddress(address: string): string | undefined {
+        // if address has been merged, return its master's address
+        for (const range of this.merges.values()) {
+            if (range.contains(address)) {
+                return range.tl;
             }
-        });
-    }
-
-    getMasterAddress(address) {
-        // if address has been merged, return its master's address. Assumes reconcile has been called
-        const range = this.hash[address];
-        return range && range.tl;
+        }
+        return undefined;
     }
 }
 

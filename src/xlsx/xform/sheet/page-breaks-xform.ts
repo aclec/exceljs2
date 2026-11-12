@@ -1,17 +1,24 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { RowBreak } from "../../../../index";
 import BaseXform from "../base-xform";
 
-class PageBreaksXform extends BaseXform {
-    get tag() {
+/**
+ * A page break, `<brk id="5" max="16383" man="1"/>` (ECMA-376 CT_Break), rendered from index.d.ts `RowBreak` (its
+ * properties are written as the attributes). Parsing keeps the `ref` attribute, which CT_Break does not have (so
+ * `undefined`): the breaks are not read back.
+ */
+class PageBreaksXform extends BaseXform<Partial<RowBreak> | string> {
+    get tag(): string {
         return "brk";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: Partial<RowBreak>): void {
         xmlStream.leafNode("brk", model);
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<brk>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "brk") {
             this.model = node.attributes.ref;
             return true;
@@ -19,9 +26,9 @@ class PageBreaksXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

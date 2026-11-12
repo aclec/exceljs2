@@ -1,29 +1,43 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../../utils/parse-sax";
+import type XmlStream from "../../../../utils/xml-stream";
+import type { CellPrepareOptions, ConditionalFormattingModel, WorksheetReconcileOptions } from "../../../../types";
 import BaseXform from "../../base-xform";
 
 import ConditionalFormattingXform from "./conditional-formatting-xform";
 
-class ConditionalFormattingsXform extends BaseXform {
-    constructor() {
-        super();
+/**
+ * The `<conditionalFormatting>` elements of a worksheet (they have no list element): the model is their array. The
+ * worksheet xform delegates each `<conditionalFormatting>` to this xform, which appends it to the model; {@link reset}
+ * starts a new list.
+ */
+class ConditionalFormattingsXform extends BaseXform<ConditionalFormattingModel[]> {
+    /** The xform of one `<conditionalFormatting>`. */
+    readonly cfXform = new ConditionalFormattingXform();
 
-        this.cfXform = new ConditionalFormattingXform();
-    }
-
-    get tag() {
+    get tag(): string {
         return "conditionalFormatting";
     }
 
-    reset() {
+    /** Starts a new list (the model is `[]`, never `null`). */
+    override reset(): void {
         this.model = [];
     }
 
-    prepare(model, options) {
+    /**
+     * Gives each rule without a priority one (after the highest one given), and registers the styles of the rules as
+     * dxfs (`dxfId`). Mutates the rules.
+     */
+    override prepare(model: readonly ConditionalFormattingModel[], options: Pick<CellPrepareOptions, "styles">): void {
         // ensure each rule has a priority value, after the highest one given
-        let nextPriority = model.reduce((p, cf) => Math.max(p, ...cf.rules.map((rule) => rule.priority || 0)), 0) + 1;
-        model.forEach((cf) => {
-            cf.rules.forEach((rule) => {
+        let nextPriority = 0;
+        for (const cf of model) {
+            for (const rule of cf.rules) {
+                nextPriority = Math.max(nextPriority, rule.priority || 0);
+            }
+        }
+        nextPriority++;
+        for (const cf of model) {
+            for (const rule of cf.rules) {
                 if (!rule.priority) {
                     rule.priority = nextPriority++;
                 }
@@ -31,17 +45,18 @@ class ConditionalFormattingsXform extends BaseXform {
                 if (rule.style) {
                     rule.dxfId = options.styles.addDxfStyle(rule.style);
                 }
-            });
-        });
+            }
+        }
     }
 
-    render(xmlStream, model) {
-        model.forEach((cf) => {
+    override render(xmlStream: XmlStream, model: readonly ConditionalFormattingModel[]): void {
+        for (const cf of model) {
             this.cfXform.render(xmlStream, cf);
-        });
+        }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<conditionalFormatting>` and its descendants */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -58,16 +73,18 @@ class ConditionalFormattingsXform extends BaseXform {
         }
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /** @returns `false` at the end of a `<conditionalFormatting>` (appended to the model) */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
-                this.model.push(this.parser.model);
+                // reset() created the list; the model of the element is set by its start tag
+                this.model!.push(this.cfXform.model!);
                 this.parser = undefined;
                 return false;
             }
@@ -76,15 +93,16 @@ class ConditionalFormattingsXform extends BaseXform {
         return false;
     }
 
-    reconcile(model, options) {
-        model.forEach((cf) => {
-            cf.rules.forEach((rule) => {
+    /** Turns the `dxfId` of the rules into their `style` (none when the workbook has no styles part). */
+    override reconcile(model: readonly ConditionalFormattingModel[], options: Pick<WorksheetReconcileOptions, "styles">): void {
+        for (const cf of model) {
+            for (const rule of cf.rules) {
                 if (rule.dxfId !== undefined) {
-                    rule.style = options.styles.getDxfStyle(rule.dxfId);
+                    rule.style = options.styles?.getDxfStyle(rule.dxfId);
                     delete rule.dxfId;
                 }
-            });
-        });
+            }
+        }
     }
 }
 

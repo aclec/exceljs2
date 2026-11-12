@@ -1,49 +1,56 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { Margins } from "../../../../index";
 import BaseXform from "../base-xform";
 
-class PageMarginsXform extends BaseXform {
-    get tag() {
+/**
+ * `<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>` (inches). Rendered when a
+ * margin is set; parsing gives every margin, with Excel's defaults for the absent ones.
+ */
+class PageMarginsXform extends BaseXform<Margins> {
+    get tag(): string {
         return "pageMargins";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: Partial<Margins> | null | undefined): void {
         if (model) {
-            const attributes = {
-                left: model.left,
-                right: model.right,
-                top: model.top,
-                bottom: model.bottom,
-                header: model.header,
-                footer: model.footer,
-            };
-            if (_.some(attributes, (value) => value !== undefined)) {
-                xmlStream.leafNode(this.tag, attributes);
+            const { left, right, top, bottom, header, footer } = model;
+            if (
+                left !== undefined ||
+                right !== undefined ||
+                top !== undefined ||
+                bottom !== undefined ||
+                header !== undefined ||
+                footer !== undefined
+            ) {
+                xmlStream.leafNode(this.tag, { left, right, top, bottom, header, footer });
             }
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<pageMargins>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
-            case this.tag:
+            case this.tag: {
+                const { attributes } = node;
                 this.model = {
-                    left: parseFloat(node.attributes.left || 0.7),
-                    right: parseFloat(node.attributes.right || 0.7),
-                    top: parseFloat(node.attributes.top || 0.75),
-                    bottom: parseFloat(node.attributes.bottom || 0.75),
-                    header: parseFloat(node.attributes.header || 0.3),
-                    footer: parseFloat(node.attributes.footer || 0.3),
+                    left: parseFloat(attributes.left || "0.7"),
+                    right: parseFloat(attributes.right || "0.7"),
+                    top: parseFloat(attributes.top || "0.75"),
+                    bottom: parseFloat(attributes.bottom || "0.75"),
+                    header: parseFloat(attributes.header || "0.3"),
+                    footer: parseFloat(attributes.footer || "0.3"),
                 };
                 return true;
+            }
             default:
                 return false;
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

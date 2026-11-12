@@ -1,22 +1,33 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { CellPrepareOptions, CellReconcileOptions, ColModel } from "../../../types";
 import utils from "../../../utils/utils";
 import colCache from "../../../utils/col-cache";
 import BaseXform from "../base-xform";
 
-class ColXform extends BaseXform {
-    get tag() {
+// clamp to the worksheet grid: <col max="2000000000"/> must not allocate 2e9 columns
+function clampColumn(value: string | undefined): number {
+    return Math.min(Math.max(parseInt(value || "0", 10) || 0, 0), colCache.MAX_COLS);
+}
+
+/**
+ * A `<col>` of `<cols>`: the definition (width, style, outline...) shared by the columns `min`..`max`. `customWidth` is
+ * always written. Parsing clamps `min` / `max` to 0..{@link colCache.MAX_COLS}.
+ */
+class ColXform extends BaseXform<ColModel> {
+    get tag(): string {
         return "col";
     }
 
-    prepare(model, options) {
+    /** Registers the style of the columns (`styleId`, when not the default). */
+    override prepare(model: ColModel, options: Pick<CellPrepareOptions, "styles">): void {
         const styleId = options.styles.addStyleModel(model.style || {});
         if (styleId) {
             model.styleId = styleId;
         }
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: ColModel): void {
         xmlStream.openNode("col");
         xmlStream.addAttribute("min", model.min);
         xmlStream.addAttribute("max", model.max);
@@ -42,28 +53,28 @@ class ColXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<col>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "col") {
-            // clamp to the worksheet grid: <col max="2000000000"/> must not allocate 2e9 columns
-            const clamp = (value) => Math.min(Math.max(parseInt(value || "0", 10) || 0, 0), colCache.MAX_COLS);
-            const model = (this.model = {
-                min: clamp(node.attributes.min),
-                max: clamp(node.attributes.max),
-                width: node.attributes.width === undefined ? undefined : parseFloat(node.attributes.width || "0"),
+            const { attributes } = node;
+            const model: ColModel = (this.model = {
+                min: clampColumn(attributes.min),
+                max: clampColumn(attributes.max),
+                width: attributes.width === undefined ? undefined : parseFloat(attributes.width || "0"),
             });
-            if (node.attributes.style) {
-                model.styleId = parseInt(node.attributes.style, 10);
+            if (attributes.style) {
+                model.styleId = parseInt(attributes.style, 10);
             }
-            if (utils.parseBoolean(node.attributes.hidden)) {
+            if (utils.parseBoolean(attributes.hidden)) {
                 model.hidden = true;
             }
-            if (utils.parseBoolean(node.attributes.bestFit)) {
+            if (utils.parseBoolean(attributes.bestFit)) {
                 model.bestFit = true;
             }
-            if (node.attributes.outlineLevel) {
-                model.outlineLevel = parseInt(node.attributes.outlineLevel, 10);
+            if (attributes.outlineLevel) {
+                model.outlineLevel = parseInt(attributes.outlineLevel, 10);
             }
-            if (utils.parseBoolean(node.attributes.collapsed)) {
+            if (utils.parseBoolean(attributes.collapsed)) {
                 model.collapsed = true;
             }
             return true;
@@ -71,15 +82,19 @@ class ColXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 
-    reconcile(model, options) {
+    /**
+     * Sets the style of the columns from `styleId` (`null` for an unknown id; nothing when the workbook has no styles
+     * part).
+     */
+    override reconcile(model: ColModel, options: Pick<CellReconcileOptions, "styles">): void {
         // reconcile column styles
-        if (model.styleId) {
+        if (model.styleId && options.styles) {
             model.style = options.styles.getStyleModel(model.styleId);
         }
     }

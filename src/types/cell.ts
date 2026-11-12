@@ -169,7 +169,8 @@ export interface ParsedCellModel {
     formula?: string;
     sharedFormula?: string;
     shareType?: string;
-    si?: string;
+    /** parse: the `si` attribute (a string); prepare (a write of a loaded cell): a number. */
+    si?: string | number;
     ref?: string;
     result?: FormulaResult;
     text?: HyperlinkCellModel["text"];
@@ -212,7 +213,8 @@ export interface ColModel {
     max: number;
     /** Column.toModel: the width or 9; parse: undefined when absent (the key is present). */
     width?: number;
-    style?: StyleModel;
+    /** reconcile: `null` for an unknown `styleId`. */
+    style?: StyleModel | null;
     /** Column.toModel only, not rendered. */
     isCustomWidth?: boolean;
     hidden?: boolean;

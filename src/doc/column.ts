@@ -22,7 +22,8 @@ export interface ColumnDefn {
     key?: string | undefined;
     /** The width in characters (default {@link DEFAULT_COLUMN_WIDTH}). */
     width?: number | undefined;
-    style?: StyleModel | undefined;
+    /** `null` (a parsed `<col>` without style) is the same as no style. */
+    style?: StyleModel | null | undefined;
     hidden?: boolean | undefined;
     outlineLevel?: number | undefined;
 }
@@ -65,7 +66,7 @@ export interface ColumnLook {
     readonly width?: number | undefined;
     readonly hidden?: boolean | undefined;
     readonly outlineLevel?: number | undefined;
-    readonly style?: StyleModel | undefined;
+    readonly style?: StyleModel | null | undefined;
 }
 
 /** A run of columns `min`..`max` (1-based) that `column` stands for (see {@link Column.segmentsToModel}). */

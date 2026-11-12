@@ -1,19 +1,45 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type {
+    CfvoModel,
+    ColModel,
+    ConditionalFormattingModel,
+    CellPrepareOptions,
+    CellReconcileOptions,
+    ConditionalFormattingRuleModel,
+    DrawingAnchorModel,
+    DrawingModel,
+    MediaModel,
+    NoteModel,
+    PageSetupModel,
+    ParsedCellModel,
+    ParsedWorksheetModel,
+    RelationshipModel,
+    RowModel,
+    SheetHyperlinkModel,
+    SheetPartRefModel,
+    SheetViewModel,
+    TableModel,
+    WorkbookPrepareOptions,
+    WorkbookReconcileOptions,
+    WorksheetLoadBudget,
+    WorksheetModel,
+    WorksheetPrepareOptions,
+    WorksheetPropertiesModel,
+    WorksheetReconcileOptions,
+} from "../../../types";
 
 import colCache from "../../../utils/col-cache";
 import Range from "../../../doc/range";
-import Enums from "../../../doc/enums";
+import { ValueType } from "../../../doc/enums";
 import { DEFAULT_MAX_MERGED_CELLS, checkMergedCells } from "../../../utils/merge-limits";
 import XmlStream from "../../../utils/xml-stream";
-import pacerModule from "../../../utils/pacer";
+import { runSteps } from "../../../utils/pacer";
 
 import RelType from "../../rel-type";
 
 import Merges from "./merges";
 
-import BaseXform from "../base-xform";
+import BaseXform, { ownEntry } from "../base-xform";
 import ListXform from "../list-xform";
 import RowXform from "./row-xform";
 import ColXform from "./col-xform";
@@ -21,13 +47,13 @@ import DimensionXform from "./dimension-xform";
 import HyperlinkXform from "./hyperlink-xform";
 import MergeCellXform from "./merge-cell-xform";
 import DataValidationsXform from "./data-validations-xform";
-import SheetPropertiesXform from "./sheet-properties-xform";
-import SheetFormatPropertiesXform from "./sheet-format-properties-xform";
+import SheetPropertiesXform, { type SheetPropertiesModel } from "./sheet-properties-xform";
+import SheetFormatPropertiesXform, { type SheetFormatPropertiesModel } from "./sheet-format-properties-xform";
 import SheetViewXform from "./sheet-view-xform";
 import SheetProtectionXform from "./sheet-protection-xform";
 import PageMarginsXform from "./page-margins-xform";
 import PageSetupXform from "./page-setup-xform";
-import PrintOptionsXform from "./print-options-xform";
+import PrintOptionsXform, { type PrintOptionsModel } from "./print-options-xform";
 import AutoFilterXform from "./auto-filter-xform";
 import PictureXform from "./picture-xform";
 import DrawingXform from "./drawing-xform";
@@ -37,39 +63,52 @@ import HeaderFooterXform from "./header-footer-xform";
 import ConditionalFormattingsXform from "./cf/conditional-formattings-xform";
 import CfRuleXform from "./cf/cf-rule-xform";
 import ExtListXform from "./ext-lst-xform";
-const { runSteps } = pacerModule;
+import type { ConditionalFormattingExtModel } from "./cf-ext/conditional-formatting-ext-xform";
 
+/** The steps of prepare / render / reconcile: one per row (the caller may pause between them). */
+type Steps = Generator<void, void, undefined>;
+
+// doc/range.ts is not typed yet: its constructor reads `arguments`, so TypeScript sees no parameter
+const RangeOf = Range as unknown as new (range: string) => Range;
+
+/** `<legacyDrawing r:id="…"/>`: the VML drawing of the notes of a worksheet. */
 class LegacyDrawingXform extends DrawingXform {
-    get tag() {
+    override get tag(): string {
         return "legacyDrawing";
     }
 }
 
-function getOwn(object, key) {
-    return object && Object.prototype.hasOwnProperty.call(object, key) ? object[key] : undefined;
+/**
+ * The own entry of an object keyed by data of the file (a part name, a media name): never an inherited member.
+ *
+ * @param key - converted to a string, as for an object key (a missing key is `"undefined"`)
+ */
+function getOwn<T>(object: Readonly<Record<string, T>> | null | undefined, key: string | undefined): T | undefined {
+    const name = String(key);
+    return object && Object.hasOwn(object, name) ? object[name] : undefined;
 }
 
 // Parts are keyed by their zip entry name. A worksheet relationship target is relative to
 // xl/worksheets/ or absolute from the package root (openpyxl writes /xl/comments/comment1.xml).
-function getPart(parts, rel) {
+function getPart<T>(parts: Readonly<Record<string, T>> | undefined, rel: RelationshipModel | undefined): T | undefined {
     if (!rel || !rel.Target || rel.TargetMode === "External") {
         return undefined;
     }
     const segments = rel.Target.startsWith("/") ? [] : ["xl", "worksheets"];
-    rel.Target.split("/").forEach((segment) => {
+    for (const segment of rel.Target.split("/")) {
         if (segment === "..") {
             segments.pop();
         } else if (segment && segment !== ".") {
             segments.push(segment);
         }
-    });
+    }
     return getOwn(parts, segments.join("/"));
 }
 
 // A <hyperlink> has a relationship (external target), a location (place in the workbook, or
 // anchor in the external target), or both. exceljs writes internal links with both, the
 // target being the location itself ("Sheet2!A1" or "#'Sheet2'!A1"): don't append it twice.
-function getHyperlinkTarget(relTarget, location) {
+function getHyperlinkTarget(relTarget: string | undefined, location: string | undefined): string | undefined {
     if (!location) {
         return relTarget;
     }
@@ -85,72 +124,90 @@ function getHyperlinkTarget(relTarget, location) {
 
 // The r attribute of <row> and <c> is optional (ECMA-376 CT_Row, CT_Cell): a row without it
 // follows the previous row, a cell without it follows the previous cell of its row.
-function inferMissingReferences(row, previousRowNumber) {
+function inferMissingReferences(row: RowModel<ParsedCellModel>, previousRowNumber: number): void {
     if (!(row.number > 0)) {
         const addressed = row.cells.find((cell) => cell.address);
-        row.number = addressed ? colCache.decodeAddress(addressed.address).row : previousRowNumber + 1;
+        row.number = addressed && addressed.address ? colCache.decodeAddress(addressed.address).row : previousRowNumber + 1;
     }
-    row.cells.forEach((cell, index) => {
+    let previousAddress: string | undefined;
+    for (const cell of row.cells) {
         if (!cell.address) {
-            const previousCol = index ? colCache.decodeAddress(row.cells[index - 1].address).col : 0;
+            const previousCol = previousAddress ? colCache.decodeAddress(previousAddress).col : 0;
             cell.address = colCache.encodeAddress(row.number, previousCol + 1);
         }
-    });
+        previousAddress = cell.address;
+    }
 }
 
 const cellRefRegex = /^([A-Z]{1,3})([1-9]\d{0,6})$/;
 
 // Excel writes no <c> element for an empty cell without a style, even when it has a note: create the cells (and rows)
 // that notes refer to, so that the notes are not lost. References outside the grid are ignored.
-function addNoteCells(rows, comments) {
-    const addresses = new Set();
-    rows.forEach((row) => row.cells.forEach((cell) => addresses.add(cell.address)));
-    const rowsByNumber = new Map(rows.map((row) => [row.number, row]));
-    (comments || []).forEach(({ ref }) => {
-        const match = typeof ref === "string" && !addresses.has(ref) && cellRefRegex.exec(ref);
-        if (!match || (match[1].length === 3 && match[1] > "XFD") || Number(match[2]) > colCache.MAX_ROWS) {
-            return;
+function addNoteCells(rows: RowModel<ParsedCellModel>[], comments: readonly NoteModel[] | undefined): void {
+    const addresses = new Set<string | undefined>();
+    for (const row of rows) {
+        for (const cell of row.cells) {
+            addresses.add(cell.address);
         }
-        const number = Number(match[2]);
+    }
+    const rowsByNumber = new Map(rows.map((row) => [row.number, row]));
+    for (const { ref } of comments || []) {
+        const match = typeof ref === "string" && !addresses.has(ref) && cellRefRegex.exec(ref);
+        if (!match) {
+            continue;
+        }
+        const [, letters = "", digits = ""] = match;
+        if ((letters.length === 3 && letters > "XFD") || Number(digits) > colCache.MAX_ROWS) {
+            continue;
+        }
+        const number = Number(digits);
         let row = rowsByNumber.get(number);
         if (!row) {
             row = { number, cells: [] };
             rows.push(row);
             rowsByNumber.set(number, row);
         }
-        row.cells.push({ address: ref, type: Enums.ValueType.Null });
+        row.cells.push({ address: ref, type: ValueType.Null });
         addresses.add(ref);
-    });
+    }
 }
 
 // Every cell of a merge is materialised when a worksheet is loaded: the merges of the worksheet are checked against the caps
 // of utils/merge-limits before any cell is created. The load budget is shared by all the worksheets of the workbook.
-function spendMergedCells(loadBudget, mergeCells) {
+function spendMergedCells(loadBudget: WorksheetLoadBudget, mergeCells: readonly string[] | null | undefined): void {
     let sheetCount = 0;
-    (mergeCells || []).forEach((ref) => {
-        const { count } = new Range(ref);
+    for (const ref of mergeCells || []) {
+        const { count } = new RangeOf(ref);
         sheetCount += count;
         loadBudget.mergedCells += count;
         checkMergedCells(`Cannot merge ${ref}`, sheetCount, loadBudget.mergedCells, loadBudget.maxMergedCells);
-    });
+    }
 }
 
-const mergeRule = (rule, extRule) => {
-    Object.keys(extRule).forEach((key) => {
-        const value = rule[key];
-        const extValue = extRule[key];
+const mergeRule = (rule: ConditionalFormattingRuleModel, extRule: ConditionalFormattingRuleModel): void => {
+    // the rules as records (rule models have no index signature): the keys of a parsed rule are the fixed keys of the
+    // cf / cf-ext xforms (never names read from the file)
+    const target = rule as unknown as Record<string, unknown>;
+    const source = extRule as unknown as Record<string, unknown>;
+    for (const key of Object.keys(source)) {
+        const value = target[key];
+        const extValue = source[key];
         if (value === undefined && extValue !== undefined) {
-            rule[key] = extValue;
+            target[key] = extValue;
         }
-    });
+    }
     // Excel 2010+ reads the thresholds of a data bar from its extension, where they may be of the
     // types autoMin / autoMax, unknown to the main <cfvo> (which has min / max instead)
-    if (rule.type === "dataBar" && extRule.cfvo && extRule.cfvo.length) {
-        rule.cfvo = extRule.cfvo;
+    const extCfvo = (extRule as { cfvo?: CfvoModel[] }).cfvo;
+    if (rule.type === "dataBar" && extCfvo && extCfvo.length) {
+        rule.cfvo = extCfvo;
     }
 };
 
-const mergeConditionalFormattings = (model, extModel) => {
+const mergeConditionalFormattings = (
+    model: ConditionalFormattingModel[],
+    extModel: readonly ConditionalFormattingExtModel[] | null | undefined
+): ConditionalFormattingModel[] => {
     // conditional formattings are rendered in worksheet.conditionalFormatting and also in
     // worksheet.extLst.ext.x14:conditionalFormattings
     // some (e.g. dataBar) are even spread across both!
@@ -159,28 +216,27 @@ const mergeConditionalFormattings = (model, extModel) => {
     }
     const cfs = model || [];
 
-    // index model rules by x14Id. Both keys come from the file: without a prototype, an id such
-    // as "__proto__" cannot reach Object.prototype
-    const cfMap = Object.create(null);
-    const ruleMap = Object.create(null);
-    cfs.forEach((cf) => {
-        cfMap[cf.ref] = cf;
-        cf.rules.forEach((rule) => {
+    // index model rules by x14Id. Both keys come from the file: a Map, so that an id such as "__proto__" is an ordinary key
+    const cfMap = new Map<string | undefined, ConditionalFormattingModel>();
+    const ruleMap = new Map<string, ConditionalFormattingRuleModel>();
+    for (const cf of cfs) {
+        cfMap.set(cf.ref, cf);
+        for (const rule of cf.rules) {
             const { x14Id } = rule;
             if (x14Id) {
-                ruleMap[x14Id] = rule;
+                ruleMap.set(x14Id, rule);
             }
-        });
-    });
+        }
+    }
 
-    extModel.forEach((extCf) => {
-        const extOnlyRules = [];
-        extCf.rules.forEach((extRule) => {
-            const rule = extRule.x14Id && ruleMap[extRule.x14Id];
+    for (const extCf of extModel) {
+        const extOnlyRules: ConditionalFormattingRuleModel[] = [];
+        for (const extRule of extCf.rules) {
+            const rule = extRule.x14Id && ruleMap.get(extRule.x14Id);
             if (rule) {
                 // merge with matching rule
                 mergeRule(rule, extRule);
-                return;
+                continue;
             }
             // a formula rule found only in the extension (e.g. one referencing another sheet) is
             // written back there
@@ -188,26 +244,114 @@ const mergeConditionalFormattings = (model, extModel) => {
                 extRule.x14 = true;
             }
             extOnlyRules.push(extRule);
-        });
-        if (!extOnlyRules.length) {
-            return;
         }
-        if (cfMap[extCf.ref]) {
+        if (!extOnlyRules.length) {
+            continue;
+        }
+        const existing = cfMap.get(extCf.ref);
+        if (existing) {
             // reuse existing cf ref
-            cfMap[extCf.ref].rules.push(...extOnlyRules);
+            existing.rules.push(...extOnlyRules);
         } else {
-            // create new cf
-            const cf = { ref: extCf.ref, rules: extOnlyRules };
-            cfMap[extCf.ref] = cf;
+            // create new cf (an <x14:conditionalFormatting> without <xm:sqref> (malformed) has an undefined ref)
+            const cf: ConditionalFormattingModel = { ref: extCf.ref as string, rules: extOnlyRules };
+            cfMap.set(extCf.ref, cf);
             cfs.push(cf);
         }
-    });
+    }
 
     return cfs;
 };
 
-class WorkSheetXform extends BaseXform {
-    constructor(options) {
+/** An index of an array of media (`imageId`): a number, or its string (array index semantics). */
+function mediumAt(media: readonly MediaModel[], imageId: number | string): MediaModel {
+    const medium =
+        typeof imageId === "number" ? media[imageId] : (media as unknown as Readonly<Record<string, MediaModel | undefined>>)[imageId];
+    if (!medium) {
+        throw new Error(`Unknown image ${imageId}`);
+    }
+    return medium;
+}
+
+/** The options of a {@link WorkSheetXform}. */
+export interface WorksheetXformOptions {
+    /** Parsing fails when the worksheet has more rows than this. Default: no limit. */
+    maxRows?: number;
+    /** Parsing fails when a row has more cells than this. Default: no limit. */
+    maxCols?: number;
+    /** The elements of the worksheet not to parse (e.g. `["dataValidations"]`). */
+    ignoreNodes?: readonly string[];
+    /** The budgets of the workbook being loaded (see WorkSheetXform.createLoadBudget). */
+    loadBudget?: WorksheetLoadBudget;
+}
+
+/**
+ * A worksheet part, `xl/worksheets/sheetN.xml` (ECMA-376 CT_Worksheet): its elements are rendered in the order of the
+ * schema (Excel reports a file as corrupt otherwise).
+ *
+ * Write: {@link prepare} sets up the per-sheet options of the cells (merges, hyperlinks, notes, shared formulae) and the
+ * relationships of the worksheet (hyperlinks, notes, images, tables, pivot tables), then {@link render} writes it. Read:
+ * the parse gives a ParsedWorksheetModel (the merged cells are checked against the caps of the load budget), which
+ * {@link reconcile} resolves with the other parts (notes, hyperlinks, images, tables). The three phases also run row by
+ * row (`prepareSteps`, `renderSteps`, `reconcileSteps`), so that the caller may pause between rows (utils/pacer).
+ */
+class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
+    /** The parsed worksheet (the xform renders a WorksheetModel, and parses a ParsedWorksheetModel). */
+    declare model: ParsedWorksheetModel | null | undefined;
+
+    /** The namespaces of `<worksheet>`. */
+    static readonly WORKSHEET_ATTRIBUTES = {
+        xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+        "mc:Ignorable": "x14ac",
+        "xmlns:x14ac": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac",
+    } as const;
+
+    /**
+     * The budgets shared by all the worksheets of one load.
+     *
+     * @param maxMergedCells - the cap of merged cells of the workbook
+     */
+    static createLoadBudget(this: void, maxMergedCells: number = DEFAULT_MAX_MERGED_CELLS): WorksheetLoadBudget {
+        return {
+            mergedCells: 0,
+            maxMergedCells,
+            dataValidationCells: DataValidationsXform.MAX_EXPANDED_CELLS,
+        };
+    }
+
+    /** See {@link WorksheetXformOptions.ignoreNodes}. */
+    readonly ignoreNodes: readonly string[];
+    /** See {@link WorksheetXformOptions.loadBudget}. */
+    readonly loadBudget: WorksheetLoadBudget | undefined;
+
+    declare map: {
+        readonly sheetPr: SheetPropertiesXform;
+        readonly dimension: DimensionXform;
+        readonly sheetViews: ListXform<SheetViewModel>;
+        readonly sheetFormatPr: SheetFormatPropertiesXform;
+        readonly cols: ListXform<ColModel>;
+        readonly sheetData: ListXform<RowModel<ParsedCellModel> | RowModel>;
+        readonly autoFilter: AutoFilterXform;
+        readonly mergeCells: ListXform<string>;
+        readonly rowBreaks: RowBreaksXform;
+        readonly hyperlinks: ListXform<SheetHyperlinkModel>;
+        readonly pageMargins: PageMarginsXform;
+        readonly dataValidations: DataValidationsXform;
+        readonly pageSetup: PageSetupXform;
+        readonly headerFooter: HeaderFooterXform;
+        readonly printOptions: PrintOptionsXform;
+        readonly picture: PictureXform;
+        readonly drawing: DrawingXform;
+        readonly legacyDrawing: LegacyDrawingXform;
+        readonly sheetProtection: SheetProtectionXform;
+        readonly tableParts: ListXform<SheetPartRefModel>;
+        readonly conditionalFormatting: ConditionalFormattingsXform;
+        readonly extLst: ExtListXform;
+    };
+
+    constructor(options?: WorksheetXformOptions) {
         super();
 
         const { maxRows, maxCols, ignoreNodes, loadBudget } = options || {};
@@ -255,47 +399,63 @@ class WorkSheetXform extends BaseXform {
         };
     }
 
-    prepare(model, options) {
+    /**
+     * Prepares the worksheet (mutates the model and `options`), see {@link prepareSteps}.
+     *
+     * @throws Error for a shared formula clone without its master, or an image of an unknown medium
+     */
+    override prepare(model: WorksheetModel, options: WorkbookPrepareOptions & Partial<CellPrepareOptions>): void {
         runSteps(this.prepareSteps(model, options));
     }
 
     // prepare(), render() and reconcile() row by row: the caller may pause between rows (utils/pacer)
-    *prepareSteps(model, options) {
-        options.merges = new Merges();
-        model.hyperlinks = options.hyperlinks = [];
-        model.comments = options.comments = [];
 
-        options.formulae = {};
-        options.siFormulae = 0;
+    /**
+     * {@link prepare}, one row per step: sets the per-sheet options of the cells, prepares the columns, rows and
+     * conditional formattings, and sets `mergeCells`, `hyperlinks`, `comments`, `rels`, `drawing`, `background`, `image`
+     * on the model (and the dxf ids of the table columns, the `rId` of the tables).
+     */
+    *prepareSteps(model: WorksheetModel, workbookOptions: WorkbookPrepareOptions & Partial<CellPrepareOptions>): Steps {
+        const merges = new Merges();
+        const hyperlinks: SheetHyperlinkModel[] = [];
+        model.hyperlinks = hyperlinks;
+        const comments: CellPrepareOptions["comments"] = [];
+        // the per-sheet options of the cells, set on the workbook-level object (mutated)
+        const options: WorksheetPrepareOptions = Object.assign(workbookOptions, {
+            merges,
+            hyperlinks,
+            comments,
+            // shared formula masters by cell address (no prototype: a sharedFormula never finds an inherited member)
+            formulae: Object.create(null) as CellPrepareOptions["formulae"],
+            siFormulae: 0,
+        });
         this.map.cols.prepare(model.cols, options);
         yield* this.map.sheetData.prepareSteps(model.rows, options);
         this.map.conditionalFormatting.prepare(model.conditionalFormattings, options);
 
-        model.mergeCells = options.merges.mergeCells;
+        model.mergeCells = merges.mergeCells;
 
         // prepare relationships
-        const rels = (model.rels = []);
+        const rels: RelationshipModel[] = (model.rels = []);
 
-        function nextRid(r) {
-            return `rId${r.length + 1}`;
-        }
+        const nextRid = (r: readonly RelationshipModel[]): string => `rId${r.length + 1}`;
 
-        model.hyperlinks.forEach((hyperlink) => {
+        for (const hyperlink of hyperlinks) {
             if (HyperlinkXform.isInternalLink(hyperlink.target)) {
-                return;
+                continue;
             }
             const rId = nextRid(rels);
             hyperlink.rId = rId;
             rels.push({
                 Id: rId,
                 Type: RelType.Hyperlink,
-                Target: hyperlink.target,
+                Target: String(hyperlink.target),
                 TargetMode: "External",
             });
-        });
+        }
 
         // prepare comment relationships
-        if (model.comments.length > 0) {
+        if (comments.length > 0) {
             const comment = {
                 Id: nextRid(rels),
                 Type: RelType.Comments,
@@ -309,72 +469,73 @@ class WorkSheetXform extends BaseXform {
             };
             rels.push(vmlDrawing);
 
-            model.comments.forEach((item) => {
-                item.refAddress = colCache.decodeAddress(item.ref);
-            });
-
             options.commentRefs.push({
                 commentName: `comments${model.id}`,
                 vmlDrawing: `vmlDrawing${model.id}`,
             });
         }
+        // the notes with their decoded reference (the note objects are mutated)
+        model.comments = comments.map((item) => Object.assign(item, { refAddress: colCache.decodeAddress(item.ref) }));
 
         // one image relationship per distinct image of this sheet's drawing
-        const imageRIds = {};
-        let bookImage;
-        model.media.forEach((medium) => {
+        const imageRIds = new Map<number | string, string>();
+        for (const medium of model.media) {
             if (medium.type === "background") {
                 const rId = nextRid(rels);
-                bookImage = options.media[medium.imageId];
+                const bookImage = mediumAt(options.media, medium.imageId);
                 rels.push({
                     Id: rId,
                     Type: RelType.Image,
-                    Target: `../media/${bookImage.name}.${bookImage.extension}`,
+                    Target: `../media/${String(bookImage.name)}.${bookImage.extension}`,
                 });
                 model.background = {
                     rId,
                 };
-                model.image = options.media[medium.imageId];
+                model.image = bookImage;
             } else if (medium.type === "image") {
                 let { drawing } = model;
-                bookImage = options.media[medium.imageId];
+                const bookImage = mediumAt(options.media, medium.imageId);
                 if (!drawing) {
+                    const name = `drawing${++options.drawingsCount}`;
+                    const rId = nextRid(rels);
                     drawing = model.drawing = {
-                        rId: nextRid(rels),
-                        name: `drawing${++options.drawingsCount}`,
+                        rId,
+                        name,
                         anchors: [],
                         rels: [],
                     };
                     options.drawings.push(drawing);
                     rels.push({
-                        Id: drawing.rId,
+                        Id: rId,
                         Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
-                        Target: `../drawings/${drawing.name}.xml`,
+                        Target: `../drawings/${name}.xml`,
                     });
                 }
-                let rIdImage = imageRIds[medium.imageId];
+                const drawingRels = (drawing.rels = drawing.rels || []);
+                let rIdImage = imageRIds.get(medium.imageId);
                 if (!rIdImage) {
-                    rIdImage = imageRIds[medium.imageId] = nextRid(drawing.rels);
-                    drawing.rels.push({
+                    rIdImage = nextRid(drawingRels);
+                    imageRIds.set(medium.imageId, rIdImage);
+                    drawingRels.push({
                         Id: rIdImage,
                         Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
-                        Target: `../media/${bookImage.name}.${bookImage.extension}`,
+                        Target: `../media/${String(bookImage.name)}.${bookImage.extension}`,
                     });
                 }
 
-                const anchor = {
+                const anchor: DrawingAnchorModel & { picture: NonNullable<DrawingAnchorModel["picture"]> } = {
                     picture: {
                         rId: rIdImage,
                     },
                     range: medium.range,
                 };
                 if (medium.hyperlinks && medium.hyperlinks.hyperlink) {
-                    const rIdHyperLink = nextRid(drawing.rels);
+                    const rIdHyperLink = nextRid(drawingRels);
                     anchor.picture.hyperlinks = {
                         tooltip: medium.hyperlinks.tooltip,
                         rId: rIdHyperLink,
                     };
-                    drawing.rels.push({
+                    drawingRels.push({
                         Id: rIdHyperLink,
                         Type: RelType.Hyperlink,
                         Target: medium.hyperlinks.hyperlink,
@@ -383,27 +544,27 @@ class WorkSheetXform extends BaseXform {
                 }
                 drawing.anchors.push(anchor);
             }
-        });
+        }
 
         // prepare tables
-        model.tables.forEach((table) => {
+        for (const table of model.tables) {
             // relationships
             const rId = nextRid(rels);
             table.rId = rId;
             rels.push({
                 Id: rId,
                 Type: RelType.Table,
-                Target: `../tables/${table.target}`,
+                Target: `../tables/${String(table.target)}`,
             });
 
             // dynamic styles
-            table.columns.forEach((column) => {
+            for (const column of table.columns) {
                 const { style } = column;
                 if (style) {
                     column.dxfId = options.styles.addDxfStyle(style);
                 }
-            });
-        });
+            }
+        }
 
         // prepare pivot tables
         if ((model.pivotTables || []).length) {
@@ -415,49 +576,55 @@ class WorkSheetXform extends BaseXform {
         }
 
         // prepare ext items
-        this.map.extLst.prepare(model, options);
+        this.map.extLst.prepare(model);
     }
 
-    render(xmlStream, model) {
+    /** Writes the worksheet part (with its XML declaration), see {@link renderSteps}. */
+    override render(xmlStream: XmlStream, model: WorksheetModel): void {
         runSteps(this.renderSteps(xmlStream, model));
     }
 
-    *renderSteps(xmlStream, model) {
+    /** {@link render}, one row per step. The elements follow the CT_Worksheet sequence. */
+    *renderSteps(xmlStream: XmlStream, model: WorksheetModel): Steps {
         xmlStream.openXml(XmlStream.StdDocAttributes);
         xmlStream.openNode("worksheet", WorkSheetXform.WORKSHEET_ATTRIBUTES);
 
-        const sheetFormatPropertiesModel = model.properties
+        const { properties, pageSetup } = model;
+        const sheetFormatPropertiesModel: SheetFormatPropertiesModel | undefined = properties
             ? {
-                  defaultRowHeight: model.properties.defaultRowHeight,
-                  dyDescent: model.properties.dyDescent,
-                  outlineLevelCol: model.properties.outlineLevelCol,
-                  outlineLevelRow: model.properties.outlineLevelRow,
+                  defaultRowHeight: properties.defaultRowHeight,
+                  dyDescent: properties.dyDescent,
+                  outlineLevelCol: properties.outlineLevelCol,
+                  outlineLevelRow: properties.outlineLevelRow,
               }
             : undefined;
-        if (model.properties && model.properties.defaultColWidth) {
-            sheetFormatPropertiesModel.defaultColWidth = model.properties.defaultColWidth;
+        if (properties && properties.defaultColWidth && sheetFormatPropertiesModel) {
+            sheetFormatPropertiesModel.defaultColWidth = properties.defaultColWidth;
         }
-        const sheetPropertiesModel = {
-            outlineProperties: model.properties && model.properties.outlineProperties,
-            tabColor: model.properties && model.properties.tabColor,
+        const sheetPropertiesModel: SheetPropertiesModel = {
+            outlineProperties: properties && properties.outlineProperties,
+            tabColor: properties && properties.tabColor,
             pageSetup:
-                model.pageSetup && model.pageSetup.fitToPage
+                pageSetup && pageSetup.fitToPage
                     ? {
-                          fitToPage: model.pageSetup.fitToPage,
+                          fitToPage: pageSetup.fitToPage,
                       }
                     : undefined,
         };
-        const pageMarginsModel = model.pageSetup && model.pageSetup.margins;
-        const printOptionsModel = {
-            showRowColHeaders: model.pageSetup && model.pageSetup.showRowColHeaders,
-            showGridLines: model.pageSetup && model.pageSetup.showGridLines,
-            horizontalCentered: model.pageSetup && model.pageSetup.horizontalCentered,
-            verticalCentered: model.pageSetup && model.pageSetup.verticalCentered,
+        const pageMarginsModel = pageSetup && pageSetup.margins;
+        const printOptionsModel: Partial<PrintOptionsModel> = {
+            showRowColHeaders: pageSetup && pageSetup.showRowColHeaders,
+            showGridLines: pageSetup && pageSetup.showGridLines,
+            horizontalCentered: pageSetup && pageSetup.horizontalCentered,
+            verticalCentered: pageSetup && pageSetup.verticalCentered,
         };
         const sheetProtectionModel = model.sheetProtection;
+        // the document gives the used range as a Range (rendered as its range string)
+        const { dimensions } = model;
+        const dimensionsRef = dimensions ? (typeof dimensions === "string" ? dimensions : dimensions.range) : undefined;
 
         this.map.sheetPr.render(xmlStream, sheetPropertiesModel);
-        this.map.dimension.render(xmlStream, model.dimensions);
+        this.map.dimension.render(xmlStream, dimensionsRef);
         this.map.sheetViews.render(xmlStream, model.views);
         this.map.sheetFormatPr.render(xmlStream, sheetFormatPropertiesModel);
         this.map.cols.render(xmlStream, model.cols);
@@ -473,18 +640,18 @@ class WorkSheetXform extends BaseXform {
 
         this.map.printOptions.render(xmlStream, printOptionsModel); // Note: must be before pageMargins
         this.map.pageMargins.render(xmlStream, pageMarginsModel);
-        this.map.pageSetup.render(xmlStream, model.pageSetup);
+        this.map.pageSetup.render(xmlStream, pageSetup);
         this.map.headerFooter.render(xmlStream, model.headerFooter);
         this.map.rowBreaks.render(xmlStream, model.rowBreaks);
         // CT_Worksheet order: drawing, legacyDrawing, picture, tableParts, extLst
         this.map.drawing.render(xmlStream, model.drawing); // Note: must be after rowBreaks
         if (model.rels) {
             // add a <legacyDrawing /> node for the comments (vml drawing)
-            model.rels.forEach((rel) => {
+            for (const rel of model.rels) {
                 if (rel.Type === RelType.VmlDrawing) {
                     xmlStream.leafNode("legacyDrawing", { "r:id": rel.Id });
                 }
-            });
+            }
         }
         this.map.picture.render(xmlStream, model.background);
         this.map.tableParts.render(xmlStream, model.tables);
@@ -494,33 +661,40 @@ class WorkSheetXform extends BaseXform {
         xmlStream.closeNode();
     }
 
-    parseOpen(node) {
+    /** @returns `true`: every element of the part is accepted (the unknown and ignored ones are skipped) */
+    override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
         }
 
         if (node.name === "worksheet") {
-            _.each(this.map, (xform) => {
+            for (const xform of Object.values(this.map)) {
                 xform.reset();
-            });
+            }
             return true;
         }
 
-        if (this.map[node.name] && !this.ignoreNodes.includes(node.name)) {
-            this.parser = this.map[node.name];
-            this.parser.parseOpen(node);
+        // element names come from the file: own entries of the map only
+        const parser = ownEntry(this.map, node.name);
+        if (parser && !this.ignoreNodes.includes(node.name)) {
+            this.parser = parser;
+            parser.parseOpen(node);
         }
         return true;
     }
 
-    parseText(text) {
+    override parseText(text: string): void {
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
-    parseClose(name) {
+    /**
+     * @returns `false` at the end of `<worksheet>` (the model is then built), else `true`
+     * @throws Error when the merged cells exceed the caps of the load budget
+     */
+    override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 this.parser = undefined;
@@ -529,51 +703,55 @@ class WorkSheetXform extends BaseXform {
         }
         switch (name) {
             case "worksheet": {
-                const properties = this.map.sheetFormatPr.model || {};
-                if (this.map.sheetPr.model && this.map.sheetPr.model.tabColor) {
-                    properties.tabColor = this.map.sheetPr.model.tabColor;
+                const { map } = this;
+                const sheetPr = map.sheetPr.model;
+                const properties: WorksheetPropertiesModel = map.sheetFormatPr.model || {};
+                if (sheetPr && sheetPr.tabColor) {
+                    properties.tabColor = sheetPr.tabColor;
                 }
-                if (this.map.sheetPr.model && this.map.sheetPr.model.outlineProperties) {
-                    properties.outlineProperties = this.map.sheetPr.model.outlineProperties;
+                if (sheetPr && sheetPr.outlineProperties) {
+                    properties.outlineProperties = sheetPr.outlineProperties;
                 }
-                const sheetProperties = {
-                    fitToPage:
-                        (this.map.sheetPr.model && this.map.sheetPr.model.pageSetup && this.map.sheetPr.model.pageSetup.fitToPage) || false,
-                    margins: this.map.pageMargins.model,
+                const sheetProperties: PageSetupModel = {
+                    fitToPage: (sheetPr && sheetPr.pageSetup && sheetPr.pageSetup.fitToPage) || false,
+                    margins: map.pageMargins.model,
                 };
-                const pageSetup = Object.assign(sheetProperties, this.map.pageSetup.model, this.map.printOptions.model);
+                const pageSetup: PageSetupModel = Object.assign(sheetProperties, map.pageSetup.model, map.printOptions.model);
+                const extLst = map.extLst.model;
                 const conditionalFormattings = mergeConditionalFormattings(
-                    this.map.conditionalFormatting.model,
-                    this.map.extLst.model && this.map.extLst.model["x14:conditionalFormattings"]
+                    // reset() set it to []
+                    map.conditionalFormatting.model!,
+                    extLst && extLst["x14:conditionalFormattings"]
                 );
                 if (this.loadBudget) {
-                    spendMergedCells(this.loadBudget, this.map.mergeCells.model);
+                    spendMergedCells(this.loadBudget, map.mergeCells.model);
                 }
-                this.model = {
-                    dimensions: this.map.dimension.model,
-                    cols: this.map.cols.model,
-                    rows: this.map.sheetData.model,
-                    mergeCells: this.map.mergeCells.model,
-                    hyperlinks: this.map.hyperlinks.model,
-                    dataValidations: this.map.dataValidations.model,
+                const model: ParsedWorksheetModel = (this.model = {
+                    dimensions: map.dimension.model,
+                    cols: map.cols.model,
+                    // parsed items are RowXform parse models (the list type also covers the rendered document rows)
+                    rows: map.sheetData.model as RowModel<ParsedCellModel>[] | null | undefined,
+                    mergeCells: map.mergeCells.model,
+                    hyperlinks: map.hyperlinks.model,
+                    dataValidations: map.dataValidations.model,
                     properties,
-                    views: this.map.sheetViews.model,
+                    views: map.sheetViews.model,
                     pageSetup,
-                    headerFooter: this.map.headerFooter.model,
-                    background: this.map.picture.model,
-                    drawing: this.map.drawing.model,
-                    tables: this.map.tableParts.model,
+                    headerFooter: map.headerFooter.model,
+                    background: map.picture.model,
+                    drawing: map.drawing.model,
+                    tables: map.tableParts.model,
                     conditionalFormattings,
-                };
+                });
 
-                if (this.map.autoFilter.model) {
-                    this.model.autoFilter = this.map.autoFilter.model;
+                if (map.autoFilter.model) {
+                    model.autoFilter = map.autoFilter.model;
                 }
-                if (this.map.sheetProtection.model) {
-                    this.model.sheetProtection = this.map.sheetProtection.model;
+                if (map.sheetProtection.model) {
+                    model.sheetProtection = map.sheetProtection.model;
                 }
-                if (this.map.legacyDrawing.model) {
-                    this.model.legacyDrawing = this.map.legacyDrawing.model;
+                if (map.legacyDrawing.model) {
+                    model.legacyDrawing = map.legacyDrawing.model;
                 }
 
                 return false;
@@ -585,22 +763,33 @@ class WorkSheetXform extends BaseXform {
         }
     }
 
-    reconcile(model, options) {
+    /** Resolves the parsed worksheet with the other parts, see {@link reconcileSteps}. */
+    override reconcile(model: ParsedWorksheetModel, options: WorkbookReconcileOptions & Partial<CellReconcileOptions>): void {
         runSteps(this.reconcileSteps(model, options));
     }
 
-    *reconcileSteps(model, options) {
+    /**
+     * {@link reconcile}, one row per step: attaches the notes (comments and VML parts), the hyperlinks, the images
+     * (drawing, background) and the tables of the worksheet, compacts the rows and cells (inferring missing references,
+     * creating the cells of the notes), and reconciles the columns, rows and conditional formattings. A part claimed by
+     * another worksheet is ignored. Mutates the model (deletes `relationships`, `legacyDrawing`, `hyperlinks`, `comments`)
+     * and `options` (the per-sheet maps).
+     */
+    *reconcileSteps(model: ParsedWorksheetModel, workbookOptions: WorkbookReconcileOptions & Partial<CellReconcileOptions>): Steps {
         // options.merges = new Merges();
         // options.merges.reconcile(model.mergeCells, model.rows);
         const relationships = model.relationships || [];
-        const rels = relationships.reduce((h, rel) => {
-            h[rel.Id] = rel;
-            return h;
-        }, Object.create(null));
+        // keyed by the relationship ids of the file
+        const rels = Object.create(null) as Record<string, RelationshipModel>;
+        for (const rel of relationships) {
+            rels[rel.Id] = rel;
+        }
+        // an object key: a missing id is "undefined"
+        const relOf = (rId: string | undefined): RelationshipModel | undefined => rels[String(rId)];
         // A comments, VML, drawing or table part belongs to one worksheet. Relationships of other worksheets to the same
         // part are ignored: they would materialise it once per worksheet (a small file could then hold millions of notes).
-        const claimedParts = options.claimedParts || new Set();
-        const claim = (part) => {
+        const claimedParts = workbookOptions.claimedParts || new Set();
+        const claim = <T extends object>(part: T | null | undefined): T | undefined => {
             if (!part || claimedParts.has(part)) {
                 return undefined;
             }
@@ -608,95 +797,109 @@ class WorkSheetXform extends BaseXform {
             return part;
         };
         // a relationship may point at a part that is missing or was not recognised: ignore it
-        const findPart = (type, parts) =>
+        const findPart = <T extends object>(type: string, parts: Readonly<Record<string, T>> | undefined): T | undefined =>
             relationships
                 .filter((rel) => rel.Type === type)
                 .map((rel) => getPart(parts, rel))
                 .find((part) => part && !claimedParts.has(part));
-        const commentsPart = claim(findPart(RelType.Comments, options.comments));
+        const commentsPart = claim(findPart(RelType.Comments, workbookOptions.comments));
         if (commentsPart) {
-            model.comments = commentsPart.comments;
+            const { comments } = commentsPart;
+            model.comments = comments;
             // the notes vml is the one named by <legacyDrawing> (<legacyDrawingHF> has header/footer
             // images); without that element, fall back to the first vml drawing relationship
             const vmlRel = model.legacyDrawing
-                ? rels[model.legacyDrawing.rId]
+                ? relOf(model.legacyDrawing.rId)
                 : relationships.find((rel) => rel.Type === RelType.VmlDrawing);
-            const vmlPart = claim(getPart(options.vmlDrawings, vmlRel));
+            const vmlPart = claim(getPart(workbookOptions.vmlDrawings, vmlRel));
             if (vmlPart) {
-                model.comments.forEach((comment, index) => {
+                comments.forEach((comment, index) => {
                     comment.note = Object.assign({}, comment.note, vmlPart.comments[index]);
                 });
             }
         }
-        options.commentsMap = (model.comments || []).reduce((h, comment) => {
-            if (comment.ref) {
-                h[comment.ref] = comment;
-            }
-            return h;
-        }, Object.create(null));
         // keyed by the cell references of the file: no prototype, so that a lookup never finds an
         // inherited member and a "__proto__" reference is an ordinary key
-        options.hyperlinkMap = (model.hyperlinks || []).reduce((h, hyperlink) => {
-            const rel = hyperlink.rId && rels[hyperlink.rId];
-            const target = getHyperlinkTarget(rel && rel.Target, hyperlink.target);
-            if (target) {
-                h[hyperlink.address] = { target, tooltip: hyperlink.tooltip };
+        const commentsMap = Object.create(null) as Record<string, NoteModel>;
+        for (const comment of model.comments || []) {
+            if (comment.ref) {
+                commentsMap[comment.ref] = comment;
             }
-            return h;
-        }, Object.create(null));
-        // shared formula masters by si (from the file)
-        options.formulae = Object.create(null);
+        }
+        const hyperlinkMap = Object.create(null) as WorksheetReconcileOptions["hyperlinkMap"];
+        for (const hyperlink of model.hyperlinks || []) {
+            const rel = hyperlink.rId && relOf(hyperlink.rId);
+            const target = getHyperlinkTarget(rel ? rel.Target : undefined, hyperlink.target);
+            if (target) {
+                hyperlinkMap[String(hyperlink.address)] = { target, tooltip: hyperlink.tooltip };
+            }
+        }
+        // the per-sheet options of the cells, set on the workbook-level object (mutated)
+        const options: WorksheetReconcileOptions = Object.assign(workbookOptions, {
+            commentsMap,
+            hyperlinkMap,
+            // shared formula masters by si (from the file)
+            formulae: Object.create(null) as CellReconcileOptions["formulae"],
+        });
 
         // compact the rows and cells
-        model.rows = (model.rows && model.rows.filter(Boolean)) || [];
+        const rows = (model.rows && model.rows.filter(Boolean)) || [];
+        model.rows = rows;
         let previousRowNumber = 0;
-        model.rows.forEach((row) => {
+        for (const row of rows) {
             row.cells = (row.cells && row.cells.filter(Boolean)) || [];
             inferMissingReferences(row, previousRowNumber);
             previousRowNumber = row.number;
-        });
-        addNoteCells(model.rows, model.comments);
+        }
+        addNoteCells(rows, model.comments);
 
-        this.map.cols.reconcile(model.cols, options);
-        yield* this.map.sheetData.reconcileSteps(model.rows, options);
+        this.map.cols.reconcile(model.cols || undefined, options);
+        yield* this.map.sheetData.reconcileSteps(rows, options);
         this.map.conditionalFormatting.reconcile(model.conditionalFormattings, options);
 
-        model.media = [];
+        const media: NonNullable<ParsedWorksheetModel["media"]> = (model.media = []);
         if (model.drawing) {
-            const drawingRel = rels[model.drawing.rId];
+            const drawingRel = relOf(model.drawing.rId);
             const match =
                 drawingRel &&
                 typeof drawingRel.Target === "string" &&
                 drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
-            const drawing = match && claim(getOwn(options.drawings, match[1]));
+            const drawing: DrawingModel | undefined = match ? claim(getOwn(options.drawings, match[1])) : undefined;
             if (drawing) {
-                drawing.anchors.forEach((anchor) => {
+                for (const anchor of drawing.anchors) {
                     if (anchor.medium) {
-                        const image = {
+                        media.push({
                             type: "image",
-                            imageId: anchor.medium.index,
+                            // set by WorkbookXform.reconcile for every medium of the workbook
+                            imageId: anchor.medium.index as number,
                             range: anchor.range,
-                            hyperlinks: anchor.picture.hyperlinks,
-                        };
-                        model.media.push(image);
+                            hyperlinks: anchor.picture && anchor.picture.hyperlinks,
+                        });
                     }
-                });
+                }
             }
         }
 
-        const backgroundRel = model.background && rels[model.background.rId];
+        const backgroundRel = model.background && relOf(model.background.rId);
         if (backgroundRel && typeof backgroundRel.Target === "string") {
             const target = backgroundRel.Target.split("/media/")[1];
             const imageId = getOwn(options.mediaIndex, target);
             if (imageId !== undefined) {
-                model.media.push({
+                media.push({
                     type: "background",
                     imageId,
                 });
             }
         }
 
-        model.tables = (model.tables || []).map((tablePart) => claim(getPart(options.tables, rels[tablePart.rId]))).filter(Boolean);
+        const tables: TableModel[] = [];
+        for (const tablePart of model.tables || []) {
+            const table = claim(getPart(options.tables, relOf(tablePart.rId)));
+            if (table) {
+                tables.push(table);
+            }
+        }
+        model.tables = tables;
 
         delete model.relationships;
         delete model.legacyDrawing;
@@ -704,20 +907,5 @@ class WorkSheetXform extends BaseXform {
         delete model.comments;
     }
 }
-
-WorkSheetXform.WORKSHEET_ATTRIBUTES = {
-    xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-    "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
-    "mc:Ignorable": "x14ac",
-    "xmlns:x14ac": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac",
-};
-
-// budgets shared by all the worksheets of one load
-WorkSheetXform.createLoadBudget = (maxMergedCells = DEFAULT_MAX_MERGED_CELLS) => ({
-    mergedCells: 0,
-    maxMergedCells,
-    dataValidationCells: DataValidationsXform.MAX_EXPANDED_CELLS,
-});
 
 export default WorkSheetXform;

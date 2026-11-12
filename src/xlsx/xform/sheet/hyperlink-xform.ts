@@ -1,5 +1,6 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { SheetHyperlinkModel } from "../../../types";
 import BaseXform from "../base-xform";
 
 // The legacy unprefixed "Sheet!A1" form of an internal link (exceljs 4 accepted it): a cell or a range of a sheet. A quoted
@@ -12,12 +13,17 @@ const LEGACY_LOCATION =
 
 const FILE_BEFORE_HASH = /^[^#']*\.[A-Za-z0-9]{1,5}#/;
 
-class HyperlinkXform extends BaseXform {
-    get tag() {
+/**
+ * A `<hyperlink>` of a worksheet (an item of `<hyperlinks>`). An external target is written as a relationship (`r:id`,
+ * added by worksheet-xform prepare); an internal one (a place in this workbook, see {@link HyperlinkXform.getLocation}) as a
+ * `location`.
+ */
+class HyperlinkXform extends BaseXform<SheetHyperlinkModel> {
+    get tag(): string {
         return "hyperlink";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: SheetHyperlinkModel): void {
         xmlStream.leafNode("hyperlink", {
             ref: model.address,
             "r:id": model.rId,
@@ -26,33 +32,39 @@ class HyperlinkXform extends BaseXform {
         });
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<hyperlink>`: the model is `{ address, rId, tooltip }`, plus `target` for a `location` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "hyperlink") {
-            this.model = {
+            const model: SheetHyperlinkModel = (this.model = {
                 address: node.attributes.ref,
                 rId: node.attributes["r:id"],
                 tooltip: node.attributes.tooltip,
-            };
+            });
 
             // This is an internal link
             if (node.attributes.location) {
-                this.model.target = node.attributes.location;
+                model.target = node.attributes.location;
             }
             return true;
         }
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 
-    // An internal link (a place in this workbook) is written as a location, without a relationship.
-    // Returns the location of an internal link target, undefined for an external target:
-    // "#Sheet2!A1", "#'My Sheet'!A1:B2", "#DefinedName" and the legacy unprefixed "Sheet2!A1" (see LEGACY_LOCATION).
-    static getLocation(target) {
+    /**
+     * An internal link (a place in this workbook) is written as a location, without a relationship.
+     *
+     * @param target - the target of a hyperlink: `"#Sheet2!A1"`, `"#'My Sheet'!A1:B2"`, `"#DefinedName"`, the legacy
+     *   unprefixed `"Sheet2!A1"` (see LEGACY_LOCATION), or an external target (URL, file)
+     * @returns the location of an internal link target (without the `#`), `undefined` for an external target or a
+     *   non-string
+     */
+    static getLocation(this: void, target: unknown): string | undefined {
         if (typeof target !== "string") {
             return undefined;
         }
@@ -66,7 +78,8 @@ class HyperlinkXform extends BaseXform {
         return LEGACY_LOCATION.test(target) ? target : undefined;
     }
 
-    static isInternalLink(target) {
+    /** @returns whether the target is a place in this workbook (see {@link HyperlinkXform.getLocation}) */
+    static isInternalLink(this: void, target: unknown): boolean {
         return HyperlinkXform.getLocation(target) !== undefined;
     }
 }

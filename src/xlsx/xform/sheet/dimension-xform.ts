@@ -1,19 +1,21 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
 import BaseXform from "../base-xform";
 
-class DimensionXform extends BaseXform {
-    get tag() {
+/** `<dimension ref="A1:D10"/>`: the used range of a worksheet. The model is the `ref` string (not rendered when empty). */
+class DimensionXform extends BaseXform<string> {
+    get tag(): string {
         return "dimension";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: string | undefined): void {
         if (model) {
             xmlStream.leafNode("dimension", { ref: model });
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<dimension>` (the model is its `ref`, `undefined` when absent) */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === "dimension") {
             this.model = node.attributes.ref;
             return true;
@@ -21,9 +23,9 @@ class DimensionXform extends BaseXform {
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

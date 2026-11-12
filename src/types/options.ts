@@ -89,7 +89,7 @@ export interface CellReconcileOptions {
     /** cell address → its note */
     commentsMap?: Record<string, NoteModel>;
     /** shared formula index (`si`, as written) → master cell address. NB: a different type than in prepare. */
-    formulae: Record<string, string>;
+    formulae: Record<string, string | undefined>;
 }
 
 /** The reconcile options inside a worksheet: the workbook-level ones plus the per-sheet ones. */

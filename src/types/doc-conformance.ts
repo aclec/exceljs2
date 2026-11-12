@@ -87,6 +87,11 @@ export type WorksheetConforms = Conforms<
     Omit<
         Public.Worksheet,
         | "workbook"
+        // the views are the flat SheetViewModel (any field of the normal / frozen / split variants): a parsed view is not
+        // narrowed to the variant of its `state`
+        | "views"
+        // a parsed worksheet without <pageMargins> has `pageSetup.margins === null`
+        | "pageSetup"
         | "dataValidations"
         | "dimensions"
         | "headerFooter"

@@ -1,24 +1,31 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
-import _ from "../../../utils/under-dash";
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { XmlValue } from "../../../utils/xml-stream";
+import type { SheetProtectionModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-function booleanToXml(model, value) {
+function booleanToXml<V extends string>(model: boolean | undefined, value: V): V | undefined {
     return model ? value : undefined;
 }
 
-function xmlToBoolean(value, equals) {
+function xmlToBoolean(value: string | undefined, equals: string): true | undefined {
     return value === equals ? true : undefined;
 }
 
-class SheetProtectionXform extends BaseXform {
-    get tag() {
+/**
+ * `<sheetProtection>`: what a protected worksheet still allows, and the password hash. In the model, `false` forbids
+ * (`selectLockedCells`, `selectUnlockedCells`, `objects`, `scenarios`: written as `"1"` when `false`) and `true` allows
+ * (the other operations: written as `"0"` when `true`); parsing gives `true` / `false` for the attributes present and
+ * `undefined` keys for the others. The hash and `objects` / `scenarios` are written for a protected sheet (`sheet`) only.
+ */
+class SheetProtectionXform extends BaseXform<SheetProtectionModel> {
+    get tag(): string {
         return "sheetProtection";
     }
 
-    render(xmlStream, model) {
+    override render(xmlStream: XmlStream, model: SheetProtectionModel | null | undefined): void {
         if (model) {
-            const attributes = {
+            const attributes: Record<string, XmlValue | undefined> = {
                 sheet: booleanToXml(model.sheet, "1"),
                 selectLockedCells: model.selectLockedCells === false ? "1" : undefined,
                 selectUnlockedCells: model.selectUnlockedCells === false ? "1" : undefined,
@@ -42,48 +49,52 @@ class SheetProtectionXform extends BaseXform {
                 attributes.objects = booleanToXml(model.objects === false, "1");
                 attributes.scenarios = booleanToXml(model.scenarios === false, "1");
             }
-            if (_.some(attributes, (value) => value !== undefined)) {
+            if (Object.values(attributes).some((value) => value !== undefined)) {
                 xmlStream.leafNode(this.tag, attributes);
             }
         }
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<sheetProtection>` */
+    override parseOpen(node: SaxTag): boolean {
         switch (node.name) {
-            case this.tag:
-                this.model = {
-                    sheet: xmlToBoolean(node.attributes.sheet, "1"),
-                    objects: node.attributes.objects === "1" ? false : undefined,
-                    scenarios: node.attributes.scenarios === "1" ? false : undefined,
-                    selectLockedCells: node.attributes.selectLockedCells === "1" ? false : undefined,
-                    selectUnlockedCells: node.attributes.selectUnlockedCells === "1" ? false : undefined,
-                    formatCells: xmlToBoolean(node.attributes.formatCells, "0"),
-                    formatColumns: xmlToBoolean(node.attributes.formatColumns, "0"),
-                    formatRows: xmlToBoolean(node.attributes.formatRows, "0"),
-                    insertColumns: xmlToBoolean(node.attributes.insertColumns, "0"),
-                    insertRows: xmlToBoolean(node.attributes.insertRows, "0"),
-                    insertHyperlinks: xmlToBoolean(node.attributes.insertHyperlinks, "0"),
-                    deleteColumns: xmlToBoolean(node.attributes.deleteColumns, "0"),
-                    deleteRows: xmlToBoolean(node.attributes.deleteRows, "0"),
-                    sort: xmlToBoolean(node.attributes.sort, "0"),
-                    autoFilter: xmlToBoolean(node.attributes.autoFilter, "0"),
-                    pivotTables: xmlToBoolean(node.attributes.pivotTables, "0"),
-                };
-                if (node.attributes.algorithmName) {
-                    this.model.algorithmName = node.attributes.algorithmName;
-                    this.model.hashValue = node.attributes.hashValue;
-                    this.model.saltValue = node.attributes.saltValue;
-                    this.model.spinCount = parseInt(node.attributes.spinCount, 10);
+            case this.tag: {
+                const { attributes } = node;
+                const model: SheetProtectionModel = (this.model = {
+                    sheet: xmlToBoolean(attributes.sheet, "1"),
+                    objects: attributes.objects === "1" ? false : undefined,
+                    scenarios: attributes.scenarios === "1" ? false : undefined,
+                    selectLockedCells: attributes.selectLockedCells === "1" ? false : undefined,
+                    selectUnlockedCells: attributes.selectUnlockedCells === "1" ? false : undefined,
+                    formatCells: xmlToBoolean(attributes.formatCells, "0"),
+                    formatColumns: xmlToBoolean(attributes.formatColumns, "0"),
+                    formatRows: xmlToBoolean(attributes.formatRows, "0"),
+                    insertColumns: xmlToBoolean(attributes.insertColumns, "0"),
+                    insertRows: xmlToBoolean(attributes.insertRows, "0"),
+                    insertHyperlinks: xmlToBoolean(attributes.insertHyperlinks, "0"),
+                    deleteColumns: xmlToBoolean(attributes.deleteColumns, "0"),
+                    deleteRows: xmlToBoolean(attributes.deleteRows, "0"),
+                    sort: xmlToBoolean(attributes.sort, "0"),
+                    autoFilter: xmlToBoolean(attributes.autoFilter, "0"),
+                    pivotTables: xmlToBoolean(attributes.pivotTables, "0"),
+                });
+                if (attributes.algorithmName) {
+                    model.algorithmName = attributes.algorithmName;
+                    model.hashValue = attributes.hashValue;
+                    model.saltValue = attributes.saltValue;
+                    // NaN when absent
+                    model.spinCount = BaseXform.toIntValue(attributes.spinCount, NaN);
                 }
                 return true;
+            }
             default:
                 return false;
         }
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

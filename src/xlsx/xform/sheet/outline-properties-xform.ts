@@ -1,39 +1,45 @@
-/* eslint-disable -- TypeScript migration: remove with the @ts-nocheck below once the file is typed */
-// @ts-nocheck
+import type { SaxTag } from "../../../utils/parse-sax";
+import type XmlStream from "../../../utils/xml-stream";
+import type { OutlinePropertiesModel } from "../../../types";
 import BaseXform from "../base-xform";
 
-const isDefined = (attr) => typeof attr !== "undefined";
-
-class OutlinePropertiesXform extends BaseXform {
-    get tag() {
+/**
+ * `<outlinePr summaryBelow="0" summaryRight="1"/>` of `<sheetPr>`: where the summary rows / columns of the outlines are.
+ * A parsed attribute that is absent is an `undefined` key.
+ */
+class OutlinePropertiesXform extends BaseXform<OutlinePropertiesModel> {
+    get tag(): string {
         return "outlinePr";
     }
 
-    render(xmlStream, model) {
-        if (model && (isDefined(model.summaryBelow) || isDefined(model.summaryRight))) {
+    /** @returns whether the element was written (only when `summaryBelow` or `summaryRight` is set) */
+    override render(xmlStream: XmlStream, model: OutlinePropertiesModel | undefined): boolean {
+        if (model && (model.summaryBelow !== undefined || model.summaryRight !== undefined)) {
             xmlStream.leafNode(this.tag, {
-                summaryBelow: isDefined(model.summaryBelow) ? Number(model.summaryBelow) : undefined,
-                summaryRight: isDefined(model.summaryRight) ? Number(model.summaryRight) : undefined,
+                summaryBelow: model.summaryBelow !== undefined ? Number(model.summaryBelow) : undefined,
+                summaryRight: model.summaryRight !== undefined ? Number(model.summaryRight) : undefined,
             });
             return true;
         }
         return false;
     }
 
-    parseOpen(node) {
+    /** @returns `true` for `<outlinePr>` */
+    override parseOpen(node: SaxTag): boolean {
         if (node.name === this.tag) {
+            const { summaryBelow, summaryRight } = node.attributes;
             this.model = {
-                summaryBelow: isDefined(node.attributes.summaryBelow) ? Boolean(Number(node.attributes.summaryBelow)) : undefined,
-                summaryRight: isDefined(node.attributes.summaryRight) ? Boolean(Number(node.attributes.summaryRight)) : undefined,
+                summaryBelow: summaryBelow !== undefined ? Boolean(Number(summaryBelow)) : undefined,
+                summaryRight: summaryRight !== undefined ? Boolean(Number(summaryRight)) : undefined,
             };
             return true;
         }
         return false;
     }
 
-    parseText() {}
+    override parseText(): void {}
 
-    parseClose() {
+    override parseClose(): boolean {
         return false;
     }
 }

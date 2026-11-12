@@ -6,22 +6,27 @@
 
 import type {
     AutoFilter,
+    CellIsOperators,
+    CfvoTypes,
     Comment,
-    ConditionalFormattingRule,
+    ContainsTextOperators,
+    DataBarRuleType,
     DataValidation,
     HeaderFooter,
+    IconSetTypes,
     ImageEditAs,
     Margins,
     PageSetup,
     TableColumnProperties,
     TableStyleProperties,
+    TimePeriodTypes,
     WorksheetProperties,
     WorksheetProtection,
     WorksheetState,
     WorksheetView,
 } from "../../index";
 import type { CellModel, ColModel, FormulaResult, ParsedCellModel, RowModel } from "./cell";
-import type { DxfModel } from "./style";
+import type { ColorModel, DxfModel } from "./style";
 import type { PivotTable } from "../doc/pivot-table";
 import type { MediaModel, RelationshipModel } from "./book";
 
@@ -85,7 +90,8 @@ export interface VmlNotesModel {
  * for an internal `location`). worksheet-xform reconcile turns them into the `hyperlink` of the cells (hyperlinkMap).
  */
 export interface SheetHyperlinkModel {
-    address: string;
+    /** The cell; `undefined` in a parsed `<hyperlink>` without `ref` (ignored by reconcile). */
+    address: string | undefined;
     target?: string;
     tooltip?: string;
     rId?: string;
@@ -94,42 +100,193 @@ export interface SheetHyperlinkModel {
 /**
  * The data validations of a worksheet (`DataValidations.model`), keyed by cell address (`A1`) or by range (`A1:B10`,
  * whole rows / columns normalised to rectangles); a removed entry is kept as `undefined`. Parsing shares one object
- * between all the cells of a `<dataValidation>`, and keeps a range key beyond a budget of expanded cells.
- * Object created with `Object.create(null)` when parsed (keys come from the file).
+ * between all the cells of a `<dataValidation>`, and keeps a range key beyond a budget of expanded cells. A parsed model is
+ * a plain object (public API) whose keys are validated cell / range references.
  */
 export type DataValidationsModel = Record<string, DataValidationModel | undefined>;
 
 /**
+ * A formula of a data validation: a number for the numeric types (`whole`, `textLength`, `decimal`), a Date for `date`
+ * (written as a serial date), else the text of the formula (e.g. `"a,b,c"` with its quotes for a list, or `$A$1:$A$9`).
+ */
+export type DataValidationFormula = string | number | Date;
+
+/**
  * One data validation (data-validations-xform). Differs from index.d.ts `DataValidation`: `type` may be `"any"` (the
- * default when parsing); `formulae` and `operator` are deleted when there is no formula.
+ * default when parsing); `formulae` and `operator` are deleted when there is no formula. Parsed literal unions hold the
+ * attribute strings of the file, unvalidated.
  */
 export type DataValidationModel = Omit<DataValidation, "type" | "formulae"> & {
     type: DataValidation["type"] | "any";
-    formulae?: DataValidation["formulae"];
+    formulae?: DataValidationFormula[];
 };
 
+/**
+ * The budgets of one workbook load, shared by all its worksheets (WorksheetXform.createLoadBudget): the cells of the
+ * merges materialised so far against their cap, and the cells that the data validation ranges may still be expanded to.
+ */
+export interface WorksheetLoadBudget {
+    mergedCells: number;
+    maxMergedCells: number;
+    dataValidationCells: number;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
-// Conditional formatting (PARTIAL)
+// Conditional formatting
+//
+// The rules are written in `<conditionalFormatting>` (cf/*: Excel 2007) and / or in the x14 extension of the worksheet
+// (cf-ext/*: data bars with x14 settings, custom or x14 icon sets, formula rules referencing other sheets); worksheet-xform
+// merges the two parsed versions of a rule by `x14Id`. A rule model is index.d.ts `ConditionalFormattingRule` with the
+// internal fields; index.d.ts rules are assignable to it.
+//
+// Parsed rules are unvalidated: their literal unions (`type`, `operator`, `iconSet`, cfvo `type`...) hold the attribute
+// strings of the file, and the main `<cfRule>` parse sets the keys of every rule type (`undefined` when absent).
+
+/** A formula of a conditional formatting rule: the text of `<formula>` / `<xm:f>` (the application may give numbers). */
+export type CfFormula = string | number | boolean;
 
 /**
- * A conditional formatting rule as the xforms see it: index.d.ts `ConditionalFormattingRule` plus the internal fields.
- * PARTIAL: the inner models of dataBar / iconSet / colorScale (cf/*, cf-ext/*) are refined by their xforms.
+ * A threshold of a color scale, data bar or icon set (`<cfvo>`, `<x14:cfvo>`): index.d.ts `Cvfo`. `value` is a number
+ * when the text is a number literal, else the text (a formula or a cell reference such as `$A$1`).
  */
-export type ConditionalFormattingRuleModel = ConditionalFormattingRule & {
-    /** prepare: the dxf index of `style` (StyleRegistry.addDxfStyle); reconcile turns it back into `style` and deletes it. */
+export interface CfvoModel {
+    type: CfvoTypes;
+    value?: number | string;
+}
+
+/** A custom icon of an x14 icon set (`<x14:cfIcon>`). `iconId` is set by render (the index of the icon). */
+export interface CfIconModel {
+    iconSet: IconSetTypes;
+    iconId?: number;
+}
+
+/** Fields of every rule model. */
+interface CfRuleModelBase {
+    /** Rules without a priority get one (after the highest one) in prepare. */
+    priority?: number;
+    /** The differential format; reconcile sets it from `dxfId`. */
+    style?: DxfModel;
+    stopIfTrue?: boolean;
+    /** prepare: the dxf index of `style` (StyleRegistry.addDxfStyle); parse: the attribute; reconcile turns it into `style` and deletes it. */
     dxfId?: number;
-    /** x14 rules: the id linking a main rule to its extension (prepare adds it; kept on loaded rules). */
+    /** The id linking a main rule to its x14 version: set by prepare (cf-ext) for an x14 rule, kept on loaded rules. */
     x14Id?: string;
     /** render: the range of the formatting, written onto each rule (mutates the caller's rule). */
     ref?: string;
-    /** x14 icon sets: custom icons. */
-    icons?: { iconSet: string; iconId: number }[];
-    /** Parsed formula rules: the `<formula>` texts. */
-    formulae?: string[];
-};
+    /** The formulae: the parse collects the `<formula>` / `<xm:f>` texts of any rule; render reads them for formula rules. */
+    formulae?: CfFormula[];
+}
+
+/** An `expression` rule (index.d.ts `ExpressionRuleType`). */
+export interface ExpressionRuleModel extends CfRuleModelBase {
+    type: "expression";
+    /** Written in the x14 extension (set on the rules read from the extension only). */
+    x14?: boolean;
+}
+
+/** A `cellIs` rule (index.d.ts `CellIsRuleType`). */
+export interface CellIsRuleModel extends CfRuleModelBase {
+    type: "cellIs";
+    operator?: CellIsOperators;
+    x14?: boolean;
+}
+
+/** A `top10` rule (index.d.ts `Top10RuleType`; the parsed attributes may be absent). */
+export interface Top10RuleModel extends CfRuleModelBase {
+    type: "top10";
+    /** Default 10. */
+    rank?: number;
+    percent?: boolean;
+    bottom?: boolean;
+}
+
+/** An `aboveAverage` rule (index.d.ts `AboveAverageRuleType`). */
+export interface AboveAverageRuleModel extends CfRuleModelBase {
+    type: "aboveAverage";
+    /** Default true. */
+    aboveAverage?: boolean;
+}
+
+/** A `colorScale` rule (index.d.ts `ColorScaleRuleType`): rendering requires `cfvo` and `color`. */
+export interface ColorScaleRuleModel extends CfRuleModelBase {
+    type: "colorScale";
+    cfvo?: CfvoModel[];
+    color?: ColorModel[];
+}
+
+/**
+ * An `iconSet` rule (index.d.ts `IconSetRuleType`): rendering requires `cfvo`. A custom icon set (`custom`, or `icons`
+ * when read) and the x14 icon sets (3Triangles, 3Stars, 5Boxes) are written in the extension only.
+ */
+export interface IconSetRuleModel extends CfRuleModelBase {
+    type: "iconSet";
+    /** Default 3TrafficLights. */
+    iconSet?: IconSetTypes;
+    reverse?: boolean;
+    showValue?: boolean;
+    custom?: boolean;
+    cfvo?: CfvoModel[];
+    /** x14 parse: the custom icons (absent from index.d.ts: rendered as `custom="1"` with `<x14:cfIcon>` elements). */
+    icons?: CfIconModel[];
+}
+
+/**
+ * A text rule (index.d.ts `ContainsTextRuleType`): `operator` (default containsText) is the `type` of its `<cfRule>`; a
+ * rule without formulae gets one derived from the operator, `text` and the top left cell of `ref`.
+ */
+export interface ContainsTextRuleModel extends CfRuleModelBase {
+    type: "containsText";
+    operator?: ContainsTextOperators;
+    text?: string;
+    x14?: boolean;
+}
+
+/** A `timePeriod` rule (index.d.ts `TimePeriodRuleType`): a rule without formulae gets one derived from `timePeriod`. */
+export interface TimePeriodRuleModel extends CfRuleModelBase {
+    type: "timePeriod";
+    timePeriod?: TimePeriodTypes;
+    x14?: boolean;
+}
+
+/**
+ * A `dataBar` rule (index.d.ts `DataBarRuleType`). The main `<dataBar>` holds `showValue`, `cfvo` and `color`; the x14
+ * version (written unless it is a plain gradient bar, see DatabarExtXform.isExt) holds the other settings, and its
+ * thresholds replace the main ones when both are read.
+ */
+export interface DataBarRuleModel extends CfRuleModelBase {
+    type: "dataBar";
+    gradient?: boolean;
+    minLength?: number;
+    maxLength?: number;
+    showValue?: boolean;
+    border?: boolean;
+    negativeBarColorSameAsPositive?: boolean;
+    negativeBarBorderColorSameAsPositive?: boolean;
+    axisPosition?: DataBarRuleType["axisPosition"];
+    direction?: DataBarRuleType["direction"];
+    cfvo?: CfvoModel[];
+    /** The color of the bars. */
+    color?: ColorModel;
+    borderColor?: ColorModel;
+    negativeFillColor?: ColorModel;
+    negativeBorderColor?: ColorModel;
+    axisColor?: ColorModel;
+}
+
+/** The rules whose formulae and format may be written inline in the x14 extension (CfRuleXform.isFormulaRule). */
+export type FormulaRuleModel = ExpressionRuleModel | CellIsRuleModel | ContainsTextRuleModel | TimePeriodRuleModel;
+
+/**
+ * A conditional formatting rule as the xforms see it, discriminated by `type`. Producer: the application (index.d.ts
+ * `ConditionalFormattingRule`, assignable to this), cf-rule-xform / cf-rule-ext-xform parse (merged by worksheet-xform).
+ * Consumer: the cf xforms (prepare mutates `priority`, `dxfId`, `x14Id`; render sets `ref`).
+ */
+export type ConditionalFormattingRuleModel =
+    FormulaRuleModel | Top10RuleModel | AboveAverageRuleModel | ColorScaleRuleModel | IconSetRuleModel | DataBarRuleModel;
 
 /** The conditional formattings of one range (conditional-formatting-xform, x14 version merged in by worksheet-xform). */
 export interface ConditionalFormattingModel {
+    /** The range (sqref), e.g. `A1:B10`. */
     ref: string;
     rules: ConditionalFormattingRuleModel[];
 }
@@ -149,21 +306,40 @@ export interface RowBreakModel {
 }
 
 /**
- * A sheet view (sheet-view-xform): index.d.ts `WorksheetView` plus `workbookViewId` (parsed) and `tabSelected` (rendered;
- * parsed but not kept). prepare forces an unknown `state` to `"normal"`.
+ * A sheet view (sheet-view-xform): index.d.ts `WorksheetView` flattened (the fields of its normal / frozen / split
+ * variants, all optional) plus `workbookViewId` (parsed) and `tabSelected` (rendered; parsed but not kept). prepare
+ * forces an unknown `state` to `"normal"`. Parsed literal unions (`style`, `activePane`) hold the attribute strings of the
+ * file, unvalidated.
  */
-export type SheetViewModel = Partial<WorksheetView> & {
+export interface SheetViewModel {
     workbookViewId?: number;
     tabSelected?: boolean;
-};
+    rightToLeft?: boolean;
+    activeCell?: string;
+    showRuler?: boolean;
+    showRowColHeaders?: boolean;
+    showGridLines?: boolean;
+    zoomScale?: number;
+    zoomScaleNormal?: number;
+    state?: WorksheetView["state"];
+    style?: WorksheetView["style"];
+    /** frozen: the number of frozen columns; split: the position of the splitter, in points. */
+    xSplit?: number;
+    /** frozen: the number of frozen rows; split: the position of the splitter, in points. */
+    ySplit?: number;
+    topLeftCell?: string;
+    /** split only (the active pane of a frozen view is derived from the splits). */
+    activePane?: "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+}
 
 /**
  * The page setup of a worksheet: index.d.ts `PageSetup` (with `margins`, the print options, the print area and titles).
  * Parse: `{ fitToPage, margins }` merged with the page-setup and print-options models; also `useFirstPageNumber`,
  * `usePrinterDefaults`, `copies`. The document defaults have `rowBreaks` / `colBreaks` set to `null`.
  */
-export type PageSetupModel = Partial<PageSetup> & {
-    margins?: Margins;
+export type PageSetupModel = Partial<Omit<PageSetup, "margins">> & {
+    /** `null` when a parsed worksheet has no `<pageMargins>`. */
+    margins?: Margins | null;
     /** The document defaults only: always null (the page breaks are `rowBreaks` of the worksheet). */
     rowBreaks?: null;
     /** The document defaults only: always null. */
@@ -177,11 +353,20 @@ export type PageSetupModel = Partial<PageSetup> & {
 export type HeaderFooterModel = { [K in keyof HeaderFooter]?: HeaderFooter[K] | (HeaderFooter[K] extends string ? null : never) };
 
 /**
+ * `<outlinePr>` (outline-properties-xform): index.d.ts `WorksheetProperties.outlineProperties`; a parsed attribute that is
+ * absent is an `undefined` key.
+ */
+export type OutlinePropertiesModel = Partial<WorksheetProperties["outlineProperties"]>;
+
+/**
  * Sheet properties: `sheetFormatPr` (defaultRowHeight, dyDescent, outlineLevelRow, outlineLevelCol, defaultColWidth?)
  * merged with `tabColor` / `outlineProperties` of `sheetPr` (worksheet-xform). index.d.ts `WorksheetProperties`; its
- * `showGridLines` is not read or written by any xform.
+ * `showGridLines` is not read or written by any xform. `tabColor` may have `tint` / `indexed` (a parsed color).
  */
-export type WorksheetPropertiesModel = Partial<WorksheetProperties>;
+export type WorksheetPropertiesModel = Partial<Omit<WorksheetProperties, "outlineProperties" | "tabColor">> & {
+    outlineProperties?: OutlinePropertiesModel;
+    tabColor?: ColorModel;
+};
 
 /**
  * Sheet protection (sheet-protection-xform): index.d.ts `WorksheetProtection` plus `sheet` and the password hash
@@ -356,6 +541,7 @@ export interface WorksheetModel {
     properties: WorksheetPropertiesModel;
     pageSetup: PageSetupModel;
     headerFooter: HeaderFooterModel;
+    /** The manual page breaks between rows (`<rowBreaks>`). */
     rowBreaks?: RowBreakModel[];
     views: SheetViewModel[];
     autoFilter?: AutoFilterModel | null;
@@ -402,24 +588,35 @@ export interface ParsedWorksheetModel {
     /** xlsx.ts: the number of the part (`sheet3.xml` → "3"). */
     sheetNo?: string;
     relationships?: RelationshipModel[];
-    dimensions?: string;
-    cols?: ColModel[];
-    rows: RowModel<ParsedCellModel>[];
-    mergeCells?: string[];
-    hyperlinks?: SheetHyperlinkModel[];
-    dataValidations?: DataValidationsModel;
+    // the parts of the worksheet absent from the file are null (the model of a reset xform)
+    dimensions?: string | null;
+    cols?: ColModel[] | null;
+    /** reconcile: compacted (no holes), every row and cell with its number / address. */
+    rows?: RowModel<ParsedCellModel>[] | null;
+    mergeCells?: string[] | null;
+    hyperlinks?: SheetHyperlinkModel[] | null;
+    dataValidations?: DataValidationsModel | null;
     properties: WorksheetPropertiesModel;
-    views?: SheetViewModel[];
+    views?: SheetViewModel[] | null;
     pageSetup: PageSetupModel;
-    headerFooter?: HeaderFooterModel;
-    background?: { rId: string };
-    drawing?: { rId: string };
-    tables?: { rId: string }[];
-    conditionalFormattings?: ConditionalFormattingModel[];
+    headerFooter?: HeaderFooterModel | null;
+    background?: SheetPartRefModel | null;
+    drawing?: SheetPartRefModel | null;
+    /** The `<tablePart>`s; reconcile: the table models of the worksheet. */
+    tables?: (SheetPartRefModel | TableModel)[] | null;
+    conditionalFormattings: ConditionalFormattingModel[];
     autoFilter?: AutoFilterModel;
     sheetProtection?: SheetProtectionModel;
-    legacyDrawing?: { rId: string };
+    legacyDrawing?: SheetPartRefModel;
     /** reconcile: the images, from the drawing and background. */
     media?: WorksheetMediumModel[];
     comments?: NoteModel[];
+}
+
+/**
+ * A reference to a part of a worksheet by relationship id: `<drawing>`, `<legacyDrawing>`, `<picture>` (background),
+ * `<tablePart>`. `rId` is `undefined` when the `r:id` attribute is absent from a parsed element.
+ */
+export interface SheetPartRefModel {
+    rId?: string;
 }

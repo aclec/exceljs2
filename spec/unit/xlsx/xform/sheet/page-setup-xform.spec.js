@@ -145,4 +145,21 @@ const expectations = [
 
 describe("PageSetupXform", () => {
     testXformHelper(expectations);
+
+    describe("cellComments", () => {
+        it("writes the ST_CellComments value asDisplayed", () => {
+            const xform = new PageSetupXform();
+            expect(xform.toXml({ cellComments: "asDisplayed" })).to.equal('<pageSetup cellComments="asDisplayed"/>');
+        });
+
+        it("writes the legacy asDisplyed (sic) as asDisplayed", () => {
+            const xform = new PageSetupXform();
+            expect(xform.toXml({ cellComments: "asDisplyed" })).to.equal('<pageSetup cellComments="asDisplayed"/>');
+        });
+
+        it("does not write None, the default", () => {
+            const xform = new PageSetupXform();
+            expect(xform.toXml({ cellComments: "None", paperSize: 9 })).to.equal('<pageSetup paperSize="9"/>');
+        });
+    });
 });
