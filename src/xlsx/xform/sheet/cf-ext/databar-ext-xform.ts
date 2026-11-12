@@ -55,8 +55,11 @@ class DatabarExtXform extends CompositeXform<DatabarExtModel> {
     readonly cfvoXform = new CfvoExtXform();
     /** The xforms of the colors. */
     readonly borderColorXform = new ColorXform("x14:borderColor");
+    /** The xform of the border colour of the negative bars. */
     readonly negativeBorderColorXform = new ColorXform("x14:negativeBorderColor");
+    /** The xform of the fill colour of the negative bars. */
     readonly negativeFillColorXform = new ColorXform("x14:negativeFillColor");
+    /** The xform of the axis colour. */
     readonly axisColorXform = new ColorXform("x14:axisColor");
 
     declare map: {

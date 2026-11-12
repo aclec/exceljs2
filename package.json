@@ -67,6 +67,7 @@
         "test:types": "tsc -p tsconfig.json && tsc -p tsconfig.types.json",
         "lint": "eslint .",
         "lint:fix": "eslint --fix .",
+        "check:tsdoc": "node scripts/check-tsdoc.mjs",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "audit": "bun audit",

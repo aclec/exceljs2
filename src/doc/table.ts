@@ -69,6 +69,7 @@ class Column {
         this.column[name] = value;
     }
 
+    /** The column name (its header text); needs `table.commit()` once changed. */
     get name(): string {
         return this.column.name;
     }
@@ -76,6 +77,7 @@ class Column {
         this._set("name", value);
     }
 
+    /** Whether the column shows the filter button of the auto filter. */
     get filterButton(): boolean | undefined {
         return this.column.filterButton;
     }
@@ -83,6 +85,7 @@ class Column {
         this.column.filterButton = value;
     }
 
+    /** The style of the column cells (a differential format, written as a dxf of the styles part). */
     get style(): TableColumnModel["style"] {
         return this.column.style;
     }
@@ -90,6 +93,7 @@ class Column {
         this.column.style = value;
     }
 
+    /** The text of the totals row in this column (used for the first column); needs `table.commit()`. */
     get totalsRowLabel(): string | undefined {
         return this.column.totalsRowLabel;
     }
@@ -97,6 +101,7 @@ class Column {
         this._set("totalsRowLabel", value);
     }
 
+    /** The function of the totals row (`"sum"`, `"average"`, `"custom"`…); needs `table.commit()`. */
     get totalsRowFunction(): TableColumnModel["totalsRowFunction"] {
         return this.column.totalsRowFunction;
     }
@@ -104,6 +109,7 @@ class Column {
         this._set("totalsRowFunction", value);
     }
 
+    /** The cached result of the totals row formula; needs `table.commit()`. */
     get totalsRowResult(): TableColumnModel["totalsRowResult"] {
         return this.column.totalsRowResult;
     }
@@ -111,6 +117,7 @@ class Column {
         this._set("totalsRowResult", value);
     }
 
+    /** The formula of the totals row for the `"custom"` function; needs `table.commit()`. */
     get totalsRowFormula(): string | undefined {
         return this.column.totalsRowFormula;
     }
@@ -485,6 +492,7 @@ class Table {
         this._assign(this.table, "ref", value);
     }
 
+    /** The table name (unique in the workbook, used in structured references). */
     get name(): string {
         return this.table.name;
     }
@@ -531,6 +539,7 @@ class Table {
         this.table.style!.theme = value;
     }
 
+    /** Whether the table style highlights the first column. */
     get showFirstColumn(): boolean | undefined {
         return this.table.style!.showFirstColumn;
     }
@@ -538,6 +547,7 @@ class Table {
         this.table.style!.showFirstColumn = value;
     }
 
+    /** Whether the table style highlights the last column. */
     get showLastColumn(): boolean | undefined {
         return this.table.style!.showLastColumn;
     }
@@ -545,6 +555,7 @@ class Table {
         this.table.style!.showLastColumn = value;
     }
 
+    /** Whether the table style bands the rows. */
     get showRowStripes(): boolean | undefined {
         return this.table.style!.showRowStripes;
     }
@@ -552,6 +563,7 @@ class Table {
         this.table.style!.showRowStripes = value;
     }
 
+    /** Whether the table style bands the columns. */
     get showColumnStripes(): boolean | undefined {
         return this.table.style!.showColumnStripes;
     }

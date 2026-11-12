@@ -67,26 +67,37 @@ export type WriterMedium = Image & { type: "image"; name: string };
  * workbook parts are added and the archive is completed.
  */
 class WorkbookWriter {
+    /** Document property: the creation date (now by default). */
     created: Date;
+    /** Document property: the date of the last change (now by default). */
     modified: Date;
+    /** Document property: the author ("ExcelJS" by default). */
     creator: string;
+    /** Document property: the author of the last change ("ExcelJS" by default). */
     lastModifiedBy: string;
+    /** Document property: the date of the last print. */
     lastPrinted: Date | undefined;
     /** Use shared strings by default in the worksheets (smaller file, more memory). */
     useSharedStrings: boolean;
+    /** The shared strings table (used when `useSharedStrings`). */
     sharedStrings: SharedStrings;
+    /** The styles registry: StylesXform with `useStyles`, else its mock (no styles). */
     styles: WriterStyles;
+    /** The workbook views (windows). */
     views: WorkbookView[];
     /** The cap on the cells covered by merges in all the worksheets (utils/merge-limits). */
     maxMergedCells: number;
     /** The cells covered by merges in all the worksheets so far. */
     _mergedCellCount: number;
+    /** The zip options (compression level…). */
     zipOptions: ZipWriterOptions | undefined;
+    /** The images added with `addImage`, by image id. */
     media: WriterMedium[];
     /** The comments parts of the worksheets (for the content types). */
     commentRefs: CommentRefsEntry[];
     /** The next block of VML shape ids that the notes of a worksheet can claim (VmlNotesXform). */
     _nextShapeBlock: number;
+    /** The archive being written. */
     zip: ZipWriter;
     /** Where the archive is written. */
     stream: NodeJS.WritableStream;

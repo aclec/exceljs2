@@ -77,6 +77,7 @@ class Row {
         return this._number;
     }
 
+    /** The worksheet of the row. */
     get worksheet(): RowWorksheet {
         return this._worksheet;
     }
@@ -356,6 +357,7 @@ class Row {
         return value;
     }
 
+    /** The number format of the row. Setting a style property sets it on the row and on its existing cells (copy on write). */
     get numFmt(): StyleModel["numFmt"] {
         return this.style.numFmt;
     }
@@ -364,6 +366,7 @@ class Row {
         this._applyStyle("numFmt", value);
     }
 
+    /** The font of the row. Setting it also sets it on the existing cells (see {@link numFmt}). */
     get font(): StyleModel["font"] {
         return this.style.font;
     }
@@ -372,6 +375,7 @@ class Row {
         this._applyStyle("font", value);
     }
 
+    /** The alignment of the row. Setting it also sets it on the existing cells (see {@link numFmt}). */
     get alignment(): StyleModel["alignment"] {
         return this.style.alignment;
     }
@@ -380,6 +384,7 @@ class Row {
         this._applyStyle("alignment", value);
     }
 
+    /** The protection of the row. Setting it also sets it on the existing cells (see {@link numFmt}). */
     get protection(): StyleModel["protection"] {
         return this.style.protection;
     }
@@ -388,6 +393,7 @@ class Row {
         this._applyStyle("protection", value);
     }
 
+    /** The borders of the row. Setting them also sets them on the existing cells (see {@link numFmt}). */
     get border(): StyleModel["border"] {
         return this.style.border;
     }
@@ -396,6 +402,7 @@ class Row {
         this._applyStyle("border", value);
     }
 
+    /** The fill of the row. Setting it also sets it on the existing cells (see {@link numFmt}). */
     get fill(): StyleModel["fill"] {
         return this.style.fill;
     }
@@ -404,6 +411,7 @@ class Row {
         this._applyStyle("fill", value);
     }
 
+    /** Whether the row is hidden. */
     get hidden(): boolean {
         return !!this._hidden;
     }

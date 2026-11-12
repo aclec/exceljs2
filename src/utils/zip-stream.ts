@@ -223,18 +223,23 @@ type ZipEntryEvents = {
 class ZipEntry extends EventEmitter<ZipEntryEvents> {
     /** the name in the archive (leading slashes dropped) */
     readonly name: string;
+    /** The name encoded in UTF-8 (as written in the headers). */
     readonly nameBytes: Uint8Array;
     /** general purpose flags, but bit 3 (data descriptor) */
     readonly flags: number;
+    /** Stored without compression (level 0). */
     readonly stored: boolean;
+    /** The compressor of the entry data (see deflate.ts). */
     readonly compressor: Compressor;
     /** compressed bytes produced so far */
     compressedSize = 0;
     /** compressed data waiting for the earlier entries */
     pending: Uint8Array[] = [];
+    /** `end()` was called: no more data can be written. */
     ended = false;
     /** all the data is compressed: `crc` and `size` are known */
     finished = false;
+    /** The local file header was written to the output. */
     headerWritten = false;
     /** CRC-32 of the uncompressed data, once finished */
     crc = 0;
@@ -372,17 +377,25 @@ type ZipWriterEvents = {
  * central directory once every entry is complete.
  */
 class ZipWriter extends EventEmitter<ZipWriterEvents> {
+    /** The compression level (0: stored, 1–9: deflate). */
     readonly level: CompressionLevel;
+    /** The deflate implementation: node:zlib when present, else fflate (browser bundle). */
     readonly backend: DeflateBackend;
+    /** Write ZIP64 records even when the sizes do not need them. */
     readonly forceZip64: boolean;
+    /** The archive comment, encoded in UTF-8. */
     readonly comment: Uint8Array;
+    /** The sizes from which ZIP64 records are needed (lowered by tests). */
     readonly limits: Zip64Limits;
+    /** The modification date and time written for every entry (MS-DOS format). */
     readonly dosDateTime: DosDateTime;
+    /** The entries, in the order they were added (and are written). */
     readonly entries: ZipEntry[] = [];
     /** index of the entry being written to the output */
     current = 0;
     /** bytes written to the output */
     offset = 0;
+    /** `finalize()` was called: no entry can be added. */
     finalizing = false;
     /** the archive is complete */
     done = false;

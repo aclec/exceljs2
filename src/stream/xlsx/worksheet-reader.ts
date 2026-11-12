@@ -112,13 +112,17 @@ const HYPERLINK_ATTRIBUTES = [
  * (`hyperlinks: "emit"` or `"cache"`). The rows are not kept.
  */
 class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
+    /** The workbook reader that the worksheet belongs to. */
     readonly workbook: WorkbookReader;
     /** The sheetId from the workbook, or the number of the part (a string) if it could not be matched to the workbook. */
     id: string | number;
+    /** The XML of the worksheet part. */
     readonly iterator: SaxInput;
+    /** The `worksheets` and `hyperlinks` options of the workbook reader. */
     readonly options: Partial<Pick<WorkbookReaderOptions, "worksheets" | "hyperlinks">>;
     /** The worksheet name (`Sheet<id>` if the worksheet could not be matched to the workbook). */
     name: string;
+    /** The visibility of the worksheet (from the workbook), if known. */
     state?: WorksheetState;
 
     /** `hyperlinks: "cache"`: the hyperlinks read, keyed by cell reference (no prototype: the references come from the file). */
@@ -180,6 +184,7 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         return this as unknown as RowWorksheet & ColumnWorksheet;
     }
 
+    /** The range covering the rows read so far. */
     get dimensions(): Range {
         return this._dimensions;
     }

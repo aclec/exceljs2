@@ -72,7 +72,9 @@ function uniqueKeys(names: readonly HeaderName[]): ([name: string | null, key: s
  * only for the files; streams and buffers anywhere.
  */
 class CSV {
+    /** The workbook read into and written from. */
     readonly workbook: Workbook;
+    /** Never set (always null): kept for compatibility with the JavaScript version. */
     worksheet: Worksheet | null;
 
     constructor(workbook: Workbook) {

@@ -16,7 +16,7 @@ TypeScript sources in `src/`; `lib/` is build output (tsc → CommonJS + `.d.ts`
 | browser bundle / tests | `bun run build` then `bun run test:browser` (local Chrome, temp profile) and `bun run test:dist` |
 | types                  | `bun run test:types` (tsc on `src/`, then `index.d.ts` + `spec/typescript`), `test:typescript`   |
 | performance            | `bun run benchmark:suite` (`--lib <other>/lib` to compare two builds)                            |
-| quality gates          | `bun run lint`, `bun run format:check`, `bun run audit`, `bun run check:install-scripts`         |
+| quality gates          | `bun run lint`, `check:tsdoc`, `format:check`, `audit`, `check:install-scripts`                  |
 
 Done = all of the above green. CI (`.github/workflows/tests.yml`) runs the same on Node 22/24/26, Bun, Chrome.
 
@@ -74,7 +74,7 @@ metadata, SSRF, postinstall hooks). Re-implement the fix, write the regression t
 - Modules use `import`/`export` (compiled to CommonJS). Public types are imported from the root `index.d.ts`
   (`import type { Style } from "../../index"`).
 - Class fields use [[Define]] semantics: for a property set by a base constructor use `declare foo: T`, not `foo: T`.
-- TSDoc on every exported symbol and public member. Performance changes are measured with `bun run benchmark:suite`.
+- TSDoc on every exported symbol and public member (`bun run check:tsdoc`). Performance changes are measured with `bun run benchmark:suite`.
 
 ## Conventions
 

@@ -174,11 +174,13 @@ class Worksheet {
     properties: WorksheetPropertiesModel;
     /** For all things printing. */
     pageSetup: PageSetupModel;
+    /** Headers and footers of the printed pages (`null` texts by default). */
     headerFooter: HeaderFooterModel;
     /** The data validations of the cells. */
     dataValidations: DataValidations;
     /** For freezepanes, split, zoom, gridlines, etc. */
     views: SheetViewModel[];
+    /** The auto filter of the worksheet (a range such as `"A1:C1"`, or its corners), if any. */
     autoFilter: AutoFilterModel | null | undefined;
     /** The images (and background image). */
     _media: Image[];
@@ -186,7 +188,9 @@ class Worksheet {
     sheetProtection: SheetProtectionModel | null | undefined;
     /** The tables by name (see setTable). */
     tables: Record<string, Table>;
+    /** The pivot tables of the worksheet (`addPivotTable`). */
     pivotTables: PivotTable[];
+    /** The conditional formattings (`addConditionalFormatting`). */
     conditionalFormattings: ConditionalFormattingModel[];
     /** The number of header rows of the columns set by the `columns` setter. */
     declare _headerRowCount?: number;
@@ -492,10 +496,12 @@ class Worksheet {
         return this._keys[key];
     }
 
+    /** Registers `value` as the column of `key` (`column.key = …` calls it). */
     setColumnKey(key: string, value: Column): void {
         this._keys[key] = value;
     }
 
+    /** Unregisters the column of `key`. */
     deleteColumnKey(key: string): void {
         delete this._keys[key];
     }

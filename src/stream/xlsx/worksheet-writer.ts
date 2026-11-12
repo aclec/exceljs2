@@ -125,21 +125,31 @@ function committedError(): Error {
 class WorksheetWriter {
     /** The number of the worksheet in the workbook. */
     readonly id: number;
+    /** The worksheet name. */
     name: string;
+    /** The visibility (`"visible"`, `"hidden"`, `"veryHidden"`). */
     state: WorksheetState;
     /** True once {@link commit} was called: no row can be added. */
     committed: boolean;
+    /** The data validations of the cells. */
     dataValidations: DataValidations;
+    /** The conditional formattings (`addConditionalFormatting`). */
     conditionalFormatting: ConditionalFormattingOptions[];
+    /** The manual page breaks (`row.addPageBreak`). */
     rowBreaks: RowBreak[];
+    /** The worksheet properties (tab colour, outline, default row height…). */
     properties: WorksheetWriterProperties;
+    /** Headers and footers of the printed pages (`null` by default). */
     headerFooter: WorksheetWriterHeaderFooter;
+    /** For all things printing (margins, orientation, fit to page…). */
     pageSetup: WorksheetWriterPageSetup;
     /** Use the shared strings table (smaller file, more memory). */
     useSharedStrings: boolean;
     /** True once a row with notes was written. */
     hasComments: boolean;
+    /** The auto filter of the worksheet, or null. */
     autoFilter: AutoFilter | null;
+    /** The protection of the worksheet, or null when it is not protected. */
     sheetProtection: SheetProtectionModel | null;
     /** True once `<sheetData>` was opened. */
     startedData: boolean;

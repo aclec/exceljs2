@@ -26,12 +26,19 @@ export type ImageInput = Omit<MediaModel, "type" | "name" | "index">;
  * read and write it.
  */
 class Workbook {
+    /** Document property: the category ("" by default). */
     category: string | undefined;
+    /** Document property: the company ("" by default). */
     company: string | undefined;
+    /** Document property: the creation date (now by default). */
     created: Date | undefined;
+    /** Document property: the description ("" by default). */
     description: string | undefined;
+    /** Document property: the keywords ("" by default). */
     keywords: string | undefined;
+    /** Document property: the manager ("" by default). */
     manager: string | undefined;
+    /** Document property: the date of the last change (now by default). */
     modified: Date | undefined;
     /** Workbook properties (e.g. `date1904`). */
     properties: Partial<WorkbookProperties>;
@@ -39,12 +46,15 @@ class Workbook {
     calcProperties: Partial<CalculationProperties>;
     /** The worksheets, indexed by id (sparse: index 0 and removed ids are empty). */
     _worksheets: (Worksheet | undefined)[];
+    /** Document property: the subject ("" by default). */
     subject: string | undefined;
+    /** Document property: the title ("" by default). */
     title: string | undefined;
     /** The workbook views (windows). */
     views: WorkbookViewModel[];
     /** The images (`addImage`), indexed by image id. */
     media: MediaModel[];
+    /** The pivot tables of the worksheets (`worksheet.addPivotTable`, one at most). */
     pivotTables: PivotTable[];
     _definedNames: DefinedNames;
     /**
@@ -55,11 +65,17 @@ class Workbook {
     /** The number of merged cells of all the worksheets, kept up to date by the worksheets. */
     _mergedCellCount: number;
     // set by the application or the model setter
+    /** Document property: the author. */
     declare creator?: string | undefined;
+    /** Document property: the author of the last change. */
     declare lastModifiedBy?: string | undefined;
+    /** Document property: the date of the last print. */
     declare lastPrinted?: Date | undefined;
+    /** Document property: the language. */
     declare language?: string | undefined;
+    /** Document property: the revision number. */
     declare revision?: number | undefined;
+    /** Document property: the content status (`"Draft"`, `"Final"`…). */
     declare contentStatus?: string | undefined;
     /** The themes read from a file (theme part name → XML), written back as they are. */
     declare _themes?: Record<string, string> | undefined;

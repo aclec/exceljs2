@@ -19,7 +19,9 @@ import type Workbook from "../doc/workbook";
 /** Compiles only when `T` is assignable to `U`. */
 type Conforms<T extends U, U> = T;
 
+/** Compiles only when the Anchor class of src/doc conforms to `Anchor` of index.d.ts, but for the members omitted (known mismatches). */
 export type AnchorConforms = Conforms<Anchor, Omit<Public.Anchor, "worksheet">>;
+/** Compiles only when the Cell class of src/doc conforms to `Cell` of index.d.ts, but for the members omitted (known mismatches). */
 export type CellConforms = Conforms<
     Cell,
     Omit<
@@ -51,6 +53,7 @@ export type CellConforms = Conforms<
         | "sheetName"
     >
 >;
+/** Compiles only when the Row class of src/doc conforms to `Row` of index.d.ts, but for the members omitted (known mismatches). */
 export type RowConforms = Conforms<
     Row,
     Omit<
@@ -71,17 +74,31 @@ export type RowConforms = Conforms<
         | "fill"
     >
 >;
+/** Compiles only when the Column class of src/doc conforms to `Column` of index.d.ts, but for the members omitted (known mismatches). */
 export type ColumnConforms = Conforms<Column, Omit<Public.Column, "values" | "worksheet" | "headers" | "eachCell">>;
+/** Compiles only when the Range class of src/doc conforms to `Range` of index.d.ts, but for the members omitted (known mismatches). */
 export type RangeConforms = Conforms<Range, Omit<Public.Range, "sheetName" | "decode">>;
+/**
+ * Compiles only when the DataValidations class of src/doc conforms to `DataValidations` of index.d.ts, but for the members omitted (known
+ * mismatches).
+ */
 export type DataValidationsConforms = Conforms<DataValidations, Omit<Public.DataValidations, "model" | "add" | "find">>;
+/**
+ * Compiles only when the DefinedNames class of src/doc conforms to `DefinedNames` of index.d.ts, but for the members omitted (known
+ * mismatches).
+ */
 export type DefinedNamesConforms = Conforms<
     DefinedNames,
     Omit<Public.DefinedNames, "getMatrix" | "addEx" | "removeEx" | "removeAllNames" | "forEach" | "getNamesEx" | "getRanges">
 >;
+/** Compiles only when the Table class of src/doc conforms to `Table` of index.d.ts, but for the members omitted (known mismatches). */
 export type TableConforms = Conforms<
     Table,
     Omit<Public.Table, "getColumn" | "ref" | "headerRow" | "totalsRow" | "style" | "columns" | "rows">
 >;
+/**
+ * Compiles only when the Worksheet class of src/doc conforms to `Worksheet` of index.d.ts, but for the members omitted (known mismatches).
+ */
 export type WorksheetConforms = Conforms<
     Worksheet,
     Omit<
@@ -125,6 +142,9 @@ export type WorksheetConforms = Conforms<
         | "getTables"
     >
 >;
+/**
+ * Compiles only when the Workbook class of src/doc conforms to `Workbook` of index.d.ts, but for the members omitted (known mismatches).
+ */
 export type WorkbookConforms = Conforms<
     Workbook,
     Omit<

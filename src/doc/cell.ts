@@ -164,10 +164,12 @@ class Cell {
         this._mergeSlaves = undefined;
     }
 
+    /** The worksheet of the cell. */
     get worksheet(): CellWorksheet {
         return this._row.worksheet;
     }
 
+    /** The workbook of the cell. */
     get workbook(): CellWorksheet["workbook"] {
         return this._row.worksheet.workbook;
     }
@@ -185,6 +187,10 @@ class Cell {
 
     // =========================================================================
     // Styles stuff
+    /**
+     * The number format (`"0.00%"`, `"dd/mm/yyyy"`…). Setting a style property copies the style object (copy on write; the cells of a
+     * merge keep sharing it).
+     */
     get numFmt(): StyleModel["numFmt"] {
         return this.style.numFmt;
     }
@@ -193,6 +199,7 @@ class Cell {
         this._applyStyle("numFmt", value);
     }
 
+    /** The font. Setting it copies the style object (see {@link numFmt}). */
     get font(): StyleModel["font"] {
         return this.style.font;
     }
@@ -201,6 +208,7 @@ class Cell {
         this._applyStyle("font", value);
     }
 
+    /** The alignment. Setting it copies the style object (see {@link numFmt}). */
     get alignment(): StyleModel["alignment"] {
         return this.style.alignment;
     }
@@ -209,6 +217,7 @@ class Cell {
         this._applyStyle("alignment", value);
     }
 
+    /** The borders. Setting them copies the style object (see {@link numFmt}). */
     get border(): StyleModel["border"] {
         return this.style.border;
     }
@@ -217,6 +226,7 @@ class Cell {
         this._applyStyle("border", value);
     }
 
+    /** The fill. Setting it copies the style object (see {@link numFmt}). */
     get fill(): StyleModel["fill"] {
         return this.style.fill;
     }
@@ -225,6 +235,7 @@ class Cell {
         this._applyStyle("fill", value);
     }
 
+    /** The protection (locked, hidden). Setting it copies the style object (see {@link numFmt}). */
     get protection(): StyleModel["protection"] {
         return this.style.protection;
     }
@@ -430,6 +441,7 @@ class Cell {
         return escapeHtml(this.text);
     }
 
+    /** The text of the cell (same as {@link text}). */
     toString(): string {
         return this.text;
     }
@@ -580,8 +592,32 @@ class Cell {
 // Each holds the model of the cell value (`model`), created by its constructor. The Cell model setter creates the holder
 // of the model's type, then replaces its model with the given one. The class names are visible (spec, debugging).
 
+/**
+ * The contract of the value holders of a {@link Cell}: one class per value type, chosen by `createValue()`. The cell
+ * delegates `value`, `type`, `effectiveType`, `model`, `toCsvString()` and `toString()` to its holder; the members documented
+ * here apply to every implementation.
+ */
+interface CellValueHolder {
+    /** The cell model of the value: address, type, value and the fields of the type (what `cell.model` is built from). */
+    readonly model: CellModel;
+    /** The value, as `cell.value` returns it (a Merge holder returns its master's value). */
+    readonly value: unknown;
+    /** The value type ({@link ValueType}) of the holder. */
+    readonly type: ValueType;
+    /** The type the value displays as: the type of a formula's result, of a merge master's value, else {@link type}. */
+    readonly effectiveType: ValueType;
+    /** The address of the cell (`A1`); updated when rows or columns are spliced. */
+    address: string;
+    /** The value as written in a CSV file (a number for a boolean, as the JavaScript version always did). */
+    toCsvString(): string | number | undefined;
+    /** Releases what the holder references before it is replaced (a merge unregisters itself from its master). */
+    release(): void;
+    /** The value as text (`cell.text`). */
+    toString(): string;
+}
+
 /** A cell without value. */
-class NullValue {
+class NullValue implements CellValueHolder {
     model: NullCellModel;
 
     constructor(cell: Cell) {
@@ -627,7 +663,7 @@ class NullValue {
 }
 
 /** A number. */
-class NumberValue {
+class NumberValue implements CellValueHolder {
     model: NumberCellModel;
 
     constructor(cell: Cell, value: number) {
@@ -674,7 +710,7 @@ class NumberValue {
 }
 
 /** A string (a String object is held as it is). */
-class StringValue {
+class StringValue implements CellValueHolder {
     model: StringCellModel & { value: string };
 
     constructor(cell: Cell, value: string) {
@@ -724,7 +760,7 @@ class StringValue {
  * A rich text (`{ richText: [{ text, font }] }`). NB: the model created from a value has the type String (a loaded one
  * has RichText); the cell's `type` is RichText either way.
  */
-class RichTextValue {
+class RichTextValue implements CellValueHolder {
     model: StringCellModel & { value: RichTextObject };
 
     constructor(cell: Cell, value: RichTextObject) {
@@ -772,7 +808,7 @@ class RichTextValue {
 }
 
 /** A date. */
-class DateValue {
+class DateValue implements CellValueHolder {
     model: DateCellModel;
 
     constructor(cell: Cell, value: Date) {
@@ -819,7 +855,7 @@ class DateValue {
 }
 
 /** A hyperlink: a text, a target, and an optional tooltip. */
-class HyperlinkValue {
+class HyperlinkValue implements CellValueHolder {
     model: HyperlinkCellModel;
 
     /** @param value - nothing from the Cell model setter, which replaces the model right after */
@@ -859,6 +895,7 @@ class HyperlinkValue {
         }
     }
 
+    /** The text shown for the link (as it is: a loaded hyperlink's text may be another value than a string). */
     get text(): HyperlinkCellModel["text"] {
         return this.model.text;
     }
@@ -867,6 +904,7 @@ class HyperlinkValue {
         this.model.text = value;
     }
 
+    /** The target: a URL, or a place in the workbook (`#Sheet1!A1`). */
     get hyperlink(): string {
         return this.model.hyperlink;
     }
@@ -904,7 +942,7 @@ class HyperlinkValue {
 }
 
 /** A cell merged into another one (its master): it shows and sets the master's value. */
-class MergeValue {
+class MergeValue implements CellValueHolder {
     model: MergeCellModel;
     /** The merged cell. */
     _cell: Cell;
@@ -942,10 +980,12 @@ class MergeValue {
         }
     }
 
+    /** Whether this cell is merged into `master`. */
     isMergedTo(master: Cell): boolean {
         return master === this._master;
     }
 
+    /** The master cell of the merge (whose value and style this cell shows). */
     get master(): Cell {
         return this._master;
     }
@@ -990,7 +1030,7 @@ const formulaRangeRegex = /([a-zA-Z0-9]+!)?[A-Z]{1,3}\d{1,4}:[A-Z]{1,3}\d{1,4}/g
 const formulaCellRegex = /([a-zA-Z0-9]+!)?[A-Z]{1,3}\d{1,4}/g;
 
 /** A formula: a master formula, or a clone of a shared formula, with its cached result. */
-class FormulaValue {
+class FormulaValue implements CellValueHolder {
     /** The cell (to find the master of a shared formula). */
     cell: Cell;
     model: FormulaCellModel;
@@ -1083,6 +1123,7 @@ class FormulaValue {
         this.model.formula = value;
     }
 
+    /** Master (a formula of its own), Shared (a clone of a shared formula), or None. */
     get formulaType(): FormulaType {
         if (this.model.formula) {
             return FormulaType.Master;
@@ -1093,6 +1134,7 @@ class FormulaValue {
         return FormulaType.None;
     }
 
+    /** The cached result of the formula (as last computed by Excel, or as set), if any. */
     get result(): FormulaResult | undefined {
         return this.model.result;
     }
@@ -1165,7 +1207,7 @@ class FormulaValue {
 }
 
 /** A shared string index (a loaded model of the stream reader), or a `{ sharedString }` value. */
-class SharedStringValue {
+class SharedStringValue implements CellValueHolder {
     model: SharedStringCellModel;
 
     constructor(cell: Cell, value: SharedStringCellModel["value"]) {
@@ -1213,7 +1255,7 @@ class SharedStringValue {
 }
 
 /** A boolean. */
-class BooleanValue {
+class BooleanValue implements CellValueHolder {
     model: BooleanCellModel;
 
     constructor(cell: Cell, value: boolean) {
@@ -1261,7 +1303,7 @@ class BooleanValue {
 }
 
 /** An error value (`{ error: "#N/A" }`). */
-class ErrorValue {
+class ErrorValue implements CellValueHolder {
     model: ErrorCellModel;
 
     constructor(cell: Cell, value: CellErrorValue) {
@@ -1311,7 +1353,7 @@ class ErrorValue {
  * Any other object: held with its JSON text (`model.value`) and itself (`model.rawValue`). NB: its type is String, in
  * the model too (there is no JSON value type).
  */
-class JSONValue {
+class JSONValue implements CellValueHolder {
     model: StringCellModel & { value: string; rawValue: object };
 
     constructor(cell: Cell, value: object) {

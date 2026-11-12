@@ -223,6 +223,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
 
     /** The input given to the constructor (read when {@link parse} gets none). */
     input: WorkbookReaderInput | undefined;
+    /** The options (defaults applied: see {@link WorkbookReaderOptions}). */
     options: WorkbookReaderOptions;
     /** The styles: the default ones, replaced by those of the file with `styles: "cache"`. */
     styles: ReaderStyles;

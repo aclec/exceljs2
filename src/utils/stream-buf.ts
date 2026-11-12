@@ -190,18 +190,19 @@ class StreamBuf extends Duplex {
     bufSize: number;
     /** The data written and not read yet. */
     buffers: ReadWriteBuf[];
-    // batch mode fills a buffer completely before passing the data on
-    // to pipes or 'readable' event listeners
+    /** Batch mode: a buffer is filled completely before its data is passed on to the pipes or 'readable' listeners. */
     batch: boolean;
+    /** While corked (`cork()`), written data is kept until `uncork()`. */
     corked: boolean;
-    // where in the current writable buffer we're up to
+    /** Where in the current writable buffer the writes are up to. */
     inPos: number;
-    // where in the current readable buffer we've read up to
+    /** Where in the current readable buffer the reads are up to. */
     outPos: number;
-    // consuming pipe streams go here
+    /** The streams piped from this one (`pipe()`). */
     pipes: NodeJS.WritableStream[];
-    // controls emit('data')
+    /** Whether 'data' events are paused (`pause()` / `resume()`). */
     paused: boolean;
+    /** The encoding of the strings read (`setEncoding()`), or null for Buffers. */
     encoding: BufferEncoding | null;
 
     constructor(options?: StreamBufOptions) {

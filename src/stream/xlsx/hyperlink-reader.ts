@@ -47,10 +47,13 @@ interface HyperlinkReaderEvents {
  * (`hyperlinks: "emit"`), or cached in {@link hyperlinks} keyed by relationship id (`hyperlinks: "cache"`).
  */
 class HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
+    /** The workbook reader that the worksheet belongs to. */
     readonly workbook: WorkbookReader;
     /** The number of the worksheet part. */
     readonly id: string;
+    /** The XML of the relationships part. */
     readonly iterator: SaxInput;
+    /** The `hyperlinks` option of the workbook reader. */
     readonly options: Pick<WorkbookReaderOptions, "hyperlinks">;
 
     /** `hyperlinks: "cache"`: the relationships read, keyed by relationship id (no prototype: the ids come from the file). */
