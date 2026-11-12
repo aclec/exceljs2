@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import { PassThrough } from "stream";
+import { PassThrough, type Stream } from "stream";
 import { ZipWriter, type ZipOutput, type ZipWriterOptions } from "../utils/zip-stream";
 import { readZip, type ZipInput, type ZipReadOptions } from "../utils/zip-reader";
 import StreamBuf from "../utils/stream-buf";
@@ -453,7 +453,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
      *
      * @throws (rejects) on an error of the stream, or as {@link load}
      */
-    async read(stream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream, options?: XlsxLoadOptions): Promise<TWorkbook> {
+    async read(stream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream | Stream, options?: XlsxLoadOptions): Promise<TWorkbook> {
         // TODO: Remove once node v8 is deprecated
         // Detect and upgrade old streams
         let input = stream as Partial<AsyncIterable<Uint8Array>> & Partial<NodeJS.ReadableStream>;
@@ -1073,7 +1073,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
      *
      * @returns the bytes of the file
      */
-    async writeBuffer(options?: XlsxWriteOptions): Promise<Buffer> {
+    async writeBuffer(options?: XlsxWriteOptions): Promise<Buffer<ArrayBuffer>> {
         const chunks: Buffer[] = [];
         const collector: ZipOutput = {
             write(chunk: Buffer) {

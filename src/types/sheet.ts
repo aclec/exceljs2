@@ -29,6 +29,8 @@ import type {
 import type { CellModel, ColModel, FormulaResult, ParsedCellModel, RowModel } from "./cell";
 import type { ColorModel, DxfModel } from "./style";
 import type { PivotTable } from "../doc/pivot-table";
+import type { CellValue } from "../doc/cell";
+import type Range from "../doc/range";
 import type { MediaModel, RelationshipModel } from "./book";
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -507,7 +509,8 @@ export interface TableModel {
     totalsRow?: boolean;
     style?: TableStyleProperties | null;
     columns: TableColumnModel[];
-    rows?: unknown[][];
+    /** The values of the data rows, by column (given to `addTable`, `addRow`, `addColumn`: `undefined` for a missing one). */
+    rows?: (CellValue | undefined)[][];
     tl?: { row: number; col: number; address?: string };
     /** write: `tableN.xml` */
     target?: string;
@@ -554,7 +557,7 @@ export interface WorksheetModel {
     cols?: ColModel[];
     rows: RowModel<CellModel>[];
     /** Doc getter: the used range (a Range, rendered as its `range`). Parse: the `ref` string. */
-    dimensions?: { readonly range: string } | string;
+    dimensions?: Range | string;
     /** Doc getter: the merged ranges (`A1:B2`). */
     merges?: string[];
     /** Write (prepare) and parse: the merged ranges; read by the doc setter. */

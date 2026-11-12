@@ -329,7 +329,7 @@ class CSV {
      *
      * @returns the CSV bytes
      */
-    async writeBuffer(options?: Partial<CsvWriteOptions>): Promise<Buffer> {
+    async writeBuffer(options?: Partial<CsvWriteOptions>): Promise<Buffer<ArrayBuffer>> {
         const stream = new StreamBuf();
         await this.write(stream, options);
         return stream.read();
