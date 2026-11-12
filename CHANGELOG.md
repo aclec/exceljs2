@@ -65,6 +65,19 @@ All fixes have regression tests in `spec/integration/security`.
   other worksheets are ignored.
 - Data validations: every `cell.dataValidation` lookup scanned all the range keys (an unbounded number once 100,000 cells are expanded: 0.75
   ms per lookup with 250,000 keys). Range keys are indexed by position and size; a lookup no longer depends on their number.
+- Second review (super-linear time or memory on small hostile files, regression tests in `spec/integration/security/complexity.spec.js`):
+    - Conditional formatting: the number check of `<cfvo val>` / x14 `<xm:f>` thresholds was quadratic (ReDoS, 6 KB file: 15 s); linear.
+    - Loading matched each worksheet part to its `<sheet>` and re-joined the `Print_Area` names of a sheet quadratically; both linear.
+    - Columns: one `<col min="1" max="16384">` (or one cell in column XFD) created 16,384 Column objects per worksheet (57 KB file: 534 MB).
+      Columns of loaded ranges are created when they are used; `ws.columns` still lists them all.
+    - Defined names on far single cells (`$XFD$1048576`) cost a million steps per name on every write or splice; now proportional to the
+      cells.
+    - Image anchors beyond the grid are clamped, and reading `range.tl.col` / `.row` no longer creates the row or columns up to the anchor.
+    - Re-saving a rich text referenced by many cells serialised it once per cell; once per text.
+    - CSV: `csv.read` ran four date parses on every text field (~100 times slower); only fields shaped like a default date are parsed.
+      `csv.write` / `writeFile` crashed the process on a destination error (ENOENT, ENOSPC); the promise rejects.
+    - Pivot tables: header names such as `constructor` were looked up in plain objects (corrupt pivot cache).
+    - An invalid `docProps/core.xml` date loaded as an Invalid Date that made every later write reject; it is read as undefined.
 
 ### Dependencies
 

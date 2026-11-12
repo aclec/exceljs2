@@ -1,3 +1,4 @@
+const { Readable } = require("stream");
 const fs = require("fs");
 
 const testXformHelper = require("../test-xform-helper");
@@ -101,4 +102,23 @@ const expectations = [
 
 describe("CoreXform", () => {
     testXformHelper(expectations);
+
+    it("reads a date that is not valid as undefined", async () => {
+        const xml =
+            `<cp:coreProperties ${Object.entries(CoreXform.CORE_PROPERTY_ATTRIBUTES)
+                .map(([name, value]) => `${name}="${value}"`)
+                .join(" ")}><dcterms:created xsi:type="dcterms:W3CDTF">garbage</dcterms:created>` +
+            `<dcterms:modified xsi:type="dcterms:W3CDTF">2020-01-05T10:20:30Z</dcterms:modified><cp:lastPrinted>x</cp:lastPrinted></cp:coreProperties>`;
+        const model = await new CoreXform().parseStream(Readable.from([xml]));
+        expect(model.created).to.equal(undefined);
+        expect(model.lastPrinted).to.equal(undefined);
+        expect(model.modified).to.deep.equal(new Date("2020-01-05T10:20:30Z"));
+    });
+
+    it("does not write dates that are not valid", () => {
+        const xml = new CoreXform().toXml({ creator: "me", created: new Date("x"), lastPrinted: new Date("y"), modified: new Date(0) });
+        expect(xml).to.not.include("dcterms:created>");
+        expect(xml).to.not.include("cp:lastPrinted");
+        expect(xml).to.include('<dcterms:modified xsi:type="dcterms:W3CDTF">1970-01-01T00:00:00Z</dcterms:modified>');
+    });
 });

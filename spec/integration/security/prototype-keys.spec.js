@@ -321,4 +321,37 @@ describe("prototype-named keys in xlsx parts", function () {
         expect(polluted).to.deep.equal([]);
         expect(await writeUnrelatedWorkbook()).to.equal("hello");
     });
+
+    describe("pivot table field names", () => {
+        async function pivotCacheDefinition(valueHeader) {
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet("src");
+            ws.addRows([
+                ["A", "B", valueHeader],
+                ["a", "b", 5],
+                ["a2", "b2", 7],
+            ]);
+            wb.addWorksheet("p").addPivotTable({ sourceSheet: ws, rows: ["A"], columns: ["B"], values: [valueHeader], metric: "sum" });
+            return readPart(await wb.xlsx.writeBuffer(), "xl/pivotCache/pivotCacheDefinition1.xml");
+        }
+
+        it("writes a value field named like an Object.prototype member as a numeric field", async () => {
+            const expected = (await pivotCacheDefinition("C")).replace('name="C"', 'name="constructor"');
+            expect(await pivotCacheDefinition("constructor")).to.equal(expected);
+        });
+
+        it("rejects fields named like Object.prototype members that are not headers", () => {
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet("src");
+            ws.addRows([
+                ["A", "B", "C"],
+                ["a", "b", 5],
+            ]);
+            for (const name of KEYS) {
+                expect(() =>
+                    wb.addWorksheet(`p${name}`).addPivotTable({ sourceSheet: ws, rows: [name], columns: ["B"], values: ["C"] })
+                ).to.throw(`The header name "${name}" was not found in src.`);
+            }
+        });
+    });
 });
