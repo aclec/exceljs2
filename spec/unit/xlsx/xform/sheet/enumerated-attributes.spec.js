@@ -60,6 +60,19 @@ describe("Enumerated attributes of the worksheet elements", () => {
         expect(await parse(new CfvoExtXform(), '<x14:cfvo type="autoMin"/>')).to.deep.equal({ type: "autoMin" });
     });
 
+    it("<cfRule>: a cellIs rule keeps every operator of ST_ConditionalFormattingOperator", async () => {
+        for (const operator of ["containsText", "notContains", "beginsWith", "endsWith", "notBetween"]) {
+            const xml = `<cfRule type="cellIs" dxfId="0" priority="1" operator="${operator}"><formula>"a"</formula></cfRule>`;
+            expect(await parse(new CfRuleXform(), xml), operator).to.deep.equal({
+                type: "cellIs",
+                dxfId: 0,
+                priority: 1,
+                operator,
+                formulae: ['"a"'],
+            });
+        }
+    });
+
     it("<cfRule>: a rule of the variant of its type, an unknown operator or time period is absent", async () => {
         expect(
             await parse(

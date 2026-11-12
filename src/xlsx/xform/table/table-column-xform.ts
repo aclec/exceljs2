@@ -4,6 +4,7 @@ import type { TableColumnProperties } from "../../../../index";
 import type { ListItemOptions, TableColumnModel } from "../../../types";
 import { isOneOf } from "../../../utils/utils";
 import BaseXform from "../base-xform";
+import InvalidTablePartError from "./invalid-table-part-error";
 
 // the totals row functions of ECMA-376 ST_TotalsRowFunction
 const TOTALS_ROW_FUNCTIONS: Readonly<Record<NonNullable<TableColumnProperties["totalsRowFunction"]>, true>> = {
@@ -60,13 +61,13 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
 
     /**
      * @returns `true` for `<tableColumn>`
-     * @throws Error for a column without name (CT_TableColumn requires it)
+     * @throws InvalidTablePartError for a column without name (CT_TableColumn requires it)
      */
     override parseOpen(node: SaxTag): boolean {
         if (node.name === this.tag) {
             const { name, totalsRowLabel, totalsRowFunction, dxfId } = node.attributes;
             if (name === undefined) {
-                throw new Error("Invalid table: <tableColumn> without name");
+                throw new InvalidTablePartError("Invalid table: <tableColumn> without name");
             }
             this.model = {
                 name,

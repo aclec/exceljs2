@@ -175,6 +175,10 @@ const CELL_IS_OPERATORS: Readonly<Record<CellIsOperators, true>> = {
     lessThanOrEqual: true,
     between: true,
     notBetween: true,
+    containsText: true,
+    notContains: true,
+    beginsWith: true,
+    endsWith: true,
 };
 
 const TIME_PERIODS: Readonly<Record<TimePeriodTypes, true>> = {

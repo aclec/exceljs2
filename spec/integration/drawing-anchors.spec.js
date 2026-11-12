@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { tamper } = require("../utils/xlsx-tamper");
+const { tamper, readPart } = require("../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -52,9 +52,16 @@ describe("Drawing anchors read from a file", () => {
         expect(invalidCol.range.tl.nativeCol).to.equal(0);
     });
 
-    it("reads an invalid editAs as oneCell", async () => {
-        const [image] = await images(await drawingBuffer((xml) => xml.replace(/editAs="oneCell"/, 'editAs="bogus"')));
-        expect(image.range.editAs).to.equal("oneCell");
+    it("reads a missing or invalid editAs of a two-cell anchor as twoCell (the CT_TwoCellAnchor default)", async () => {
+        for (const patch of [(xml) => xml.replace(/ editAs="oneCell"/, ""), (xml) => xml.replace(/editAs="oneCell"/, 'editAs="bogus"')]) {
+            const buffer = await drawingBuffer(patch);
+            const [image] = await images(buffer);
+            expect(image.range.editAs).to.equal("twoCell");
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer);
+            const xml = await readPart(await wb.xlsx.writeBuffer(), DRAWING);
+            expect(xml.match(/<xdr:twoCellAnchor[^>]*>/)[0]).to.not.include('editAs="oneCell"');
+        }
     });
 
     it("throws a clear Error when writing an image anchored by one cell without its size", async () => {

@@ -1663,9 +1663,23 @@ export interface WorkbookModelInput extends Omit<WorkbookModel, "worksheets"> {
 
 export type WorksheetState = "visible" | "hidden" | "veryHidden";
 
-/** The comparison of a `cellIs` rule. */
+/**
+ * The comparison of a `cellIs` rule (ST_ConditionalFormattingOperator). Excel writes the text tests (`containsText`,
+ * `notContains`, `beginsWith`, `endsWith`) as `containsText` rules; they are valid on a `cellIs` rule too.
+ */
 export type CellIsOperators =
-    "equal" | "notEqual" | "greaterThan" | "greaterThanOrEqual" | "lessThan" | "lessThanOrEqual" | "between" | "notBetween";
+    | "equal"
+    | "notEqual"
+    | "greaterThan"
+    | "greaterThanOrEqual"
+    | "lessThan"
+    | "lessThanOrEqual"
+    | "between"
+    | "notBetween"
+    | "containsText"
+    | "notContains"
+    | "beginsWith"
+    | "endsWith";
 
 /** The test of a `containsText` rule. */
 export type ContainsTextOperators =

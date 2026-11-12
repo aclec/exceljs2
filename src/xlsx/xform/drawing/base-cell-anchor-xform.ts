@@ -30,9 +30,10 @@ abstract class BaseCellAnchorXform extends BaseXform<DrawingAnchorModel> {
         switch (node.name) {
             case this.tag: {
                 this.reset();
-                // the model is built when the element closes
+                // the model is built when the element closes; a missing or invalid editAs is the default of the
+                // anchor: twoCell for a <xdr:twoCellAnchor> (CT_TwoCellAnchor), oneCell for the others (no attribute)
                 const { editAs } = node.attributes;
-                this.parsedEditAs = isOneOf(EDIT_AS, editAs) ? editAs : "oneCell";
+                this.parsedEditAs = isOneOf(EDIT_AS, editAs) ? editAs : this.tag === "xdr:twoCellAnchor" ? "twoCell" : "oneCell";
                 break;
             }
             default: {

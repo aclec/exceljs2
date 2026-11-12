@@ -22,6 +22,7 @@ import WorkbookXform from "./xform/book/workbook-xform";
 import WorksheetXform from "./xform/sheet/worksheet-xform";
 import DrawingXform from "./xform/drawing/drawing-xform";
 import TableXform from "./xform/table/table-xform";
+import InvalidTablePartError from "./xform/table/invalid-table-part-error";
 import PivotCacheRecordsXform from "./xform/pivot-table/pivot-cache-records-xform";
 import PivotCacheDefinitionXform from "./xform/pivot-table/pivot-cache-definition-xform";
 import PivotTableXform from "./xform/pivot-table/pivot-table-xform";
@@ -393,9 +394,21 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         if (comments) model.comments[entryName] = comments;
     }
 
+    /**
+     * Reads a table part. A part that CT_Table forbids (a table or a column without name, no `<tableColumns>`) is
+     * skipped, as Excel repairs such a file by removing the table: the worksheet keeps its cells, without the table.
+     */
     async _processTableEntry(stream: SaxInput, model: XlsxReadModel, entryName: string): Promise<void> {
         const xform = new TableXform();
-        const table = await xform.parseStream(stream);
+        let table: TableModel | null | undefined;
+        try {
+            table = await xform.parseStream(stream);
+        } catch (error) {
+            if (error instanceof InvalidTablePartError) {
+                return;
+            }
+            throw error;
+        }
         // a part without <table> parses to nothing: no entry (a lookup gives undefined, as the stored undefined did)
         if (table) model.tables[entryName] = table;
     }

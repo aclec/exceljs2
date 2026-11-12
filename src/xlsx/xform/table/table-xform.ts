@@ -3,6 +3,7 @@ import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
 import type { ListItemOptions, StyleLookup, TableColumnModel, TableModel } from "../../../types";
 
 import BaseXform, { ownEntry } from "../base-xform";
+import InvalidTablePartError from "./invalid-table-part-error";
 import ListXform from "../list-xform";
 
 import AutoFilterXform from "./auto-filter-xform";
@@ -103,7 +104,7 @@ class TableXform extends BaseXform<TableModel> {
                 this.reset();
                 const { name: tableName } = attributes;
                 if (tableName === undefined) {
-                    throw new Error("Invalid table part: <table> without name");
+                    throw new InvalidTablePartError("Invalid table part: <table> without name");
                 }
                 this.model = {
                     name: tableName,
@@ -136,7 +137,7 @@ class TableXform extends BaseXform<TableModel> {
         }
     }
 
-    /** @throws Error for a table without `<tableColumns>` (CT_Table requires it) */
+    /** @throws InvalidTablePartError for a table without `<tableColumns>` (CT_Table requires it) */
     override parseClose(name: string): boolean {
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
@@ -154,7 +155,7 @@ class TableXform extends BaseXform<TableModel> {
                     return false;
                 }
                 if (!columns) {
-                    throw new Error(`Invalid table ${JSON.stringify(model.name)}: no <tableColumns>`);
+                    throw new InvalidTablePartError(`Invalid table ${JSON.stringify(model.name)}: no <tableColumns>`);
                 }
                 model.columns = columns;
                 const autoFilter = this.map.autoFilter.model;
