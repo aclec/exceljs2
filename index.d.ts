@@ -1545,20 +1545,71 @@ export interface WorkbookProperties {
     date1904: boolean;
 }
 
-export interface JSZipGeneratorOptions {
+/**
+ * Zip options of the writers (`xlsx.write`, `writeBuffer`, `writeFile` and the streaming WorkbookWriter)
+ */
+export interface ZipOptions {
     /**
-     * @default DEFLATE
+     * DEFLATE level from 1 (fastest) to 9 (smallest); 0 stores the parts uncompressed
+     * @default 6
+     */
+    level: number;
+    /**
+     * Write ZIP64 records for every entry. They are added automatically when a size or an offset
+     * exceeds 4 GiB or the archive has 65535 entries or more.
+     * @default false
+     */
+    forceZip64: boolean;
+    /**
+     * Archive comment
+     */
+    comment: string;
+    /**
+     * @deprecated JSZip option (ExcelJS < 5): 'STORE' is `level: 0`
      */
     compression: "STORE" | "DEFLATE";
-    compressionOptions: null | {
-        /**
-         * @default 6
-         */
-        level: number;
-    };
+    /**
+     * @deprecated JSZip option (ExcelJS < 5): use `level`
+     */
+    compressionOptions: null | { level: number };
+    /**
+     * @deprecated archiver option (ExcelJS < 5): `store: true` is `level: 0`
+     */
+    store: boolean;
+    /**
+     * @deprecated archiver option (ExcelJS < 5): only `level` is used
+     */
+    zlib: { level?: number };
 }
 
-export interface XlsxReadOptions {
+/**
+ * @deprecated use ZipOptions
+ */
+export type JSZipGeneratorOptions = ZipOptions;
+
+/**
+ * Decompression limits of the readers. A file is rejected as soon as one of them is exceeded
+ * while it is inflated.
+ */
+export interface ZipReadLimits {
+    /**
+     * Maximum decompressed size of one zip entry (part), in bytes.
+     * @default 1 GiB (xlsx.load / read / readFile), 16 GiB (streaming WorkbookReader)
+     */
+    maxEntrySize: number;
+    /**
+     * Maximum decompressed size of all the entries read, in bytes.
+     * @default 2 GiB (xlsx.load / read / readFile), 32 GiB (streaming WorkbookReader)
+     */
+    maxUncompressedSize: number;
+    /**
+     * Maximum compression ratio of an entry larger than 10 MiB.
+     * @default 1000
+     */
+    maxCompressionRatio: number;
+}
+
+export interface XlsxReadOptions extends ZipReadLimits {
     /**
      * The list of XML node names to ignore while parsing an XLSX file
      */
@@ -1567,9 +1618,9 @@ export interface XlsxReadOptions {
 
 export interface XlsxWriteOptions extends stream.xlsx.WorkbookWriterOptions {
     /**
-     * The option passed to JsZip#generateAsync(options)
+     * Zip options
      */
-    zip: Partial<JSZipGeneratorOptions>;
+    zip: Partial<ZipOptions>;
 }
 
 export interface Xlsx {
@@ -2093,13 +2144,10 @@ export namespace stream {
             useStyles: boolean;
         }
 
-        interface ArchiverZipOptions {
-            comment: string;
-            forceLocalTime: boolean;
-            forceZip64: boolean;
-            store: boolean;
-            zlib: Partial<ZlibOptions>;
-        }
+        /**
+         * @deprecated use ZipOptions
+         */
+        type ArchiverZipOptions = ZipOptions;
 
         interface ZlibOptions {
             /**
@@ -2126,7 +2174,7 @@ export namespace stream {
              * Specifies whether to add style information to the workbook.
              * Styles can add some performance overhead. Default is false
              */
-            zip: Partial<ArchiverZipOptions>;
+            zip: Partial<ZipOptions>;
         }
 
         class WorkbookWriter extends Workbook {
@@ -2144,7 +2192,7 @@ export namespace stream {
             addWorkbook(): Promise<void>;
         }
 
-        interface WorkbookStreamReaderOptions {
+        interface WorkbookStreamReaderOptions extends Partial<ZipReadLimits> {
             /**
              * @default 'emit'
              */
@@ -2167,11 +2215,18 @@ export namespace stream {
             entries?: "emit" | "ignore";
         }
 
+        /**
+         * A file name, a Node.js stream (or any object with a `pipe` method), a web ReadableStream or an
+         * async iterable of byte chunks
+         */
+        type WorkbookReaderInput =
+            string | import("stream").Stream | import("stream/web").ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
+
         class WorkbookReader extends Workbook {
-            constructor(input: string | import("stream").Stream, options?: Partial<WorkbookStreamReaderOptions>);
-            read(input?: string | import("stream").Stream, options?: Partial<WorkbookStreamReaderOptions>): Promise<void>;
+            constructor(input: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>);
+            read(input?: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>): Promise<void>;
             [Symbol.asyncIterator](): AsyncGenerator<WorksheetReader>;
-            parse(input?: string | import("stream").Stream, options?: Partial<WorkbookStreamReaderOptions>): AsyncIterator<any>;
+            parse(input?: WorkbookReaderInput, options?: Partial<WorkbookStreamReaderOptions>): AsyncIterator<any>;
         }
 
         /**

@@ -50,9 +50,9 @@ ExcelJS reads and writes data; it does not decide whether that data is safe to u
   interpreted as formulas by spreadsheet applications. Neutralise untrusted values before writing CSV.
 - **Hyperlinks and other URLs** read from a file (`javascript:`, `file:`, ...) are returned unchanged. Validate them before rendering or
   following them.
-- **Decompressed size (zip bombs).** ExcelJS does not limit the decompressed size of the parts of an xlsx file, and memory use grows with
-  the size of legitimate workbooks. Limit upload sizes, and parse untrusted files in a worker thread or a separate process with memory and
-  time limits.
+- **Resource use within the limits.** Both readers reject zip bombs (`maxEntrySize`, `maxUncompressedSize`, `maxCompressionRatio`, see the
+  README), but memory and time still grow with the size of legitimate workbooks, and the defaults allow gigabytes. Lower the limits and the
+  upload size for untrusted files, and parse them in a worker thread or a separate process with memory and time limits.
 - **Formulas are not evaluated** by ExcelJS, but they are kept and will be evaluated by Excel when a user opens a file that you generated
   from untrusted input.
 - **Content passed through unchanged**, such as theme parts and media, is not sanitised.

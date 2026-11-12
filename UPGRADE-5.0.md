@@ -25,16 +25,18 @@ Applications that must run on an older Node.js or on Internet Explorer should st
 
 ## Dependencies
 
-Runtime dependencies were upgraded and three were removed. They are internal to ExcelJS, but you may notice them in your lockfile or bundle:
+Runtime dependencies were upgraded, three were removed and the three zip libraries were replaced by one. They are internal to ExcelJS, but
+you may notice them in your lockfile or bundle:
 
 | Dependency      | 4.x      | 5.0                                                                            |
 | --------------- | -------- | ------------------------------------------------------------------------------ |
-| archiver        | ^5.0.0   | ^7.0.1                                                                         |
 | dayjs           | ^1.8.34  | ^1.11.23                                                                       |
 | fast-csv        | ^4.3.1   | ^5.0.8                                                                         |
-| jszip           | ^3.10.1  | ^3.10.2                                                                        |
 | saxes           | ^5.0.1   | ^6.0.0                                                                         |
-| unzipper        | ^0.10.11 | ^0.12.5                                                                        |
+| archiver        | ^5.0.0   | removed: see [Zip library](#zip-library-fflate)                                |
+| jszip           | ^3.10.1  | removed: see [Zip library](#zip-library-fflate)                                |
+| unzipper        | ^0.10.11 | removed: see [Zip library](#zip-library-fflate)                                |
+| fflate          | -        | ^0.8.3 (new, no dependencies)                                                  |
 | readable-stream | ^3.6.0   | removed: `node:stream` is used (`stream-browserify` inside the browser bundle) |
 | tmp             | ^0.2.0   | removed: `fs.promises.mkdtemp`                                                 |
 | uuid            | ^8.3.0   | removed: `crypto.randomUUID` / `crypto.getRandomValues`                        |
@@ -215,3 +217,41 @@ browser projects that set `"types": []`.
 
 The typings use `get`/`set` accessor declarations in interfaces, which require TypeScript 4.3 or later; they are tested with TypeScript 5.9,
 6.0 and 7.0.
+
+## Zip library: fflate
+
+`archiver`, `jszip` and `unzipper` were replaced by ExcelJS's own zip code (records, ZIP64, limits) on top of one DEFLATE implementation per
+platform: `node:zlib` (native) on Node.js and Bun, and [fflate](https://github.com/101arrowz/fflate) (^0.8.3, no dependencies) in the
+browser bundle. The two produce standard archives that each reads from the other.
+
+### `zip` option of the writers
+
+The `zip` option of `xlsx.write` / `writeBuffer` / `writeFile` was passed to JSZip, the one of the streaming `WorkbookWriter` to archiver.
+Both writers now take the same options, and the old shapes keep working:
+
+| ExcelJS 4.x                                                                        | ExcelJS 5.0                    |
+| ---------------------------------------------------------------------------------- | ------------------------------ |
+| `{compression: 'DEFLATE', compressionOptions: {level: 9}}` (JSZip)                 | `{level: 9}`                   |
+| `{zlib: {level: 9}}` (archiver)                                                    | `{level: 9}`                   |
+| `{compression: 'STORE'}` (JSZip), `{store: true}` (archiver)                       | `{level: 0}`                   |
+| `{forceZip64: true}`, `{comment}` (archiver)                                       | unchanged, now in both writers |
+| other JSZip / archiver / zlib options (`type`, `platform`, `memLevel`, `strategy`) | ignored                        |
+| an invalid `level`                                                                 | throws a `TypeError`           |
+
+### Behaviour changes
+
+- **Decompression limits.** Both readers reject files whose content inflates beyond `maxEntrySize`, `maxUncompressedSize` or
+  `maxCompressionRatio` (see the [Security & limits](README.md#security--limits) section of the README for the defaults). A legitimate file
+  above the defaults needs the option raised, e.g. `xlsx.load(buffer, {maxEntrySize: 4 * 1024 ** 3})`.
+- **ZIP64** records are written when an entry or the archive exceeds 4 GiB, or with 65,535 entries or more. In 4.x the streaming writer
+  (archiver) did so but `writeBuffer` (JSZip) did not.
+- **`xlsx.load` input**: a Buffer, a `Uint8Array`, an `ArrayBuffer` or a `Blob`. Strings (JSZip's binary strings) and other values are
+  rejected with `Can't read the zip file: expected a Buffer, a Uint8Array, an ArrayBuffer or a Blob`; use `{base64: true}` for base64.
+- **Error messages** of malformed archives changed: a truncated stream rejects with `Unexpected end of zip data` (unzipper: `FILE_ENDED`),
+  other errors start with `Invalid or unsupported zip file:`. Part names are decoded as UTF-8, like JSZip did.
+- **Streaming reader input**: besides file names and `stream.Readable`, any object with a `pipe` method (e.g. a `readable-stream` or older
+  stream), a web `ReadableStream` and an async iterable of byte chunks are accepted.
+- **Image extensions** must be 1 to 5 letters or digits (`png`, `jpeg`, ...). Another value (which would end up in a zip entry name and in
+  XML) makes `writeBuffer` / `write` reject and `WorkbookWriter.addImage` throw.
+- A failing output stream (or an unreadable image file) now rejects `write` / `writeFile` / `WorkbookWriter.commit()` instead of leaving the
+  promise pending or raising an unhandled rejection.

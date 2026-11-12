@@ -1,6 +1,6 @@
 // Streaming writer (ExcelJS.stream.xlsx.WorkbookWriter): sheet XML structure and shared strings.
 const { PassThrough, Readable } = require("stream");
-const JSZip = require("jszip");
+const { readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -15,11 +15,6 @@ async function writeBuffer(build, options = {}) {
     await build(wb);
     await wb.commit();
     return Buffer.concat(chunks);
-}
-
-async function readPart(buffer, path) {
-    const zip = await JSZip.loadAsync(buffer);
-    return zip.file(path).async("string");
 }
 
 describe("WorkbookWriter (stream)", () => {

@@ -1,10 +1,8 @@
 // Streaming reader (ExcelJS.stream.xlsx.WorkbookReader) robustness tests.
-// Fixtures are built in-test with ExcelJS + JSZip so they stay reviewable.
+// Fixtures are built in-test with ExcelJS + fflate so they stay reviewable.
 const fs = require("fs");
 const { Readable } = require("stream");
-const JSZip = require("jszip");
-
-const { baseWorkbookBuffer, tamper } = require("../utils/xlsx-tamper");
+const { baseWorkbookBuffer, tamper, unzipParts, zipParts } = require("../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -35,17 +33,16 @@ async function readAll(input, options) {
 
 // rebuild the zip with its parts sorted by rank(path) (stable: equal ranks keep their order)
 async function reorderZip(buffer, rank) {
-    const source = await JSZip.loadAsync(buffer);
-    const names = Object.keys(source.files).filter((name) => !source.files[name].dir);
-    const ordered = names
+    const source = unzipParts(buffer);
+    const ordered = Object.keys(source)
         .map((name, index) => ({ name, index, rank: rank(name) }))
         .sort((a, b) => a.rank - b.rank || a.index - b.index)
         .map(({ name }) => name);
-    const target = new JSZip();
+    const target = {};
     for (const name of ordered) {
-        target.file(name, await source.file(name).async("nodebuffer"));
+        target[name] = source[name];
     }
-    return target.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    return zipParts(target);
 }
 
 async function readError(input) {
@@ -133,7 +130,8 @@ describe("WorkbookReader (stream)", () => {
                 fs.createReadStream = original;
             }
             expect(opened).to.have.length(2);
-            opened.forEach((stream) => expect(stream.destroyed).to.equal(true));
+            // closed (not only destroyed) before the directory is removed: Windows cannot remove open files
+            opened.forEach((stream) => expect(stream.closed).to.equal(true));
             expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
@@ -153,11 +151,46 @@ describe("WorkbookReader (stream)", () => {
                 counts.push(count);
             }
             expect(counts).to.deep.equal([3000, 1]);
+            // removed once the collected worksheets have been read
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(fs.existsSync(tracker.created[0])).to.equal(false);
+        });
+
+        it("removes the temp dir when spooled worksheets are skipped", async () => {
+            const buffer = await bigSheetFirstBuffer();
+            for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+                if (worksheet.name !== "Second") continue;
+                // eslint-disable-next-line no-unused-vars
+                for await (const row of worksheet) {
+                    // read
+                }
+            }
+            await readAll(chunkedStream(buffer), { worksheets: "ignore" });
+            expect(tracker.created).to.have.length(2);
+            tracker.created.forEach((dir) => expect(fs.existsSync(dir)).to.equal(false));
+        });
+
+        it("closes the spooled worksheet files read to the end before removing the temp dir", async () => {
+            const opened = [];
+            const original = fs.createReadStream;
+            fs.createReadStream = (...args) => {
+                const stream = original.apply(fs, args);
+                opened.push(stream);
+                return stream;
+            };
+            try {
+                await readAll(chunkedStream(await bigSheetFirstBuffer()));
+            } finally {
+                fs.createReadStream = original;
+            }
+            expect(opened).to.have.length(2);
+            opened.forEach((stream) => expect(stream.closed).to.equal(true));
+            expect(fs.existsSync(tracker.created[0])).to.equal(false);
         });
 
         it("rejects and removes the temp dir on a truncated file", async function () {
             this.timeout(10000);
-            // large enough for unzipper to stall inside the worksheet entry being spooled
+            // large enough for the input to end inside the worksheet entry being spooled
             const buffer = await bigSheetFirstBuffer(20000);
             const truncated = buffer.subarray(0, Math.floor(buffer.length * 0.5));
             const error = await readError(chunkedStream(truncated));
@@ -196,7 +229,7 @@ describe("WorkbookReader (stream)", () => {
         it("rejects when the input is truncated", async function () {
             this.timeout(5000);
             const error = await readError(chunkedStream(buffer.subarray(0, Math.floor(buffer.length * 0.8))));
-            expect(error && error.message).to.equal("FILE_ENDED");
+            expect(error && error.message).to.equal("Unexpected end of zip data");
         });
 
         it("rejects with the error of the input stream", async function () {

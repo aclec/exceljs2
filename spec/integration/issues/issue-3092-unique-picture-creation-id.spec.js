@@ -1,4 +1,4 @@
-const JSZip = require("jszip");
+const { readPart } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
@@ -15,10 +15,10 @@ describe("github issues", () => {
             ws.addImage(imageId, "D1:E2");
         });
 
-        const zip = await JSZip.loadAsync(await wb.xlsx.writeBuffer());
+        const buffer = await wb.xlsx.writeBuffer();
         const ids = [];
         for (const drawing of ["drawing1", "drawing2"]) {
-            const xml = await zip.file(`xl/drawings/${drawing}.xml`).async("string");
+            const xml = await readPart(buffer, `xl/drawings/${drawing}.xml`);
             xml.replace(/<a16:creationId [^>]*id="([^"]+)"/g, (m, id) => ids.push(id));
         }
         expect(ids).to.have.length(4);
