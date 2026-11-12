@@ -97,4 +97,41 @@ describe('xlsx read robustness', function() {
       expect(table.table.autoFilterRef).to.equal('A3:B4');
     });
   });
+
+  describe('document properties', () => {
+    it('loads when docProps/app.xml uses a prefixed root element', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'docProps/app.xml': () =>
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<ep:Properties xmlns:ep="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">' +
+          '<ep:Application>Other</ep:Application></ep:Properties>',
+      });
+      const wb = await load(buffer);
+      expect(wb.getWorksheet('Sheet1').getCell('A1').value).to.equal('hello');
+      expect(wb.company).to.equal(undefined);
+      expect(wb.manager).to.equal(undefined);
+    });
+
+    it('loads when docProps/app.xml has no root element', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'docProps/app.xml': () => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Other/>',
+      });
+      const wb = await load(buffer);
+      expect(wb.getWorksheet('Sheet1').getCell('A1').value).to.equal('hello');
+    });
+
+    it('ignores core properties it does not model', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(wb => {
+        wb.creator = 'me';
+      }), {
+        'docProps/core.xml': xml =>
+          xml.replace(
+            '</cp:coreProperties>',
+            '<dc:contributor>x</dc:contributor><dcterms:available><b>y</b></dcterms:available></cp:coreProperties>'
+          ),
+      });
+      const wb = await load(buffer);
+      expect(wb.creator).to.equal('me');
+    });
+  });
 });
