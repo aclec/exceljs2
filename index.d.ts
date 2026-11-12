@@ -2044,6 +2044,12 @@ export namespace stream {
 			parse(input?: string | import('stream').Stream, options?: Partial<WorkbookStreamReaderOptions>): AsyncIterator<any>;
 		}
 
+		/**
+		 * At runtime the WorkbookReader is an EventEmitter ('worksheet', 'shared-strings',
+		 * 'hyperlinks', 'entry', 'end', 'finished', 'error')
+		 */
+		interface WorkbookReader extends EventEmitter {}
+
 		interface WorksheetReaderOptions {
 			workbook: WorkbookReader;
 			id: number | string;

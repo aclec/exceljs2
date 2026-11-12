@@ -154,6 +154,12 @@ async function streamingReader(): Promise<void> {
   const withOptions = new ExcelJS.stream.xlsx.WorkbookReader(fs.createReadStream('in.xlsx'), {
     sharedStrings: 'emit',
   });
+  // event interface documented in the README
+  reader.on('worksheet', (worksheetReader: ExcelJS.stream.xlsx.WorksheetReader) => {
+    worksheetReader.on('row', (row: ExcelJS.Row) => row.number);
+  });
+  reader.on('end', () => undefined);
+  await reader.read();
   for await (const worksheetReader of reader) {
     const name: string = worksheetReader.name;
     const id: number | string = worksheetReader.id;
