@@ -143,6 +143,9 @@ upstream PR code was merged) and has a regression test.
   than they were compressed and written, with no way to wait. `row.commit()` and `worksheet.commit()` now return a promise that resolves
   once the output has drained; awaiting it keeps memory bounded (about 7 MB of live memory whatever the number of rows). Not awaiting it
   keeps the previous behaviour.
+- Streaming reader: the temp file of a worksheet spooled before the shared strings stayed open for the life of the process when the consumer
+  skipped that worksheet (or with `worksheets: 'ignore'`); it is closed once its reader is garbage collected. Removing the temp dir no
+  longer waits forever for a spooled file that was closed before it opened.
 
 ### Documentation
 
