@@ -4,7 +4,7 @@ const fs = require('fs');
 const {Readable} = require('stream');
 const JSZip = require('jszip');
 
-const {baseWorkbookBuffer} = require('../utils/xlsx-tamper');
+const {baseWorkbookBuffer, tamper} = require('../utils/xlsx-tamper');
 
 const ExcelJS = verquire('exceljs');
 
@@ -232,5 +232,53 @@ describe('WorkbookReader (stream)', () => {
 
     const sheets = await readAll(chunkedStream(reordered), {styles: 'cache'});
     expect(sheets[0].rows[0].values[2]).to.equalTime(date);
+  });
+
+  describe('columns and rows', () => {
+    it('reads column widths, styles and hidden flags', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getColumn(1).width = 25;
+        ws.getColumn(2).hidden = true;
+        ws.getColumn(3).width = 12.5;
+        ws.getColumn(3).numFmt = '0.00';
+        ws.getColumn(3).outlineLevel = 1;
+        ws.getCell('C1').value = 3;
+      });
+      const [sheet] = await readAll(chunkedStream(buffer), {styles: 'cache'});
+      const {worksheet} = sheet;
+      expect(worksheet.columns).to.have.length(3);
+      expect(worksheet.getColumn(1).width).to.equal(25);
+      expect(worksheet.getColumn(1).hidden).to.equal(false);
+      expect(worksheet.getColumn(2).hidden).to.equal(true);
+      expect(worksheet.getColumn('C').width).to.equal(12.5);
+      expect(worksheet.getColumn('C').outlineLevel).to.equal(1);
+      expect(worksheet.getColumn('C').numFmt).to.equal('0.00');
+    });
+
+    it('clamps column ranges to the worksheet grid', async () => {
+      const buffer = await tamper(await baseWorkbookBuffer(), {
+        'xl/worksheets/sheet1.xml': xml =>
+          xml.replace('<sheetData>', '<cols><col min="2" max="2000000000" width="5"/></cols><sheetData>'),
+      });
+      const [sheet] = await readAll(chunkedStream(buffer));
+      expect(sheet.worksheet.columns).to.have.length(16384);
+      expect(sheet.worksheet.getColumn(16384).width).to.equal(5);
+    });
+
+    it('reads hidden rows', async () => {
+      const buffer = await baseWorkbookBuffer((wb, ws) => {
+        ws.getCell('A2').value = 'hidden';
+        ws.getRow(2).hidden = true;
+        ws.getCell('A3').value = 'visible';
+      });
+      const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer));
+      const hidden = [];
+      for await (const worksheet of reader) {
+        for await (const row of worksheet) {
+          hidden.push(row.hidden);
+        }
+      }
+      expect(hidden).to.deep.equal([false, true, false]);
+    });
   });
 });
