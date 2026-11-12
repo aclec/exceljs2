@@ -107,8 +107,8 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 * **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
  once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
- and column splices, but are not enumerated by `definedNames.forEach()`, and removing a name from any
- cell of such a range removes the whole range.
+ and column splices, but are not enumerated by `definedNames.forEach()`. Removing a name from a cell
+ or a range inside such a range cuts it into the rectangles that remain (at most four per removal).
 * **Formulas.** Formulas longer than Excel's limit of 8,192 characters are rejected with an error
  when ExcelJS has to analyse them (translating a shared formula to another cell, `cell.dependencies`)
  instead of being scanned with regular expressions.
@@ -2531,7 +2531,7 @@ The constructor takes a required input argument and an optional options argument
 | options (optional)    | Specifies how to handle the event types occuring during the read parsing. |
 | options.entries       | Specifies whether to emit entries (`'emit'`) or not (`'ignore'`). Default is `'ignore'`. |
 | options.sharedStrings | Specifies whether to cache shared strings (`'cache'`), which inserts them into the respective cell values, or whether to emit them (`'emit'`) or ignore them (`'ignore'`), in both of which case the cell value will be a reference to the shared string's index. Default is `'cache'`. |
-| options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
+| options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which keeps the hyperlinks of each worksheet in `worksheetReader.hyperlinks` (keyed by cell reference, with the `target` of each external link, set once the worksheet's relationships part has been read), whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). The cells of the rows do not get them: a worksheet lists its hyperlinks after its rows. Default is `'ignore'`. |
 | options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.worksheets    | Specifies whether to emit worksheets (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
 | options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to a temporary file, which these limits bound too. |

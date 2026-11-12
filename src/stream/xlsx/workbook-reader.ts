@@ -14,8 +14,8 @@ import SharedStringXform from "../../xlsx/xform/strings/shared-string-xform";
 import type { WorkbookProperties, stream as publicStream } from "../../../index";
 import type { RelationshipModel, SharedStringValue, SheetDefModel, WorkbookPartModel } from "../../types";
 
-import WorksheetReader from "./worksheet-reader";
-import HyperlinkReader from "./hyperlink-reader";
+import WorksheetReader, { type WorksheetHyperlink } from "./worksheet-reader";
+import HyperlinkReader, { cacheHyperlinkRelationships, type HyperlinkRelationships } from "./hyperlink-reader";
 
 /**
  * What the WorkbookReader reads: a file name, a Node.js stream (or any object with a `pipe` method), a web
@@ -78,6 +78,17 @@ function workbookPartPath(target: unknown): string | undefined {
         return undefined;
     }
     return target.startsWith("/") ? target.slice(1) : `xl/${target}`;
+}
+
+// sets the target (and target mode) of the relationship of a worksheet hyperlink, if it has one
+function setHyperlinkTarget(hyperlink: WorksheetHyperlink, relationships: HyperlinkRelationships): void {
+    const relationship = hyperlink.rId === undefined ? undefined : relationships[hyperlink.rId];
+    if (relationship && relationship.target !== undefined) {
+        hyperlink.target = relationship.target;
+        if (relationship.targetMode !== undefined) {
+            hyperlink.targetMode = relationship.targetMode;
+        }
+    }
 }
 
 // size of the chunks read back from the spool file
@@ -240,6 +251,15 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
 
     private _sheetIndex?: Map<string | undefined, SheetDefModel | undefined> | null;
     private _stylesParsed?: boolean;
+    /** `hyperlinks: "cache"`: the hyperlink relationships of the worksheet parts read, by part number (`sheet3.xml`: "3"). */
+    private _hyperlinkRelationships = new Map<string, HyperlinkRelationships>();
+    /**
+     * `hyperlinks: "cache"`: the hyperlinks (with an `r:id`) of the worksheets read before their relationships part, by
+     * part number, until the zip is read to the end.
+     */
+    private _unresolvedHyperlinks = new Map<string, WorksheetHyperlink[]>();
+    /** The zip was read to the end: a worksheet part without relationships part has no hyperlink target. */
+    private _relationshipsRead = false;
 
     constructor(input?: WorkbookReaderInput, options: Partial<WorkbookReaderOptions> = {}) {
         super();
@@ -331,6 +351,10 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         if (options) this.options = { ...DEFAULT_OPTIONS, ...options };
         const stream = (this.stream = this._getStream(input || this.input));
 
+        this._hyperlinkRelationships = new Map();
+        this._unresolvedHyperlinks = new Map();
+        this._relationshipsRead = false;
+
         // worksheets, deferred for parsing after shared strings reading
         const waitingWorkSheets: { sheetNo: string; range: SpoolRange }[] = [];
         let completed = false;
@@ -378,6 +402,9 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
                     }
                 }
             }
+            // the hyperlinks still waiting have no relationships part
+            this._relationshipsRead = true;
+            this._unresolvedHyperlinks.clear();
 
             for (const { sheetNo, range } of waitingWorkSheets) {
                 // a range was spooled: the spool exists
@@ -389,6 +416,8 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
             }
             completed = true;
         } finally {
+            // stopped early: the hyperlinks waiting for a relationships part will not get it
+            this._unresolvedHyperlinks.clear();
             try {
                 if (spool) {
                     // stopped early (break / throw / error): nobody will read the worksheets, close the file now; else
@@ -531,16 +560,49 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
         }
     }
 
-    private *_parseHyperlinks(iterator: SaxInput, sheetNo: string): Generator<WorkbookReaderEvent, void, undefined> {
+    // the relationships part of a worksheet: emitted as a HyperlinkReader (`hyperlinks: "emit"`), or read for the targets
+    // of the hyperlinks of the worksheet readers (`hyperlinks: "cache"`)
+    private async *_parseHyperlinks(iterator: SaxInput, sheetNo: string): AsyncGenerator<WorkbookReaderEvent, void, undefined> {
         this._emitEntry({ type: "hyperlinks", id: sheetNo });
-        const hyperlinksReader = new HyperlinkReader({
-            workbook: this,
-            id: sheetNo,
-            iterator,
-            options: this.options,
-        });
         if (this.options.hyperlinks === "emit") {
+            const hyperlinksReader = new HyperlinkReader({
+                workbook: this,
+                id: sheetNo,
+                iterator,
+                options: this.options,
+            });
             yield { eventType: "hyperlinks", value: hyperlinksReader };
+        } else if (this.options.hyperlinks === "cache") {
+            const relationships = await cacheHyperlinkRelationships(iterator);
+            this._hyperlinkRelationships.set(sheetNo, relationships);
+            const unresolved = this._unresolvedHyperlinks.get(sheetNo);
+            if (unresolved) {
+                this._unresolvedHyperlinks.delete(sheetNo);
+                for (const hyperlink of unresolved) {
+                    setHyperlinkTarget(hyperlink, relationships);
+                }
+            }
+        }
+    }
+
+    /**
+     * `hyperlinks: "cache"`: sets the target of a hyperlink (with an `r:id`) of a worksheet part from the relationships
+     * part of the worksheet: now if it was read, else once it is (a hyperlink of a worksheet part without relationships
+     * part, or whose relationship is missing, gets none).
+     *
+     * @param partNumber - the number of the worksheet part (`sheet3.xml`: "3")
+     */
+    _cacheHyperlinkTarget(partNumber: string, hyperlink: WorksheetHyperlink): void {
+        const relationships = this._hyperlinkRelationships.get(partNumber);
+        if (relationships) {
+            setHyperlinkTarget(hyperlink, relationships);
+        } else if (!this._relationshipsRead) {
+            const unresolved = this._unresolvedHyperlinks.get(partNumber);
+            if (unresolved) {
+                unresolved.push(hyperlink);
+            } else {
+                this._unresolvedHyperlinks.set(partNumber, [hyperlink]);
+            }
         }
     }
 }

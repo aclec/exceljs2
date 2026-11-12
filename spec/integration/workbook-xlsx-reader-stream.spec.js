@@ -828,6 +828,92 @@ describe("WorkbookReader (stream)", () => {
         });
     });
 
+    describe("hyperlinks: cache", () => {
+        const SHEET_RELS = "xl/worksheets/_rels/sheet1.xml.rels";
+
+        async function linkBuffer() {
+            return baseWorkbookBuffer((wb, ws) => {
+                ws.getCell("B1").value = { text: "link", hyperlink: "https://example.com" };
+                ws.getCell("C1").value = { text: "inside", hyperlink: "#Sheet1!A1" };
+            });
+        }
+
+        // the worksheet readers, kept to look at their hyperlinks once the workbook is read
+        async function cachedHyperlinks(input) {
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(input, { hyperlinks: "cache" });
+            const worksheets = [];
+            for await (const worksheet of reader) {
+                for await (const row of worksheet) {
+                    expect(row.number).to.be.above(0);
+                }
+                worksheets.push(worksheet);
+            }
+            return worksheets.map((worksheet) => worksheet.hyperlinks);
+        }
+
+        it("gives each hyperlink of a worksheet the target of its relationship", async () => {
+            const [hyperlinks] = await cachedHyperlinks(chunkedStream(await linkBuffer()));
+            expect(Object.getPrototypeOf(hyperlinks)).to.equal(null);
+            expect({ ...hyperlinks }).to.deep.equal({
+                B1: { ref: "B1", rId: "rId1", target: "https://example.com", targetMode: "External" },
+                C1: { ref: "C1", location: "Sheet1!A1" },
+            });
+        });
+
+        it("gives the targets when the relationships part comes before or after a worksheet read directly", async () => {
+            const buffer = await linkBuffer();
+            // every part a worksheet depends on first: the worksheet is read as it comes out of the zip
+            const dependenciesFirst = (name) => (isWorksheet(name) || name === SHEET_RELS ? 1 : 0);
+            const relsFirst = (name) => (name === SHEET_RELS ? 0 : dependenciesFirst(name) + 1);
+            for (const rank of [dependenciesFirst, relsFirst]) {
+                const reordered = await reorderZip(buffer, rank);
+                const names = Object.keys(unzipParts(reordered));
+                expect(names.indexOf(SHEET_RELS) > names.indexOf("xl/worksheets/sheet1.xml")).to.equal(rank === dependenciesFirst);
+                const [hyperlinks] = await cachedHyperlinks(chunkedStream(reordered));
+                expect(hyperlinks.B1.target).to.equal("https://example.com");
+            }
+        });
+
+        it("leaves a hyperlink whose relationship is missing without target", async () => {
+            const buffer = await tamper(await linkBuffer(), {
+                [SHEET_RELS]: (xml) => xml.replace('Id="rId1"', 'Id="rId9"'),
+            });
+            const [hyperlinks] = await cachedHyperlinks(chunkedStream(buffer));
+            expect(hyperlinks.B1).to.deep.equal({ ref: "B1", rId: "rId1" });
+
+            const parts = unzipParts(await linkBuffer());
+            delete parts[SHEET_RELS];
+            const [withoutRels] = await cachedHyperlinks(chunkedStream(zipParts(parts)));
+            expect(withoutRels.B1).to.deep.equal({ ref: "B1", rId: "rId1" });
+        });
+
+        it("does not emit hyperlinks events", async () => {
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(await linkBuffer()), { hyperlinks: "cache" });
+            const events = [];
+            for await (const { eventType, value } of reader.parse()) {
+                events.push(eventType);
+                if (eventType === "worksheet") {
+                    await value.read();
+                }
+            }
+            expect(events).to.deep.equal(["worksheet"]);
+        });
+
+        it("rejects a malformed relationships part", async () => {
+            const buffer = await tamper(await linkBuffer(), { [SHEET_RELS]: (xml) => xml.replace("</Relationships>", "</Relations>") });
+            const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer), { hyperlinks: "cache" });
+            let error;
+            try {
+                for await (const worksheet of reader) {
+                    await worksheet.read();
+                }
+            } catch (err) {
+                error = err;
+            }
+            expect(error).to.be.an("error");
+        });
+    });
+
     it("merges options passed to read() with the defaults", async () => {
         const buffer = await baseWorkbookBuffer();
         const reader = new ExcelJS.stream.xlsx.WorkbookReader();
@@ -875,6 +961,44 @@ describe("WorkbookReader (stream)", () => {
         expect(expected[5]).to.equal("aAb");
         const [sheet] = await readAll(chunkedStream(buffer));
         expect(sheet.rows[0].values).to.deep.equal(expected);
+    });
+
+    it("gives the cells of the shared string 0 a shared string value (sharedStrings: emit)", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("B1").value = "other";
+        });
+        const reader = new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer), { sharedStrings: "emit" });
+        const cells = [];
+        for await (const worksheet of reader) {
+            for await (const row of worksheet) {
+                row.eachCell((cell) => cells.push([cell.address, cell.type, cell.value]));
+            }
+        }
+        expect(cells).to.deep.equal([
+            ["A1", ExcelJS.ValueType.SharedString, { sharedString: 0 }],
+            ["B1", ExcelJS.ValueType.SharedString, { sharedString: 1 }],
+        ]);
+    });
+
+    it("gives a shared formula clone a formula value (without formula) and its result", async () => {
+        const buffer = await baseWorkbookBuffer((wb, ws) => {
+            ws.getCell("B1").value = { formula: "A1&1", result: "hello1", shareType: "shared", ref: "B1:B2" };
+            ws.getCell("B2").value = { sharedFormula: "B1", result: 0 };
+        });
+        const [sheet] = await readAll(chunkedStream(buffer));
+        const clone = sheet.rows[1].values[2];
+        expect(clone).to.deep.equal({ formula: "", result: 0 });
+        const cells = [];
+        for await (const worksheet of new ExcelJS.stream.xlsx.WorkbookReader(chunkedStream(buffer))) {
+            for await (const row of worksheet) {
+                const cell = row.getCell(2);
+                cells.push([cell.type, cell.formulaType, cell.result, cell.text]);
+            }
+        }
+        expect(cells).to.deep.equal([
+            [ExcelJS.ValueType.Formula, ExcelJS.FormulaType.Master, "hello1", "hello1"],
+            [ExcelJS.ValueType.Formula, ExcelJS.FormulaType.None, 0, "0"],
+        ]);
     });
 
     it("emits shared strings in sharedStrings: emit mode", async () => {

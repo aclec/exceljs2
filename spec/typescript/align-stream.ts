@@ -123,6 +123,9 @@ async function workbookReader(): Promise<void> {
         // undefined only for an invalid number (below 1, not an integer): declared Column
         const column: ExcelJS.Column = worksheet.getColumn(1);
         const hyperlinks: Record<string, ExcelJS.stream.xlsx.WorksheetHyperlink> | undefined = worksheet.hyperlinks;
+        // hyperlinks: "cache" gives the targets of the external links
+        const target: Equals<ExcelJS.stream.xlsx.WorksheetHyperlink["target"], string | undefined> = true;
+        void target;
         const outline: number = worksheet.properties.outlineLevelRow;
         for await (const events of worksheet.parse()) {
             const batch: ExcelJS.stream.xlsx.WorksheetReaderEvent[] = events;

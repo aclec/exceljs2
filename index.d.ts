@@ -565,8 +565,8 @@ export interface CellRichTextValue {
 export interface CellHyperlinkValue {
     /**
      * The value shown: any value of a cell, such as a number or a rich text (a hyperlink read from a file shows the value
-     * of its cell, whatever its type). It must be truthy: a value with an empty or zero `text` is not a hyperlink (it is
-     * held as a JSON value, see {@link CellValue}).
+     * of its cell, whatever its type); `cell.text` is its text, as for a cell of that value. It may be empty (`""`), not
+     * null.
      */
     text: string | number | boolean | Date | CellErrorValue | CellRichTextValue;
     hyperlink: string;
@@ -634,10 +634,12 @@ export interface CellSharedStringValue {
  * The value of a cell. Reading gives `null` for an empty cell (never `undefined`); setting `undefined` or `null` empties
  * the cell.
  *
- * The kind of an object value is told by its truthy marker properties, in this order: `text` and `hyperlink`
- * (hyperlink), `formula` or `sharedFormula` (formula), `richText`, `sharedString`, `error`. Any other object (outside
- * this type: an untyped value, such as one returned by the CSV `map` option) is held as a JSON value: its type is
- * String, it is returned as is, and it is written as its JSON text (read back as a string).
+ * The kind of an object value is told by its marker properties, by their presence and type (an empty text or formula,
+ * a shared string 0 count), in this order: a `text` (not null) and a string `hyperlink` (hyperlink), a string `formula`
+ * or `sharedFormula` (formula; an empty formula is a formula cell without formula, `formulaType` None), an array
+ * `richText`, a number `sharedString`, a string `error`. Any other object (outside this type: an untyped value, such as
+ * one returned by the CSV `map` option) is held as a JSON value: its type is String, it is returned as is, and it is
+ * written as its JSON text (read back as a string).
  */
 export type CellValue =
     | null
@@ -748,6 +750,11 @@ export interface Cell extends StyleProperties, Readonly<Omit<Address, "sheetName
     readonly isHyperlink: boolean;
     /** The target of a hyperlink cell, `undefined` for other cells. */
     readonly hyperlink: string | undefined;
+    /**
+     * The text of the value, not formatted by `numFmt`: a string as is, the `toString()` of a number, a boolean or a
+     * date, the code of an error, the runs of a rich text, the text of a hyperlink (as for a cell of that value), the
+     * result of a formula; `""` for an empty cell.
+     */
     readonly text: string;
     /** The text of the cell ({@link text}), HTML-escaped. */
     readonly html: string;
@@ -2739,7 +2746,8 @@ export interface DefinedNameCell {
 
 /**
  * The defined names of a workbook (`workbook.definedNames`). The cells of a name follow the rows and columns inserted or
- * removed; a range of more than 100,000 cells is kept as a whole (removing any of its cells removes the range).
+ * removed; a range of more than 100,000 cells is kept as a rectangle (removing cells from it cuts it into the rectangles
+ * that remain).
  */
 export interface DefinedNames {
     /**
@@ -2754,14 +2762,22 @@ export interface DefinedNames {
     addEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
 
     /**
-     * Removes a name from a cell, given as a reference (`"Sheet1!$A$1"`). A range reference removes nothing.
+     * Removes a name from a cell or from the cells of a range, given as a reference (`"Sheet1!$A$1"` or
+     * `"Sheet1!$A$1:$B$2"`).
      * @throws Error when a column or a row is out of bounds
      */
     remove(locStr: string, name: string): void;
-    /** Removes a name from a cell (and the range of more than 100,000 cells of the name that contains it). */
-    removeEx(location: DefinedNameCell, name: string): void;
-    /** Removes every name of a cell. */
-    removeAllNames(location: DefinedNameCell): void;
+    /**
+     * Removes a name from a cell, or from the cells of a range given by its 1-based bounds (`top`, `left`, `bottom`,
+     * `right`, e.g. a decoded range reference).
+     * @throws Error for a range whose bounds are not rows and columns of the sheet, or are reversed
+     */
+    removeEx(location: DefinedNameCell | (Location & { sheetName?: string }), name: string): void;
+    /**
+     * Removes every name of a cell, or of the cells of a range given by its 1-based bounds.
+     * @throws Error for a range whose bounds are not rows and columns of the sheet, or are reversed
+     */
+    removeAllNames(location: DefinedNameCell | (Location & { sheetName?: string })): void;
 
     /** Calls `callback` with each name and each of its cells (the cells of the very large ranges are not enumerated). */
     forEach(callback: (name: string, cell: DefinedNameCell) => void): void;
@@ -3176,7 +3192,8 @@ export interface TableColumn {
 
 /**
  * A table of a worksheet (`worksheet.addTable`, `worksheet.getTable`). Its rows and columns live in the cells of the
- * worksheet: change them with the methods below, then `commit()`.
+ * worksheet: change them with the methods below, then `commit()`. A table read from a file has no data rows of its own
+ * (they are the cells of its worksheet): the methods that change its rows, columns or position throw an Error.
  */
 export interface Table {
     /** The table name (unique in the workbook, used in structured references). */
@@ -3190,7 +3207,7 @@ export interface Table {
     headerRow: boolean | undefined;
     /** Whether the table has a totals row; needs `commit()` once changed. */
     totalsRow: boolean | undefined;
-    /** The table style (`"TableStyleMedium2"`), or `null` for none. */
+    /** The table style (`"TableStyleMedium2"`), or `null` for none (also for a table read from a file without one). */
     theme: TableStyleProperties["theme"];
     showFirstColumn: boolean | undefined;
     showLastColumn: boolean | undefined;
@@ -3198,31 +3215,39 @@ export interface Table {
     showColumnStripes: boolean | undefined;
     /** The number of columns. */
     readonly width: number;
-    /** The number of data rows. */
+    /** The number of data rows (of a table read from a file: those of its range). */
     readonly height: number;
 
     /**
-     * Commit changes (writes the table to the cells of the worksheet)
+     * Commit changes (writes the table to the cells of the worksheet); does nothing without a change.
+     * @throws Error for invalid table properties (e.g. a row with more values than the table has columns, a table that
+     *   does not fit in the sheet): the cells are not changed then
      */
     commit(): void;
     /**
      * Remove rows of data (0-based index; 1 row by default)
+     * @throws Error for a table read from a file
      */
     removeRows(rowIndex: number, count?: number): void;
     /**
      * Add a row of data, either insert at rowNumber (0-based) or append
+     * @throws Error for more values than the table has columns (the table is not changed); for a table read from a file
      */
     addRow(values: CellValue[], rowNumber?: number): void;
     /**
      * Get column (0-based index)
+     * @throws Error for an index that is not a column of the table
      */
     getColumn(colIndex: number): TableColumn;
     /**
-     * Add a new column, including column defn and values; inserts at colIndex (0-based) or adds to the right
+     * Add a new column, including column defn and values (one per data row); inserts at colIndex (0-based) or adds to
+     * the right
+     * @throws Error for more values than the table has rows (the table is not changed); for a table read from a file
      */
     addColumn(column: TableColumnProperties, values: CellValue[], colIndex?: number): void;
     /**
      * Remove columns with their data (0-based index; 1 column by default)
+     * @throws Error for a table read from a file
      */
     removeColumns(colIndex: number, count?: number): void;
 }
@@ -3596,10 +3621,11 @@ export namespace stream {
              */
             sharedStrings?: "cache" | "emit" | "ignore";
             /**
-             * The hyperlinks of the worksheets: `cache`: the `<hyperlink>` elements in `worksheetReader.hyperlinks` (the
-             * targets of external links, in the relationship parts, are not read); `emit`: `hyperlink` events of the
-             * worksheet readers, and `hyperlinks` events (a {@link HyperlinkReader} per worksheet, for the targets) of the
-             * workbook reader; `ignore`.
+             * The hyperlinks of the worksheets: `cache`: the `<hyperlink>` elements in `worksheetReader.hyperlinks`, with
+             * the targets of the external links (read from the relationship parts: see {@link WorksheetHyperlink.target});
+             * `emit`: `hyperlink` events of the worksheet readers, and `hyperlinks` events (a {@link HyperlinkReader} per
+             * worksheet, for the targets) of the workbook reader; `ignore`. The cells of the rows do not get the
+             * hyperlinks (a worksheet lists its hyperlinks after its rows).
              * @default 'ignore'
              */
             hyperlinks?: "cache" | "emit" | "ignore";
@@ -3731,7 +3757,10 @@ export namespace stream {
             ): AsyncGenerator<WorkbookReaderEvent, void, undefined>;
         }
 
-        /** A `<hyperlink>` of a worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes present. */
+        /**
+         * A `<hyperlink>` of a worksheet, as read (`hyperlinks: "cache"` or `"emit"`): the attributes present, and with
+         * `hyperlinks: "cache"` the target of its relationship.
+         */
         interface WorksheetHyperlink {
             /** The cell reference (`"A1"`). */
             ref: string | undefined;
@@ -3743,6 +3772,15 @@ export namespace stream {
             tooltip?: string;
             /** The text displayed. */
             display?: string;
+            /**
+             * `hyperlinks: "cache"`: the link of an external hyperlink (the `Target` of its relationship `rId`), set once
+             * the relationships part of the worksheet is read: when the worksheet is read if that part comes first in the
+             * file, else when the reader reaches it (at the latest when the iteration of the workbook ends). Absent when
+             * the relationship is missing.
+             */
+            target?: string;
+            /** `hyperlinks: "cache"`: the `TargetMode` of the relationship (`"External"` for a link outside the package). */
+            targetMode?: string;
         }
 
         /** The events of a {@link WorksheetReader} (emitted by {@link WorksheetReader.read}), and their arguments. */
@@ -3780,7 +3818,8 @@ export namespace stream {
             /** The `worksheets` and `hyperlinks` options of the workbook reader. */
             readonly options: Partial<Pick<WorkbookStreamReaderOptions, "worksheets" | "hyperlinks">>;
             /**
-             * `hyperlinks: "cache"`: the hyperlinks read so far, keyed by cell reference (an object without prototype).
+             * `hyperlinks: "cache"`: the hyperlinks read so far, keyed by cell reference (an object without prototype),
+             * with their targets (see {@link WorksheetHyperlink.target}).
              */
             hyperlinks?: Record<string, WorksheetHyperlink>;
             /** The sheet format properties (outline levels, default sizes), read from `<sheetFormatPr>`. */
@@ -3860,7 +3899,8 @@ export namespace stream {
          * The hyperlink relationships (link targets) of a worksheet: the `hyperlinks` event of the {@link WorkbookReader},
          * with `hyperlinks: "emit"`. {@link read} emits them one by one (`hyperlink` events). The cache members
          * ({@link hyperlinks}, {@link count}, {@link each}) are filled only by a reader of the `"cache"` option, which the
-         * workbook reader never hands out: they stay empty.
+         * workbook reader never hands out (with `hyperlinks: "cache"`, it gives the targets to the hyperlinks of the
+         * worksheet readers instead): they stay empty.
          */
         interface HyperlinkReader extends EventEmitter<HyperlinkReaderEvents> {
             /** The workbook reader. */
