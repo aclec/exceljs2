@@ -11,6 +11,62 @@ import { wholeRangeAddress } from "../../../doc/data-validations";
 const addressRegex = /^[A-Z]{1,3}\d+$/;
 const rangeRegex = /^[A-Z]{1,3}\d+:[A-Z]{1,3}\d+$/;
 
+// A number literal of a formula: an optional sign, digits with an optional fraction (or a fraction alone), an optional
+// exponent. Anchored, and no two quantifiers can match the same characters: linear on any input.
+const numberLiteralRegex = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/**
+ * A formula of a `<dataValidation>` read from a file: for `whole`, `decimal` and `textLength` a number literal is a
+ * number, for `date` it is a serial date, read as a Date; any other formula (`$B$1`, `TODAY()`, `A1+1`, a literal out of
+ * range) is its text.
+ */
+function parseFormula(type: DataValidationModel["type"], text: string): DataValidationFormula {
+    switch (type) {
+        case "whole":
+        case "decimal":
+        case "textLength":
+        case "date": {
+            if (!numberLiteralRegex.test(text)) {
+                return text;
+            }
+            const value = Number(text);
+            if (type !== "date") {
+                return Number.isFinite(value) ? value : text;
+            }
+            const date = utils.excelToDate(value);
+            return Number.isNaN(date.getTime()) ? text : date;
+        }
+        case "any":
+        case "list":
+        case "custom":
+        default:
+            return text;
+    }
+}
+
+/**
+ * The text of a formula of a `<dataValidation>`: a string as is (a formula, or a literal), a number as a number (for a
+ * `date` rule, as milliseconds since 1970 like `new Date(number)`: its serial date), a Date as its serial date.
+ *
+ * @throws Error for an invalid Date (or a number that is not one, for a `date` rule), or a number that is not finite
+ */
+function formulaText(type: DataValidationModel["type"], formula: DataValidationFormula): string {
+    if (typeof formula === "string") {
+        return formula;
+    }
+    if (formula instanceof Date || type === "date") {
+        const date = formula instanceof Date ? formula : new Date(formula);
+        if (Number.isNaN(date.getTime())) {
+            throw new Error(`Invalid date in the formulae of a data validation: ${String(formula)}`);
+        }
+        return String(utils.dateToExcel(date));
+    }
+    if (!Number.isFinite(formula)) {
+        throw new Error(`A formula of a data validation is not a finite number: ${String(formula)}`);
+    }
+    return String(formula);
+}
+
 // Ranges read from a file are expanded to one model entry per cell only while the
 // workbook stays under this budget; larger ranges are kept as 'A1:B2' keys.
 const MAX_EXPANDED_CELLS = 100000;
@@ -193,7 +249,12 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
         return "dataValidations";
     }
 
-    /** Writes the validations (nothing when there is none); `date` formulae are written as serial dates. */
+    /**
+     * Writes the validations (nothing when there is none); a formula that is a Date (or a number, for a `date` rule) is
+     * written as a serial date.
+     *
+     * @throws Error for an invalid key (see {@link optimiseDataValidations}) or formula (see {@link formulaText})
+     */
     override render(xmlStream: XmlStream, model: DataValidationsModel | undefined): void {
         const optimizedModel = optimiseDataValidations(model);
         if (optimizedModel.length) {
@@ -236,11 +297,7 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
                 xmlStream.addAttribute("sqref", value.sqref);
                 (value.formulae || []).forEach((formula: DataValidationFormula, index) => {
                     xmlStream.openNode(`formula${index + 1}`);
-                    if (value.type === "date") {
-                        xmlStream.writeText(utils.dateToExcel(new Date(formula)));
-                    } else {
-                        xmlStream.writeText(typeof formula === "object" ? formula.toString() : formula);
-                    }
+                    xmlStream.writeText(formulaText(value.type, formula));
                     xmlStream.closeNode();
                 });
                 xmlStream.closeNode();
@@ -354,26 +411,7 @@ class DataValidationsXform extends BaseXform<DataValidationsModel> {
             }
             case "formula1":
             case "formula2": {
-                const text = (this._formula || []).join("");
-                let formula: DataValidationFormula;
-                switch (this._dataValidation.type) {
-                    case "whole":
-                    case "textLength":
-                        formula = parseInt(text, 10);
-                        break;
-                    case "decimal":
-                        formula = parseFloat(text);
-                        break;
-                    case "date":
-                        formula = utils.excelToDate(parseFloat(text));
-                        break;
-                    case "any":
-                    case "list":
-                    case "custom":
-                    default:
-                        formula = text;
-                        break;
-                }
+                const formula = parseFormula(this._dataValidation.type, (this._formula || []).join(""));
                 // a formula is read inside <dataValidation>, which created the formulae
                 this._dataValidation.formulae!.push(formula);
                 this._formula = undefined;

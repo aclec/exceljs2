@@ -136,4 +136,5 @@ export function tablesAndValidations(): void {
         rows: [[Symbol("not a value")]],
     });
     cell.dataValidation = { type: "whole", operator: "between", formulae: [1, 10], errorStyle: "warning", showErrorMessage: true };
+    cell.dataValidation = { type: "date", operator: "greaterThan", formulae: ["TODAY()"] };
 }

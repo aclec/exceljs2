@@ -504,8 +504,11 @@ export interface DataValidations {
 export interface DataValidation {
     type: DataValidationType;
     /**
-     * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`); absent for `"any"`. Read from a
-     * file: numbers for `whole`, `decimal` and `textLength`, Dates for `date`, else the text of the formula.
+     * The formulas or values of the rule (`["A1:A5"]`, `[1, 10]`, `[new Date()]`, `["$B$1"]`, `["TODAY()"]`); absent for
+     * `"any"`. A string is written as is (a formula), a number as is, a Date as its serial date; for `date`, a number is
+     * read as milliseconds since 1970 (`new Date(number)`). Writing an invalid Date or a number that is not finite
+     * throws. Read from a file: a number literal is a number for `whole`, `decimal` and `textLength` and a Date for
+     * `date`; any other formula (a reference, a function...) is its text.
      */
     formulae?: (string | number | Date)[];
     /** Whether an empty cell is valid. */
