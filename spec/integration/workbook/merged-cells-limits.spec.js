@@ -141,6 +141,59 @@ describe("Merged-cell limits", function () {
         ws.mergeCells("B1:B6");
     });
 
+    it("checks the workbook budget in constant time per merge, whatever the sheet ids", async () => {
+        // 8000 two-cell merges on a worksheet whose sheetId is 65535: summing the merged cells of every worksheet id on each
+        // merge took 7 s
+        const merges = [];
+        for (let row = 1; row <= 8000; row++) {
+            merges.push(`B${row}:C${row}`);
+        }
+        const buffer = await tamper(await mergedSheetsBuffer(1, () => merges), {
+            "xl/workbook.xml": (xml) => xml.replace('sheetId="1"', 'sheetId="65535"'),
+        });
+        const start = Date.now();
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        const ms = Date.now() - start;
+        expect(wb.getWorksheet(65535).getCell("C8000").master.address).to.equal("B8000");
+        expect(ms).to.be.below(2000);
+    });
+
+    it("keeps the merged cells of the workbook up to date as merges and worksheets change", () => {
+        const wb = new ExcelJS.Workbook();
+        wb.maxMergedCells = 10;
+        const a = wb.addWorksheet("a");
+        const b = wb.addWorksheet("b");
+        a.mergeCells("A1:A4"); // 4
+        b.mergeCells("A1:A4"); // 8
+        expect(() => b.mergeCells("C1:C3")).to.throw(/workbook would exceed 10 merged cells/);
+        // unmerging frees cells
+        a.unMergeCells("A1");
+        b.mergeCells("C1:C3"); // 7
+        b.mergeCells("E1:E3"); // 10
+        expect(() => a.mergeCells("A1:A2")).to.throw(/workbook would exceed 10 merged cells/);
+        // a splice that removes a merge frees its cells
+        b.spliceRows(1, 4); // the merges of rows 1-4 are removed: 0
+        a.mergeCells("A1:J1"); // 10
+        expect(() => b.mergeCells("A1:A2")).to.throw(/workbook would exceed 10 merged cells/);
+        // replacing the model of a worksheet replaces its merges
+        a.model = { ...a.model, mergeCells: ["B1:B2"] }; // 2
+        b.mergeCells("A1:H1"); // 10
+        expect(() => b.mergeCells("A3:A4")).to.throw(/workbook would exceed 10 merged cells/);
+        // removing a worksheet frees its share, once
+        wb.removeWorksheet(a.id); // 8
+        a.destroy();
+        b.mergeCells("A3:A4"); // 10
+        expect(() => b.mergeCells("A6:A7")).to.throw(/workbook would exceed 10 merged cells/);
+        // a removed worksheet no longer counts for the workbook
+        a.mergeCells("D1:D5");
+        expect(() => b.mergeCells("A6:A7")).to.throw(/workbook would exceed 10 merged cells/);
+        // replacing the model of the workbook replaces all its merges
+        wb.model = { ...wb.model, worksheets: [] };
+        const c = wb.addWorksheet("c");
+        c.mergeCells("A1:J1");
+    });
+
     describe("streaming writer", () => {
         function writer(options) {
             const stream = new PassThrough();
