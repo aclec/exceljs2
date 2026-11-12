@@ -1,13 +1,13 @@
 // Merged-cell caps: every cell of a merge is materialised, so merges are capped per worksheet (one full column) and per
-// workbook (workbook.maxMergedCells, the maxMergedCells load option). Reading and writing apply the same defaults, so a
-// workbook ExcelJS writes with the defaults can be read back with the defaults.
+// workbook (workbook.maxMergedCells, the maxMergedCells load option, one full column by default). Reading and writing apply
+// the same defaults, so a workbook ExcelJS writes with the defaults can be read back with the defaults.
 const { PassThrough } = require("stream");
 const { baseWorkbookBuffer, tamper } = require("../../utils/xlsx-tamper");
 
 const ExcelJS = verquire("exceljs");
 
 const MAX_PER_SHEET = 1048576;
-const DEFAULT_MAX_PER_WORKBOOK = 4 * MAX_PER_SHEET;
+const DEFAULT_MAX_PER_WORKBOOK = MAX_PER_SHEET;
 
 // a workbook with sheets Sheet1..SheetN, the merges of mergeRefs(i) on sheet i
 async function mergedSheetsBuffer(count, mergeRefs) {
@@ -38,8 +38,32 @@ async function loadError(buffer, options) {
 describe("Merged-cell limits", function () {
     this.timeout(30000);
 
-    it("reads back a workbook written with the defaults, whose sheets together hold more than 1048576 merged cells", async () => {
+    it("has a default budget of one full worksheet, for a workbook, a load and the streaming writer", () => {
+        expect(new ExcelJS.Workbook().maxMergedCells).to.equal(1048576);
+        const stream = new PassThrough();
+        stream.resume();
+        expect(new ExcelJS.stream.xlsx.WorkbookWriter({ stream }).maxMergedCells).to.equal(1048576);
+    });
+
+    it("reads back a workbook written with the defaults, whose sheets together hold merged cells up to the budget", async () => {
         const wb = new ExcelJS.Workbook();
+        for (const name of ["a", "b"]) {
+            const ws = wb.addWorksheet(name);
+            // 500 merges of 1,000 cells: 500,000 merged cells per sheet, 1,000,000 in the workbook
+            for (let i = 0; i < 500; i++) {
+                ws.mergeCells(i * 100 + 1, 1, i * 100 + 100, 10);
+            }
+        }
+        // a workbook built with the defaults cannot exceed the budget of a load with the defaults
+        expect(() => wb.getWorksheet("b").mergeCells("L1:L48577")).to.throw(/workbook would exceed 1048576 merged cells/);
+        const reloaded = new ExcelJS.Workbook();
+        await reloaded.xlsx.load(await wb.xlsx.writeBuffer());
+        expect(reloaded.getWorksheet("b").getCell("J50000").master.address).to.equal("A49901");
+    });
+
+    it("reads back a workbook built with a raised budget when the load is given the same budget", async () => {
+        const wb = new ExcelJS.Workbook();
+        wb.maxMergedCells = 1100000;
         for (const name of ["a", "b"]) {
             const ws = wb.addWorksheet(name);
             // 550 merges of 1,000 cells: 550,000 merged cells per sheet, 1,100,000 in the workbook
@@ -47,8 +71,12 @@ describe("Merged-cell limits", function () {
                 ws.mergeCells(i * 100 + 1, 1, i * 100 + 100, 10);
             }
         }
+        const buffer = await wb.xlsx.writeBuffer();
+        const { error } = await loadError(buffer);
+        expect(error).to.be.an("error");
+        expect(error.message).to.match(/workbook would exceed 1048576 merged cells/);
         const reloaded = new ExcelJS.Workbook();
-        await reloaded.xlsx.load(await wb.xlsx.writeBuffer());
+        await reloaded.xlsx.load(buffer, { maxMergedCells: 1100000 });
         expect(reloaded.getWorksheet("b").getCell("J55000").master.address).to.equal("A54901");
     });
 
@@ -60,8 +88,9 @@ describe("Merged-cell limits", function () {
         expect(ms).to.be.below(3000); // rejected before the cells are created
     });
 
-    it("caps the merged cells of the workbook on read with a default budget of four full worksheets", async () => {
-        const buffer = await mergedSheetsBuffer(5, () => ["B1:B1048576"]);
+    it("caps the merged cells of the workbook on read with a default budget of one full worksheet", async () => {
+        // a few KB of XML that would create 2 x 1048576 merged cells (about 1.2 GB of heap)
+        const buffer = await mergedSheetsBuffer(2, () => ["B1:B1048576"]);
         const { error, ms } = await loadError(buffer);
         expect(error).to.be.an("error");
         expect(error.message).to.match(new RegExp(`workbook would exceed ${DEFAULT_MAX_PER_WORKBOOK} merged cells`));

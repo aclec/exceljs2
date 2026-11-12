@@ -114,9 +114,9 @@ when it is read (a workbook ExcelJS writes with the defaults can be read back wi
 - A worksheet can have at most **1,048,576 merged cells** in total (the size of one full column). `worksheet.mergeCells()`, a splice that
   moves or widens merges, the streaming `WorkbookWriter` and loading a file throw
   `Cannot merge <range>: worksheet would exceed 1048576 merged cells` beyond that. This cap is not configurable.
-- A workbook can have at most **`workbook.maxMergedCells`** merged cells in all its worksheets together, **4,194,304** (four full
-  worksheets) by default. Beyond it they throw
-  `Cannot merge <range>: the workbook would exceed 4194304 merged cells (see the maxMergedCells option)`. Raise it with the `maxMergedCells`
+- A workbook can have at most **`workbook.maxMergedCells`** merged cells in all its worksheets together, **1,048,576** (one full worksheet,
+  about 600 MB of memory) by default. Beyond it they throw
+  `Cannot merge <range>: the workbook would exceed 1048576 merged cells (see the maxMergedCells option)`. Raise it with the `maxMergedCells`
   option of `xlsx.load` / `read` / `readFile` (the loaded workbook keeps that value), by setting `workbook.maxMergedCells` before merging or
   loading, or with the `maxMergedCells` option of the streaming `WorkbookWriter`:
 

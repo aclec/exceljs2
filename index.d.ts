@@ -1702,7 +1702,7 @@ export interface XlsxReadOptions extends ZipReadLimits {
      * Maximum number of cells covered by merges in all the worksheets of the file (every merged cell is created in
      * memory). One worksheet holds at most 1,048,576 merged cells whatever this option. The loaded workbook keeps this
      * value as its `maxMergedCells`.
-     * @default workbook.maxMergedCells (4194304, four full worksheets)
+     * @default workbook.maxMergedCells (1048576, one full worksheet)
      */
     maxMergedCells: number;
 }
@@ -1979,7 +1979,7 @@ export class Workbook {
     /**
      * Maximum number of cells covered by merges in all the worksheets (`mergeCells` throws beyond it; one worksheet holds
      * at most 1,048,576). Also the default `maxMergedCells` of `xlsx.load` / `read` / `readFile`.
-     * @default 4194304 (four full worksheets)
+     * @default 1048576 (one full worksheet)
      */
     maxMergedCells: number;
 
@@ -2276,7 +2276,7 @@ export namespace stream {
             /**
              * Maximum number of cells covered by merges in all the worksheets (one worksheet holds at most 1,048,576).
              * Reading the file back with `xlsx.load` needs a `maxMergedCells` load option at least as large.
-             * @default 4194304 (four full worksheets)
+             * @default 1048576 (one full worksheet)
              */
             maxMergedCells: number;
         }
