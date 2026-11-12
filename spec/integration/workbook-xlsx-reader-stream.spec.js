@@ -339,4 +339,30 @@ describe('WorkbookReader (stream)', () => {
       ]);
     });
   });
+
+  it('reads ISO 8601 date cells (t="d") as UTC dates', async () => {
+    const cells = [
+      '2024-02-29T12:34:56Z',
+      '2024-02-29T12:34:56.5',
+      '2024-02-29',
+      '2024-02-29T12:34:56+02:00',
+      '2024-02-30',
+      'not a date',
+    ]
+      .map(text => `<c t="d"><v>${text}</v></c>`)
+      .join('');
+    const buffer = await tamper(await baseWorkbookBuffer(), {
+      'xl/worksheets/sheet1.xml': xml =>
+        xml.replace(/<sheetData>.*<\/sheetData>/, `<sheetData><row r="1">${cells}</row></sheetData>`),
+    });
+    const [sheet] = await readAll(chunkedStream(buffer));
+    const values = sheet.rows[0].values.slice(1);
+    expect(values.slice(0, 4).map(value => value instanceof Date && value.toISOString())).to.deep.equal([
+      '2024-02-29T12:34:56.000Z',
+      '2024-02-29T12:34:56.500Z',
+      '2024-02-29T00:00:00.000Z',
+      '2024-02-29T10:34:56.000Z',
+    ]);
+    expect(values.slice(4)).to.deep.equal(['2024-02-30', 'not a date']);
+  });
 });
