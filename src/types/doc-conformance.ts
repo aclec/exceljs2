@@ -126,7 +126,11 @@ export type WorksheetConforms = Assert<
         | "views"
         | "model"
         | "pageSetup"
-        // TODO(align) rows, columns and cells
+        // rows, columns and cells: undefined only for an invalid column number (not an integer >= 1), typed `Column`
+        // as documented (and also the Column cascade below)
+        | "getColumn"
+        // TODO(align) rows, columns and cells: their signatures are aligned; they fail only through the Row / Cell /
+        // Column / CellValue types they return or take (removed once Row, Cell, Column and CellValue conform)
         | "findCell"
         | "getCell"
         | "columns"
@@ -134,7 +138,6 @@ export type WorksheetConforms = Assert<
         | "lastColumn"
         | "getColumnKey"
         | "setColumnKey"
-        | "getColumn"
         | "lastRow"
         | "findRow"
         | "findRows"
