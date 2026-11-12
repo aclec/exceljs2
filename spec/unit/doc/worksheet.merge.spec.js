@@ -205,6 +205,25 @@ describe("Worksheet", () => {
             expect(nMergeVals).to.deep.equal(3);
         });
 
+        it("keeps the style of every cell of a merge moved by a row insert", () => {
+            const wb = new Excel.Workbook();
+            const ws = wb.addWorksheet("styled");
+            ws.mergeCells("B2:D3");
+            const border = { top: { style: "thick" }, bottom: { style: "thick" } };
+            ws.getCell("B2").value = "merged";
+            ws.getCell("B2").border = border;
+
+            ws.insertRows(2, [["x"], ["y"]]);
+
+            expect(ws.getCell("B4").value).to.equal("merged");
+            expect(ws.getCell("D5").value).to.equal("merged");
+            ["B4", "C4", "D4", "B5", "C5", "D5"].forEach((address) => {
+                expect(ws.getCell(address).isMergedTo(ws.getCell("B4")) || address === "B4", address).to.equal(true);
+                // the bottom border of the merged area is drawn from its last row
+                expect(ws.getCell(address).border, address).to.deep.equal(border);
+            });
+        });
+
         it("releases a merge reference only once", () => {
             const ws = new Excel.Workbook().addWorksheet("s");
             ws.mergeCells("A1:B2");
