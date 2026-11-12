@@ -2,14 +2,14 @@ import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel } from "../../../../types";
 import BaseXform from "../../base-xform";
-import { isLiteralOf } from "../attribute-values";
+import { isOneOf } from "../../../../utils/utils";
 
 // a number literal ("50", "-1.5", "1E3"); each digit run can only be matched one way, so testing a long
 // non-numeric value ("111...1x") is linear instead of quadratic
 const NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:E[-+]?\d+)?$/i;
 
 /** ST_CfvoType, with the x14 types of a data bar threshold (autoMin, autoMax). */
-const isCfvoType = isLiteralOf<CfvoModel["type"]>({
+const CFVO_TYPES: Readonly<Record<CfvoModel["type"], true>> = {
     num: true,
     percent: true,
     max: true,
@@ -18,13 +18,13 @@ const isCfvoType = isLiteralOf<CfvoModel["type"]>({
     percentile: true,
     autoMin: true,
     autoMax: true,
-});
+};
 
 /**
  * The type of a threshold read from a file: `num` when the required `type` is absent or unknown (the value is kept).
  */
 export function cfvoType(type: string | undefined): CfvoModel["type"] {
-    return isCfvoType(type) ? type : "num";
+    return isOneOf(CFVO_TYPES, type) ? type : "num";
 }
 
 /**

@@ -29,6 +29,7 @@ import type {
 } from "../../../types";
 
 import colCache from "../../../utils/col-cache";
+import { createDictionary } from "../../../utils/utils";
 import Range from "../../../doc/range";
 import { ValueType } from "../../../doc/enums";
 import { DEFAULT_MAX_MERGED_CELLS, checkMergedCells } from "../../../utils/merge-limits";
@@ -74,16 +75,6 @@ class LegacyDrawingXform extends DrawingXform {
     override get tag(): string {
         return "legacyDrawing";
     }
-}
-
-/**
- * An empty object without prototype, for keys that come from the file (cell and part references, ids): a lookup never
- * finds an inherited member, and a "__proto__" key is an ordinary key. Object.create(null), not setPrototypeOf on a
- * literal: its lookups (once per cell) are faster.
- */
-function emptyRecord<T>(): Record<string, T> {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- Object.create is typed any: an empty object (without prototype) is a Record of any value type
-    return Object.create(null) as Record<string, T>;
 }
 
 /**
@@ -396,7 +387,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         readonly sheetViews: ListXform<SheetViewModel>;
         readonly sheetFormatPr: SheetFormatPropertiesXform;
         readonly cols: ListXform<ColModel>;
-        readonly sheetData: ListXform<RowModel<ParsedCellModel> | RowModel>;
+        readonly sheetData: ListXform<RowModel<ParsedCellModel> | RowModel, RowModel<ParsedCellModel>>;
         readonly autoFilter: AutoFilterXform;
         readonly mergeCells: ListXform<string>;
         readonly rowBreaks: RowBreaksXform;
@@ -490,7 +481,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             hyperlinks,
             comments,
             // shared formula masters by cell address (no prototype: a sharedFormula never finds an inherited member)
-            formulae: emptyRecord<FormulaCellModel>(),
+            formulae: createDictionary<FormulaCellModel>(),
             siFormulae: 0,
         });
         if (options.date1904) {
@@ -797,9 +788,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                 const model: ParsedWorksheetModel = (this.model = {
                     dimensions: map.dimension.model,
                     cols: map.cols.model,
-                    // parsed items are RowXform parse models (the list type also covers the rendered document rows)
-                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the items of <sheetData> are parsed by RowXform, whose parse model is RowModel<ParsedCellModel> (ListXform has one item type for render and parse)
-                    rows: map.sheetData.model as RowModel<ParsedCellModel>[] | null | undefined,
+                    rows: map.sheetData.model,
                     mergeCells: map.mergeCells.model,
                     rowBreaks: map.rowBreaks.model ?? [],
                     hyperlinks: map.hyperlinks.model,
@@ -851,7 +840,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         // options.merges.reconcile(model.mergeCells, model.rows);
         const relationships = model.relationships || [];
         // keyed by the relationship ids of the file
-        const rels = emptyRecord<RelationshipModel>();
+        const rels = createDictionary<RelationshipModel>();
         for (const rel of relationships) {
             rels[rel.Id] = rel;
         }
@@ -891,13 +880,13 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         }
         // keyed by the cell references of the file: no prototype, so that a lookup never finds an
         // inherited member and a "__proto__" reference is an ordinary key
-        const commentsMap = emptyRecord<NoteModel>();
+        const commentsMap = createDictionary<NoteModel>();
         for (const comment of model.comments || []) {
             if (comment.ref) {
                 commentsMap[comment.ref] = comment;
             }
         }
-        const hyperlinkMap: WorksheetReconcileOptions["hyperlinkMap"] = emptyRecord();
+        const hyperlinkMap: WorksheetReconcileOptions["hyperlinkMap"] = createDictionary();
         for (const hyperlink of model.hyperlinks || []) {
             const rel = hyperlink.rId && relOf(hyperlink.rId);
             const target = getHyperlinkTarget(rel ? rel.Target : undefined, hyperlink.target);
@@ -910,7 +899,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             commentsMap,
             hyperlinkMap,
             // shared formula masters by si (from the file)
-            formulae: emptyRecord<string | undefined>(),
+            formulae: createDictionary<string | undefined>(),
         });
 
         // compact the rows and cells

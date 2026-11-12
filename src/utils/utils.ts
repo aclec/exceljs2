@@ -284,6 +284,11 @@ function parseBoolean(value: string | number | boolean | null | undefined, absen
     return value === true || value === "true" || value === 1 || value === "1";
 }
 
+/** An xsd:boolean attribute (see {@link parseBoolean}: `"1"` / `"true"` are true), `undefined` when it is absent. */
+function parseOptionalBoolean(value: string | undefined): boolean | undefined {
+    return value === undefined ? undefined : parseBoolean(value);
+}
+
 /** The numbers from start (included) to stop (excluded), by step (negative to count down). */
 function* range(start: number, stop: number, step = 1): Generator<number, void, undefined> {
     const compareOrder = step > 0 ? (a: number, b: number) => a < b : (a: number, b: number) => a > b;
@@ -322,22 +327,32 @@ function objectFromProps<V = null>(props: readonly string[], value: V | null = n
 }
 
 /**
- * A type guard for a union of string literals: `isOneOf(["a", "b"] as const)(x)` is true when x is `"a"` or `"b"`
- * (e.g. an attribute value read from a file).
+ * Whether a string read from a file is one of the members of a union of string literals (e.g. the values of an ECMA-376
+ * enumeration such as ST_Orientation), given as the keys of a record: an object literal typed `Record<T, true>` lists
+ * every member of `T`, and only them (the compiler checks both). Only the own keys of the record count, never an
+ * inherited member (`"constructor"`, `"__proto__"`...).
+ *
+ * @example
+ * const EDIT_AS: Readonly<Record<ImageEditAs, true>> = { twoCell: true, oneCell: true, absolute: true };
+ * const editAs = isOneOf(EDIT_AS, node.attributes.editAs) ? node.attributes.editAs : "oneCell";
  */
-function isOneOf<T extends string>(values: readonly T[]): (value: unknown) => value is T {
-    const set = new Set<unknown>(values);
-    return (value: unknown): value is T => set.has(value);
+function isOneOf<T extends string>(members: Readonly<Record<T, true>>, value: string | undefined): value is T {
+    return value !== undefined && Object.hasOwn(members, value);
 }
 
 /**
+ * `Object.create` for a `null` prototype, typed: an object without any property, own or inherited (lib.d.ts types the
+ * result of `Object.create` `any`).
+ */
+const createEmptyObject: (prototype: null) => Record<string, never> = Object.create;
+
+/**
  * A new empty object without prototype, for keys that come from data (`"__proto__"`, `"constructor"`...), which a
- * plain `{}` would resolve on Object.prototype.
+ * plain `{}` would resolve on Object.prototype. `Object.create(null)`, not `Object.setPrototypeOf({}, null)`: the
+ * lookups in such an object (once per cell in the address cache and the shared strings) are faster.
  */
 function createDictionary<V>(): Record<string, V> {
-    const dictionary: Record<string, V> = {};
-    Object.setPrototypeOf(dictionary, null);
-    return dictionary;
+    return createEmptyObject(null);
 }
 
 const utils = {
@@ -355,6 +370,7 @@ const utils = {
     fs,
     toIsoDateString,
     parseBoolean,
+    parseOptionalBoolean,
     range,
     toSortedArray,
     objectFromProps,
@@ -378,6 +394,7 @@ export {
     exists,
     toIsoDateString,
     parseBoolean,
+    parseOptionalBoolean,
     range,
     toSortedArray,
     objectFromProps,

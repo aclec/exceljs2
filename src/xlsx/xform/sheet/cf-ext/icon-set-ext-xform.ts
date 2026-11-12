@@ -3,7 +3,7 @@ import type XmlStream from "../../../../utils/xml-stream";
 import type { CfIconModel, CfvoModel, IconSetRuleModel } from "../../../../types";
 import { parseBoolean } from "../../../../utils/utils";
 import BaseXform from "../../base-xform";
-import { parseOptionalBoolean } from "../attribute-values";
+import { parseOptionalBoolean } from "../../../../utils/utils";
 import CompositeXform from "../../composite-xform";
 
 import CfvoExtXform from "./cfvo-ext-xform";
@@ -96,12 +96,8 @@ class IconSetExtXform extends CompositeXform<IconSetExtModel> {
         };
     }
 
-    override onParserClose(name: string): void {
+    override onParserClose(name: string, model: IconSetExtModel): void {
         // the element was opened before its children (createNewModel); a child model is set by its start tag
-        const { model } = this;
-        if (!model) {
-            return;
-        }
         switch (name) {
             case "x14:cfvo": {
                 const cfvo = this.cfvoXform.model;

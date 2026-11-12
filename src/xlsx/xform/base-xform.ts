@@ -1,5 +1,4 @@
 import parseSax, { type SaxEvent, type SaxInput, type SaxTag } from "../../utils/parse-sax";
-import { parseBoolean } from "../../utils/utils";
 import XmlStream, { type XmlAttributes, type XmlValue } from "../../utils/xml-stream";
 
 /** Any xform, whatever its model: the type of child xforms held without their precise type (`parser`, maps). */
@@ -37,18 +36,6 @@ export interface ValueXformOptions {
  */
 export function ownEntry<T>(map: Readonly<Record<string, T>>, key: string): T | undefined {
     return Object.hasOwn(map, key) ? map[key] : undefined;
-}
-
-/**
- * Whether a string read from a file is one of the members of a union of string literals, given as the keys of a record
- * (an object literal typed `Record<T, true>` lists every member of `T`, and only them: the compiler checks both).
- *
- * @example
- * const EDIT_AS: Record<ImageEditAs, true> = { twoCell: true, oneCell: true, absolute: true };
- * const editAs = isOneOf(EDIT_AS, node.attributes.editAs) ? node.attributes.editAs : "oneCell";
- */
-export function isOneOf<T extends string>(members: Readonly<Record<T, true>>, value: string | undefined): value is T {
-    return value !== undefined && Object.hasOwn(members, value);
 }
 
 /** Batches of SAX events, as yielded by `parseSax()`. */
@@ -286,17 +273,6 @@ class BaseXform<TModel = unknown> {
             return value ? "1" : "0";
         }
         return undefined;
-    }
-
-    /**
-     * @returns `true` for the xsd:boolean `"1"` or `"true"` (any other value is `false`), or `undefined` when the attribute is
-     *   absent
-     */
-    static toBoolValue(attr: string | undefined): boolean | undefined;
-    /** @returns `true` for the xsd:boolean `"1"` or `"true"` (any other value is `false`), or `dflt` when the attribute is absent */
-    static toBoolValue<D>(attr: string | undefined, dflt: D): boolean | D;
-    static toBoolValue<D>(attr: string | undefined, dflt?: D): boolean | D | undefined {
-        return attr === undefined ? dflt : parseBoolean(attr);
     }
 
     /** {@link toAttribute} for an integer value. */

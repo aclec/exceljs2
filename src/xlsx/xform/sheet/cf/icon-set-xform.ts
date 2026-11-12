@@ -2,7 +2,7 @@ import type { SaxTag } from "../../../../utils/parse-sax";
 import type XmlStream from "../../../../utils/xml-stream";
 import type { CfvoModel, IconSetRuleModel } from "../../../../types";
 import BaseXform from "../../base-xform";
-import { parseOptionalBoolean } from "../attribute-values";
+import { parseOptionalBoolean } from "../../../../utils/utils";
 import CompositeXform from "../../composite-xform";
 
 import CfvoXform from "./cfvo-xform";
@@ -73,11 +73,10 @@ class IconSetXform extends CompositeXform<IconSetModel> {
         };
     }
 
-    override onParserClose(name: string): void {
-        // the element was opened before its children; the cfvo model is set by its start tag
-        const { model } = this;
+    override onParserClose(name: string, model: IconSetModel): void {
+        // the cfvo model is set by its start tag
         const cfvo = this.cfvoXform.model;
-        if (name === "cfvo" && model && cfvo) {
+        if (name === "cfvo" && cfvo) {
             model.cfvo.push(cfvo);
         }
     }

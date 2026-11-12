@@ -44,15 +44,12 @@ class CfvoExtXform extends CompositeXform<CfvoModel> {
         };
     }
 
-    override onParserClose(name: string): void {
+    override onParserClose(name: string, model: CfvoModel): void {
         switch (name) {
             case "xm:f": {
-                // the element was opened before its child (createNewModel); <xm:f> holds text
-                const { model } = this;
+                // <xm:f> holds text
                 const text = this.fExtXform.model;
-                if (model) {
-                    model.value = text ? CfvoXform.toValue(String(text)) : 0;
-                }
+                model.value = text ? CfvoXform.toValue(String(text)) : 0;
                 break;
             }
         }

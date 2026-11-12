@@ -2,7 +2,8 @@ import type { SaxTag } from "../../../utils/parse-sax";
 import type XmlStream from "../../../utils/xml-stream";
 import type { TableColumnProperties } from "../../../../index";
 import type { ListItemOptions, TableColumnModel } from "../../../types";
-import BaseXform, { isOneOf } from "../base-xform";
+import { isOneOf } from "../../../utils/utils";
+import BaseXform from "../base-xform";
 
 // the totals row functions of ECMA-376 ST_TotalsRowFunction
 const TOTALS_ROW_FUNCTIONS: Readonly<Record<NonNullable<TableColumnProperties["totalsRowFunction"]>, true>> = {

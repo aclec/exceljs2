@@ -219,8 +219,8 @@ function isAsyncIterable(input: object): input is ByteChunks {
     return Symbol.asyncIterator in input && typeof input[Symbol.asyncIterator] === "function";
 }
 
-/** Whether a sheet state from xl/workbook.xml is one of {@link WorksheetState}. */
-const isWorksheetState = isOneOf(["visible", "hidden", "veryHidden"] as const satisfies readonly WorksheetState[]);
+/** The sheet states of xl/workbook.xml (ECMA-376 ST_SheetState): {@link WorksheetState}. */
+const WORKSHEET_STATES: Readonly<Record<WorksheetState, true>> = { visible: true, hidden: true, veryHidden: true };
 
 /**
  * The streaming reader of an xlsx file: reads the parts as they come out of the zip, in one pass, holding only the
@@ -577,7 +577,7 @@ class WorkbookReader extends EventEmitter<WorkbookReaderEvents> {
             worksheetReader.name = matchingSheet.name;
             // an unknown state from the file: none (the schema default is visible)
             const { state } = matchingSheet;
-            worksheetReader.state = isWorksheetState(state) ? state : undefined;
+            worksheetReader.state = isOneOf(WORKSHEET_STATES, state) ? state : undefined;
         }
         if (this.options.worksheets === "emit") {
             yield { eventType: "worksheet", value: worksheetReader };

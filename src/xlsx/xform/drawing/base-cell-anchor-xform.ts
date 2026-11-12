@@ -1,7 +1,8 @@
 import type { SaxTag } from "../../../utils/parse-sax";
 import type { ImageEditAs } from "../../../../index";
 import type { DrawingAnchorModel, DrawingPictureModel, DrawingReconcileOptions, MediaModel } from "../../../types";
-import BaseXform, { isOneOf, ownEntry, type AnyXform } from "../base-xform";
+import { isOneOf } from "../../../utils/utils";
+import BaseXform, { ownEntry, type AnyXform } from "../base-xform";
 
 // ECMA-376 ST_EditAs
 const EDIT_AS: Readonly<Record<ImageEditAs, true>> = { twoCell: true, oneCell: true, absolute: true };

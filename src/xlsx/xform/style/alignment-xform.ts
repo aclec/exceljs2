@@ -3,8 +3,8 @@ import type XmlStream from "../../../utils/xml-stream";
 import type { Alignment } from "../../../../index";
 import type { AlignmentModel } from "../../../types";
 import { ReadingOrder } from "../../../doc/enums";
-import { parseBoolean, validInt } from "../../../utils/utils";
-import BaseXform, { isOneOf } from "../base-xform";
+import { isOneOf, parseBoolean, validInt } from "../../../utils/utils";
+import BaseXform from "../base-xform";
 
 // ECMA-376 ST_HorizontalAlignment, but general (the default: no alignment)
 const HORIZONTAL_VALUES: Readonly<Record<Alignment["horizontal"], true>> = {
