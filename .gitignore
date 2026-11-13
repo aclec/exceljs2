@@ -56,5 +56,6 @@ Thumbs.db
 # Compiled from src/ by `bun run build:lib` (tsc -p tsconfig.build.json)
 /lib/
 
-# Claude Code agent worktrees (local copies of the repository)
+# Claude Code: agent worktrees (local copies of the repository) and personal settings
 /.claude/worktrees/
+/.claude/settings.local.json
