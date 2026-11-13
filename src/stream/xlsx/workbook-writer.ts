@@ -17,10 +17,31 @@ import WorkbookXform from "../../xlsx/xform/book/workbook-xform";
 import SharedStringsXform from "../../xlsx/xform/strings/shared-strings-xform";
 
 import WorksheetWriter from "./worksheet-writer";
+import { CapturedChart, type CapturedSheet } from "./stream-chart";
+import { validateChart, type ChartContext } from "../../doc/chart";
+import { checkSheetName, chartsheetState } from "../../doc/sheet-name";
+import { ChartPartWriter, prepareChartAnchors, writeDrawingParts } from "../../xlsx/chart-parts";
+import {
+    createdChartsheetPart,
+    prepareChartsheetDrawings,
+    prepareChartsheets,
+    writeChartsheetParts,
+    CHARTSHEET_REL_TYPE,
+} from "../../xlsx/chartsheet-parts";
 
 import theme1Xml from "../../xlsx/xml/theme1";
-import type { AddWorksheetOptions, AutoFilter, Color, Image, WorkbookView } from "../../../index";
-import type { CommentRefsEntry, RelationshipModel } from "../../types";
+import type {
+    AddChartsheetOptions,
+    AddWorksheetOptions,
+    AutoFilter,
+    Chartsheet,
+    ChartsheetChartOptions,
+    Color,
+    Image,
+    WorkbookView,
+    WorksheetState,
+} from "../../../index";
+import type { ChartsheetWriteModel, CommentRefsEntry, ContentTypeOverride, DrawingModel, RelationshipModel } from "../../types";
 
 /** The styles manager of the writer: StylesXform (`useStyles`) or its mock (no styles), and the styles part. */
 export type WriterStyles = StylesXform;
@@ -60,6 +81,23 @@ export type AddStreamWorksheetOptions = Partial<AddWorksheetOptions> & {
 
 /** A medium of the writer: the image given to addImage, with its part name (`image0.png`). */
 export type WriterMedium = Image & { type: "image"; name: string };
+
+/** A chartsheet added by {@link WorkbookWriter.addChartsheet}: written when the workbook is committed. */
+interface WriterChartsheet {
+    readonly id: number;
+    readonly name: string;
+    readonly state: WorksheetState;
+    /** Its position among the sheets (worksheets and chartsheets) when it was added. */
+    readonly index: number;
+    readonly chart: CapturedChart;
+}
+
+/** The parts of the charts written (WorkbookWriter commit), for the workbook parts written after them. */
+interface WrittenCharts {
+    readonly drawings: DrawingModel[];
+    readonly chartParts: ContentTypeOverride[];
+    readonly writtenChartsheets: ChartsheetWriteModel[];
+}
 
 /**
  * The streaming xlsx writer: the worksheets are written to the archive as their rows are committed, so that a large
@@ -106,6 +144,11 @@ class WorkbookWriter {
 
     private _definedNames: DefinedNames;
     private _worksheets: (WorksheetWriter | undefined)[];
+    // the drawings of the worksheets with charts (in the order they are numbered), the chartsheets added, and what is
+    // written of them when the workbook is committed
+    private _chartDrawings: { readonly name: string; readonly charts: readonly CapturedChart[] }[];
+    private _chartsheets: WriterChartsheet[];
+    private _writtenCharts: WrittenCharts | undefined;
 
     /** @throws TypeError for an invalid `maxMergedCells` */
     constructor(options?: WorkbookWriterOptions) {
@@ -128,6 +171,9 @@ class WorkbookWriter {
         this._definedNames = new DefinedNames();
 
         this._worksheets = [];
+        this._chartDrawings = [];
+        this._chartsheets = [];
+        this._writtenCharts = undefined;
         this.views = [];
 
         // cap on the cells covered by merges in all the worksheets (utils/merge-limits)
@@ -197,6 +243,8 @@ class WorkbookWriter {
         await this.addMedia();
         // a failing zip (e.g. the output stream failed) would never finish the worksheet entries
         await Promise.race([this._commitWorksheets(), this.zip.finished]);
+        // every worksheet is committed: the values of the charts are captured
+        this._addCharts();
         await Promise.all([
             this.addContentTypes(),
             this.addApp(),
@@ -209,16 +257,15 @@ class WorkbookWriter {
         return this._finalize();
     }
 
-    /** The next free worksheet id: the first hole in the ids, or the next one. */
+    /** The next free worksheet id: the first id (from 1) of no worksheet and no chartsheet. */
     get nextId(): number {
+        const chartsheetIds = new Set(this._chartsheets.map(({ id }) => id));
         // find the next unique spot to add worksheet
-        let i;
-        for (i = 1; i < this._worksheets.length; i++) {
-            if (!this._worksheets[i]) {
-                return i;
-            }
+        let i = 1;
+        while (this._worksheets[i] || chartsheetIds.has(i)) {
+            i++;
         }
-        return this._worksheets.length || 1;
+        return i;
     }
 
     /**
@@ -266,6 +313,11 @@ class WorkbookWriter {
 
         const id = this.nextId;
         name = name || `sheet${id}`;
+        // a worksheet may not have the name of a chartsheet (case-insensitive)
+        const lowerName = String(name).toLowerCase();
+        if (this._chartsheets.some((chartsheet) => chartsheet.name.toLowerCase() === lowerName)) {
+            throw new Error(`Worksheet name already exists: ${name}`);
+        }
 
         const worksheet = new WorksheetWriter({
             id,
@@ -282,6 +334,97 @@ class WorkbookWriter {
 
         this._worksheets[id] = worksheet;
         return worksheet;
+    }
+
+    /**
+     * Adds a chartsheet after the sheets added so far: a sheet that is a single chart, with the options of the document
+     * `addChartsheet` (see index.d.ts `ChartsheetChartOptions`). The values shown before Excel recalculates the chart
+     * are captured from the cells as their rows are written; a series with a row committed before is written without
+     * cached values. The chartsheet is written when the workbook is committed.
+     *
+     * @param name - the name of the sheet tab: the rules of a worksheet name (unique among all the sheets,
+     *   case-insensitive)
+     * @returns the chartsheet added
+     * @throws Error for an invalid or duplicate name, invalid chart options (a range without a worksheet name, an
+     *   `anchor`...), or an invalid `state`
+     */
+    addChartsheet(name: string, chart: ChartsheetChartOptions, options?: AddChartsheetOptions): Chartsheet {
+        const sheetName = checkSheetName(
+            name,
+            (lowerName) =>
+                this._worksheets.some((worksheet) => worksheet && worksheet.name.toLowerCase() === lowerName) ||
+                this._chartsheets.some((chartsheet) => chartsheet.name.toLowerCase() === lowerName)
+        );
+        const state = chartsheetState(options);
+        const definition = validateChart<CapturedSheet>(chart, this._chartContext(undefined));
+        const id = this.nextId;
+        const index = this._worksheets.filter(Boolean).length + this._chartsheets.length;
+        this._chartsheets.push({ id, name: sheetName, state, index, chart: new CapturedChart(definition) });
+        return { id, name: sheetName, state };
+    }
+
+    /**
+     * The context of the validation of a chart (src/doc/chart.ts): the worksheets of this writer.
+     * @param sheet - the worksheet of the chart, undefined for the chart of a chartsheet
+     */
+    _chartContext(sheet: WorksheetWriter | undefined): ChartContext<CapturedSheet> {
+        return {
+            sheet,
+            cellSizes: sheet && {
+                _findColumn: (col) => sheet.columns?.[col - 1],
+                findRow: (row) => sheet.findRow(row),
+            },
+            findSheet: (name) => {
+                const lowerName = name.toLowerCase();
+                return this._worksheets.find((worksheet) => worksheet && worksheet.name.toLowerCase() === lowerName);
+            },
+        };
+    }
+
+    /**
+     * Registers the charts of a worksheet being committed (written when the workbook is committed).
+     * @returns the name of their drawing (`drawing1`)
+     */
+    _addChartDrawing(charts: readonly CapturedChart[]): string {
+        const name = `drawing${this._chartDrawings.length + 1}`;
+        this._chartDrawings.push({ name, charts });
+        return name;
+    }
+
+    /**
+     * Writes the drawings of the worksheets, the chartsheets and the chart parts (every worksheet committed: the values
+     * of the charts are captured), through the code of the document writer (chart-parts.ts, chartsheet-parts.ts).
+     */
+    private _addCharts(): void {
+        if (!this._chartDrawings.length && !this._chartsheets.length) {
+            return;
+        }
+        const registry = new ChartPartWriter();
+        const drawings: DrawingModel[] = this._chartDrawings.map(({ name, charts }) => {
+            const rels: RelationshipModel[] = [];
+            const models = charts.map((chart, index) => chart.toModel(`Chart ${index + 1}`));
+            return { name, anchors: [], rels, chartAnchors: prepareChartAnchors(models, name, rels, registry) };
+        });
+        const worksheets = this._worksheets.filter((worksheet) => worksheet !== undefined);
+        const writtenChartsheets = prepareChartsheets(
+            worksheets,
+            this._chartsheets.map(({ id, name, state, index, chart }) => ({
+                ...createdChartsheetPart(),
+                id,
+                name,
+                state,
+                index,
+                charts: [chart.toModel("Chart 1")],
+            }))
+        );
+        // the drawings of the chartsheets are numbered after those of the worksheets
+        prepareChartsheetDrawings(writtenChartsheets, { drawingsCount: drawings.length, drawings }, registry);
+        const chartParts = registry.complete();
+        writeChartsheetParts(this.zip, writtenChartsheets);
+        writeDrawingParts(this.zip, drawings);
+        registry.write(this.zip);
+        this._writtenCharts = { drawings, chartParts, writtenChartsheets };
+        this._chartDrawings = [];
     }
 
     /** The first worksheet (no argument), the worksheet with this id, or the one with this name. */
@@ -336,6 +479,7 @@ class WorkbookWriter {
                 sharedStrings: this.sharedStrings,
                 commentRefs: this.commentRefs,
                 media: this.media,
+                ...this._writtenCharts,
             };
             const xform = new ContentTypesXform();
             const xml = xform.toXml(model);
@@ -378,6 +522,7 @@ class WorkbookWriter {
         return new Promise((resolve) => {
             const model = {
                 worksheets: this._worksheets.filter((worksheet) => worksheet !== undefined),
+                writtenChartsheets: this._writtenCharts?.writtenChartsheets,
             };
             const xform = new AppXform();
             const xml = xform.toXml(model);
@@ -435,6 +580,10 @@ class WorkbookWriter {
                 });
             }
         }
+        for (const chartsheet of this._writtenCharts?.writtenChartsheets ?? []) {
+            const rId = (chartsheet.rId = `rId${count++}`);
+            relationships.push({ Id: rId, Type: CHARTSHEET_REL_TYPE, Target: `chartsheets/sheet${chartsheet.partNo}.xml` });
+        }
         return new Promise((resolve) => {
             const xform = new RelationshipsXform();
             const xml = xform.toXml(relationships);
@@ -448,6 +597,7 @@ class WorkbookWriter {
         const { zip } = this;
         const model = {
             worksheets: this._worksheets.filter((worksheet) => worksheet !== undefined),
+            writtenChartsheets: this._writtenCharts?.writtenChartsheets,
             definedNames: this._definedNames.model,
             views: this.views,
             properties: {},

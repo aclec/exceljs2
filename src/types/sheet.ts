@@ -28,6 +28,8 @@ import type {
 } from "../../index";
 import type { CellModel, ColModel, FormulaResult, ParsedCellModel, RowModel } from "./cell";
 import type { ColorModel, DxfModel } from "./style";
+import type { ChartAnchorModel, ChartXmlElement, DrawingChartModel } from "./chart";
+import type { PivotTablePartModel } from "./pivot-parts";
 import type { PivotTable } from "../doc/pivot-table";
 import type { CellValue } from "../doc/cell";
 import type Range from "../doc/range";
@@ -310,6 +312,18 @@ export interface RowBreakModel {
 }
 
 /**
+ * A page break after a column (`column.addPageBreak`, a `<brk>` of `<colBreaks>`): `id` is the column number, `min` /
+ * `max` the 0-based first and last rows (`min` absent for the first row), `man` 1 for a manual break
+ * (`column.addPageBreak`), 0 for an automatic one (read from a file).
+ */
+export interface ColBreakModel {
+    id: number;
+    max: number;
+    man: number;
+    min?: number;
+}
+
+/**
  * A sheet view (sheet-view-xform): index.d.ts `WorksheetView` flattened (the fields of its normal / frozen / split
  * variants, all optional) plus `workbookViewId` (parsed) and `tabSelected` (rendered; parsed but not kept). prepare
  * forces an unknown `state` to `"normal"`. Parse: a `view` that is `normal` (the default) or unknown is no `style`, an
@@ -340,14 +354,15 @@ export interface SheetViewModel {
  * The page setup of a worksheet: index.d.ts `PageSetup` (with `margins`, the print options, the print area and titles).
  * Parse: `{ fitToPage, margins }` merged with the page-setup and print-options models; also `usePrinterDefaults`,
  * `copies`, and `firstPageNumber` with `useFirstPageNumber` when the file gives or uses a first page number. The document
- * defaults have `rowBreaks` / `colBreaks` set to `null`.
+ * defaults have `rowBreaks` / `colBreaks` set to `null` (kept from 4.x: the page breaks are the worksheet's `rowBreaks`
+ * and `colBreaks`).
  */
 export type PageSetupModel = Partial<Omit<PageSetup, "margins">> & {
     /** `null` when a parsed worksheet has no `<pageMargins>`. */
     margins?: Margins | null;
     /** The document defaults only: always null (the page breaks are `rowBreaks` of the worksheet). */
     rowBreaks?: null;
-    /** The document defaults only: always null. */
+    /** The document defaults only: always null (the page breaks are `colBreaks` of the worksheet). */
     colBreaks?: null;
     useFirstPageNumber?: boolean;
     usePrinterDefaults?: boolean;
@@ -431,6 +446,12 @@ export interface DrawingModel {
     name?: string;
     anchors: DrawingAnchorModel[];
     rels?: RelationshipModel[];
+    /** Parse: the anchors holding a chart (drawing/chart-anchor.ts), resolved by xlsx.ts into `charts`. */
+    chartFrames?: ChartXmlElement[];
+    /** Reconcile: the charts of the drawing, with their parts (chart-parts.ts). */
+    charts?: ChartAnchorModel[];
+    /** Write (worksheet-xform prepare): the chart anchors, rendered after the pictures. */
+    chartAnchors?: DrawingChartModel[];
 }
 
 /**
@@ -489,6 +510,7 @@ export interface FilterColumnModel {
  * A table column as the xforms see it: index.d.ts `TableColumnProperties` (its `style` is the dxf of the column) plus
  * the write-side ids (`id`: 1-based, set by table-column-xform prepare; `colId`: see {@link FilterColumnModel}; `dxfId`:
  * set by worksheet-xform prepare) and the parse-side `dxfId` (a string, resolved to `style` by table-xform reconcile).
+ * `dxfId` is written as `dataDxfId` (the style of the data cells).
  */
 export type TableColumnModel = Omit<TableColumnProperties, "style"> &
     FilterColumnModel & {
@@ -497,6 +519,12 @@ export type TableColumnModel = Omit<TableColumnProperties, "style"> &
         id?: number;
         dxfId?: number | string;
         style?: DxfModel;
+        /** Read from a file and written back (no API): the `<calculatedColumnFormula>` of the column. */
+        calculatedColumnFormula?: string;
+        /** The `array` attribute of `<calculatedColumnFormula>`. */
+        calculatedColumnFormulaArray?: boolean;
+        /** The `array` attribute of `<totalsRowFormula>` (read from a file; cleared when the table is committed). */
+        totalsRowFormulaArray?: boolean;
     };
 
 /**
@@ -534,7 +562,7 @@ export interface TableModel {
  * and as worksheet-xform prepares and renders it.
  *
  * Doc getter only: `id`, `state`, `dimensions`, `merges` (the setter reads them when `mergeCells` is absent),
- * `pivotTables`. Doc setter: `mergeCells`, else `merges`; `rowBreaks` (none when absent). Write-side additions (worksheet-xform prepare): `mergeCells`, `hyperlinks`, `comments`, `rels`, `drawing`,
+ * `pivotTables`. Doc setter: `mergeCells`, else `merges`; `rowBreaks` / `colBreaks` (none when absent). Write-side additions (worksheet-xform prepare): `mergeCells`, `hyperlinks`, `comments`, `rels`, `drawing`,
  * `background`, `image`, `date1904`; xlsx.ts adds `rId`, `shapeBlock`.
  *
  * Index.d.ts `WorksheetModel` is a subset of this (it lacks dataValidations, state, sheetProtection, tables, ...).
@@ -550,6 +578,8 @@ export interface WorksheetModel {
     headerFooter: HeaderFooterModel;
     /** The page breaks between rows (`<rowBreaks>`): always given by the getter and a parse. */
     rowBreaks?: RowBreakModel[];
+    /** The page breaks between columns (`<colBreaks>`): always given by the getter and a parse. */
+    colBreaks?: ColBreakModel[];
     /** `[]` for a worksheet read from a file without `<sheetViews>`. */
     views: SheetViewModel[];
     autoFilter?: AutoFilterModel | null;
@@ -574,6 +604,10 @@ export interface WorksheetModel {
     comments?: CommentRefModel[];
     rels?: RelationshipModel[];
     drawing?: DrawingModel;
+    /** The charts of the worksheet, carried from the file read (chart-parts.ts); absent when it has none. */
+    charts?: ChartAnchorModel[];
+    /** The pivot tables of the worksheet, carried from the file read (pivot-parts.ts); absent when it has none. */
+    pivotTableParts?: PivotTablePartModel[];
     background?: { rId: string };
     /** The workbook medium of the background image. */
     image?: MediaModel;
@@ -606,6 +640,8 @@ export interface ParsedWorksheetModel {
     mergeCells?: string[] | null;
     /** The page breaks between rows (`[]` without `<rowBreaks>`). */
     rowBreaks: RowBreakModel[];
+    /** The page breaks between columns (`[]` without `<colBreaks>`). */
+    colBreaks: ColBreakModel[];
     hyperlinks?: SheetHyperlinkModel[] | null;
     dataValidations?: DataValidationsModel | null;
     properties: WorksheetPropertiesModel;
@@ -624,6 +660,10 @@ export interface ParsedWorksheetModel {
     legacyDrawing?: SheetPartRefModel;
     /** reconcile: the images, from the drawing and background. */
     media?: WorksheetMediumModel[];
+    /** reconcile: the charts of the drawing. */
+    charts?: ChartAnchorModel[];
+    /** xlsx.ts reconcile: the pivot tables of the worksheet carried from the file (pivot-parts.ts). */
+    pivotTableParts?: PivotTablePartModel[];
     comments?: NoteModel[];
 }
 

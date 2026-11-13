@@ -30,7 +30,7 @@ import BaseXform from "../base-xform";
 
 /**
  * A note of the comments part, `<comment ref authorId><text><r>...</r></text></comment>`: its rich text runs. Rendered
- * with `authorId="0"` (the only author written). Parsed as `{ type: "note", note: { texts }, ...the attributes of
+ * with the `authorId` given by the comments part (`0` by default). Parsed as `{ type: "note", note: { texts }, ...the attributes of
  * <comment> }`: `type` and `note` are never taken from the attributes.
  */
 class CommentXform extends BaseXform<NoteModel> {
@@ -52,11 +52,15 @@ class CommentXform extends BaseXform<NoteModel> {
         return this._richTextXform;
     }
 
-    /** Writes the note. */
-    override render(xmlStream: XmlStream, note: NoteModel): void {
+    /**
+     * Writes the note.
+     *
+     * @param authorId - the index of its author in the `<authors>` of the part
+     */
+    override render(xmlStream: XmlStream, note: NoteModel, authorId = 0): void {
         xmlStream.openNode("comment", {
             ref: note.ref,
-            authorId: 0,
+            authorId,
         });
         xmlStream.openNode("text");
         if (note.note && note.note.texts) {

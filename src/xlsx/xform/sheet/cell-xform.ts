@@ -19,6 +19,7 @@ import Range from "../../../doc/range";
 import { ValueType } from "../../../doc/enums";
 
 import RichTextXform from "../strings/rich-text-xform";
+import PhoneticTextXform from "../strings/phonetic-text-xform";
 
 /**
  * The type of a value (of a formula result), told as Cell tells it (src/doc/cell.ts): Null for null / undefined; the
@@ -132,6 +133,8 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
 
     /** The xform of the runs of an inline rich string. */
     readonly richTextXForm = new RichTextXform();
+    /** The xform of the phonetic runs (`<rPh>`) of an inline string: parsed and dropped, as for shared strings. */
+    readonly phoneticTextXform = new PhoneticTextXform();
 
     /** While parsing: the `t` attribute (the type of the value) of the cell. */
     declare t: string | undefined;
@@ -408,7 +411,7 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
         xmlStream.closeNode(); // </c>
     }
 
-    /** @returns `true` for `<c>` and its descendants (`<f>`, `<v>`, `<is>`, `<t>`, `<r>`) */
+    /** @returns `true` for `<c>` and its descendants (`<f>`, `<v>`, `<is>`, `<t>`, `<r>`, `<rPh>`) */
     override parseOpen(node: SaxTag): boolean {
         if (this.parser) {
             this.parser.parseOpen(node);
@@ -457,6 +460,12 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
                 this.parser.parseOpen(node);
                 return true;
 
+            case "rPh":
+                // a phonetic run of an inline string: its <t> is not the text of the cell
+                this.parser = this.phoneticTextXform;
+                this.parser.parseOpen(node);
+                return true;
+
             default:
                 return false;
         }
@@ -491,6 +500,13 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
 
     /** @returns `false` at the end of `<c>` (the type and value of the cell are then set), else `true` */
     override parseClose(name: string): boolean {
+        if (this.parser === this.phoneticTextXform) {
+            // inside <rPh>: dropped once it ends
+            if (!this.parser.parseClose(name)) {
+                this.parser = undefined;
+            }
+            return true;
+        }
         switch (name) {
             case "c": {
                 // the end tag of the element that created the model
@@ -609,9 +625,9 @@ class CellXform extends BaseXform<ParsedCellModel | CellModel> {
             default:
                 if (this.parser) {
                     this.parser.parseClose(name);
-                    return true;
                 }
-                return false;
+                // another element of the cell (<phoneticPr>, <extLst>...): ignored
+                return true;
         }
     }
 

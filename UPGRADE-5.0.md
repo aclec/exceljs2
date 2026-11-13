@@ -248,7 +248,9 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
 - **CSV headers.** `parserOptions.headers` is supported (4.x threw). The header names become the column keys and row 1 of the worksheet; the
   data starts at row 2.
 - **Tables.** When a file omits `headerRowCount` (default 1), `table.headerRow` and `filterButton` are read as `true` (4.x: `false`). A
-  table without a header row is written without `<autoFilter>`.
+  table without a header row is written without `<autoFilter>`. The `style` of a table column is the format of its data cells (written as
+  `dataDxfId`): it is merged into the style of the data cells (4.x replaced their whole `font`, `border`...) and no longer applied to the
+  header and totals cells.
 - **Alignment.** `wrapText` and `shrinkToFit` attributes equal to `0` (the default) are no longer read into `alignment` as `false`.
 - **`worksheet.tables`** is still a plain object keyed by table name. Use `worksheet.getTable(name)`, which only returns tables (a table may
   be named `constructor` or `__proto__`).

@@ -243,7 +243,8 @@ class Row {
     /**
      * Adds a manual page break after this row, from column `lft` to column `rght` (1-based; absent or 0: from the
      * first column, to the last one).
-     * @throws Error for a column that is not one of the worksheet (an integer from 1 to 16,384)
+     * @throws Error for a column that is not one of the worksheet (an integer from 1 to 16,384), and for an `lft` column
+     * after the `rght` one
      */
     addPageBreak(lft?: number, rght?: number): void {
         for (const col of [lft, rght]) {
@@ -252,9 +253,12 @@ class Row {
             }
         }
         const ws = this._worksheet;
-        // the break model holds 0-based columns: the last one is MAX_COLS - 1
-        const left = Math.max(0, (lft ?? 0) - 1);
-        const right = Math.max(0, (rght ?? 0) - 1) || colCache.MAX_COLS - 1;
+        // the break model holds 0-based columns: the last one is MAX_COLS - 1 (absent or 0: the first / last column)
+        const left = lft ? lft - 1 : 0;
+        const right = rght ? rght - 1 : colCache.MAX_COLS - 1;
+        if (left > right) {
+            throw new Error(`Invalid page break columns: ${String(lft)} to ${String(rght)} (the first column is after the last one)`);
+        }
         const pb: RowBreakModel = {
             id: this._number,
             max: right,

@@ -58,8 +58,10 @@ import PrintOptionsXform, { type PrintOptionsModel } from "./print-options-xform
 import AutoFilterXform from "./auto-filter-xform";
 import PictureXform from "./picture-xform";
 import DrawingXform from "./drawing-xform";
+import { prepareChartAnchors, relativeTarget } from "../../chart-parts";
 import TablePartXform from "./table-part-xform";
 import RowBreaksXform from "./row-breaks-xform";
+import ColBreaksXform from "./col-breaks-xform";
 import HeaderFooterXform, { defaultHeaderFooter } from "./header-footer-xform";
 import ConditionalFormattingsXform from "./cf/conditional-formattings-xform";
 import CfRuleXform from "./cf/cf-rule-xform";
@@ -391,6 +393,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         readonly autoFilter: AutoFilterXform;
         readonly mergeCells: ListXform<string>;
         readonly rowBreaks: RowBreaksXform;
+        readonly colBreaks: ColBreaksXform;
         readonly hyperlinks: ListXform<SheetHyperlinkModel>;
         readonly pageMargins: PageMarginsXform;
         readonly dataValidations: DataValidationsXform;
@@ -434,6 +437,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             autoFilter: new AutoFilterXform(),
             mergeCells: new ListXform({ tag: "mergeCells", count: true, childXform: new MergeCellXform() }),
             rowBreaks: new RowBreaksXform(),
+            colBreaks: new ColBreaksXform(),
             hyperlinks: new ListXform({
                 tag: "hyperlinks",
                 count: false,
@@ -457,7 +461,8 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
     /**
      * Prepares the worksheet (mutates the model and `options`), see {@link prepareSteps}.
      *
-     * @throws Error for a shared formula clone without its master, or an image of an unknown medium
+     * @throws Error for a shared formula clone without its master, an image of an unknown medium, or a worksheet with both a
+     *   pivot table added and pivot tables read from the file
      */
     override prepare(model: WorksheetModel, options: WorkbookPrepareOptions & Partial<CellPrepareOptions>): void {
         runSteps(this.prepareSteps(model, options));
@@ -536,6 +541,27 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         // the notes with their decoded reference (the note objects are mutated)
         model.comments = comments.map((item) => Object.assign(item, { refAddress: colCache.decodeAddress(item.ref) }));
 
+        // the drawing of the worksheet, created for its first image or chart
+        const ensureDrawing = (): DrawingModel => {
+            if (!model.drawing) {
+                const name = `drawing${++options.drawingsCount}`;
+                const rId = nextRid(rels);
+                model.drawing = {
+                    rId,
+                    name,
+                    anchors: [],
+                    rels: [],
+                };
+                options.drawings.push(model.drawing);
+                rels.push({
+                    Id: rId,
+                    Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+                    Target: `../drawings/${name}.xml`,
+                });
+            }
+            return model.drawing;
+        };
+
         // one image relationship per distinct image of this sheet's drawing
         const imageRIds = new Map<number | string, string>();
         for (const medium of model.media) {
@@ -552,24 +578,8 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                 };
                 model.image = bookImage;
             } else if (medium.type === "image") {
-                let { drawing } = model;
                 const bookImage = mediumAt(options.media, medium.imageId);
-                if (!drawing) {
-                    const name = `drawing${++options.drawingsCount}`;
-                    const rId = nextRid(rels);
-                    drawing = model.drawing = {
-                        rId,
-                        name,
-                        anchors: [],
-                        rels: [],
-                    };
-                    options.drawings.push(drawing);
-                    rels.push({
-                        Id: rId,
-                        Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
-                        Target: `../drawings/${name}.xml`,
-                    });
-                }
+                const drawing = ensureDrawing();
                 const drawingRels = (drawing.rels = drawing.rels || []);
                 let rIdImage = imageRIds.get(medium.imageId);
                 if (!rIdImage) {
@@ -605,6 +615,12 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             }
         }
 
+        // the charts carried from the file read (chart-parts.ts), written after the pictures
+        if (model.charts && model.charts.length && options.chartParts) {
+            const drawing = ensureDrawing();
+            drawing.chartAnchors = prepareChartAnchors(model.charts, String(drawing.name), (drawing.rels ??= []), options.chartParts);
+        }
+
         // prepare tables
         for (const table of model.tables) {
             // relationships
@@ -625,13 +641,32 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
             }
         }
 
-        // prepare pivot tables
+        // prepare pivot tables: the one added has a fixed name and location (A3:E15), which could be those of the pivot
+        // tables read (worksheet.addPivotTable refuses such a worksheet; a model set by hand could still have both)
+        if ((model.pivotTables || []).length && model.pivotTableParts && model.pivotTableParts.length) {
+            throw new Error(
+                `The worksheet ${model.name} has both a pivot table added (addPivotTable) and pivot tables read from the file: their names and locations may collide`
+            );
+        }
         if ((model.pivotTables || []).length) {
             rels.push({
                 Id: nextRid(rels),
                 Type: RelType.PivotTable,
                 Target: "../pivotTables/pivotTable1.xml",
             });
+        }
+        // the pivot tables carried from the file read (pivot-parts.ts)
+        if (model.pivotTableParts && options.pivotParts) {
+            for (const table of model.pivotTableParts) {
+                const name = options.pivotParts.addTable(table, model.name);
+                if (name !== undefined) {
+                    rels.push({
+                        Id: nextRid(rels),
+                        Type: RelType.PivotTable,
+                        Target: relativeTarget(`xl/worksheets/sheet${model.id}.xml`, name),
+                    });
+                }
+            }
         }
 
         // prepare ext items
@@ -702,8 +737,9 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
         this.map.pageSetup.render(xmlStream, pageSetup);
         this.map.headerFooter.render(xmlStream, model.headerFooter);
         this.map.rowBreaks.render(xmlStream, model.rowBreaks);
+        this.map.colBreaks.render(xmlStream, model.colBreaks); // Note: must be right after rowBreaks
         // CT_Worksheet order: drawing, legacyDrawing, picture, tableParts, extLst
-        this.map.drawing.render(xmlStream, model.drawing); // Note: must be after rowBreaks
+        this.map.drawing.render(xmlStream, model.drawing); // Note: must be after colBreaks
         if (model.rels) {
             // add a <legacyDrawing /> node for the comments (vml drawing)
             for (const rel of model.rels) {
@@ -791,6 +827,7 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                     rows: map.sheetData.model,
                     mergeCells: map.mergeCells.model,
                     rowBreaks: map.rowBreaks.model ?? [],
+                    colBreaks: map.colBreaks.model ?? [],
                     hyperlinks: map.hyperlinks.model,
                     dataValidations: map.dataValidations.model,
                     properties,
@@ -927,6 +964,9 @@ class WorkSheetXform extends BaseXform<ParsedWorksheetModel | WorksheetModel> {
                 drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
             const drawing: DrawingModel | undefined = match ? claim(getOwn(options.drawings, match[1])) : undefined;
             if (drawing) {
+                if (drawing.charts) {
+                    model.charts = drawing.charts;
+                }
                 for (const anchor of drawing.anchors) {
                     // the index is set by WorkbookXform.reconcile for every medium of the workbook
                     const imageId = anchor.medium && anchor.medium.index;

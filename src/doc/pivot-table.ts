@@ -47,7 +47,10 @@ export interface PivotTable {
     values: number[];
     metric: "sum";
     cacheFields: PivotCacheField[];
-    /** Defined in `<pivotTableDefinition>` of xl/pivotTables/pivotTable1.xml; also used in xl/workbook.xml. */
+    /**
+     * Defined in `<pivotTableDefinition>` of xl/pivotTables/pivotTable1.xml; also used in xl/workbook.xml. Written as the
+     * next free id when a pivot table read from the file has it (this object is not changed).
+     */
     cacheId: string;
     /** Set when the workbook is written (xlsx.ts): the relationship id of the pivot cache definition from the workbook. */
     rId?: string;
@@ -69,7 +72,8 @@ function fieldName(value: CellValue | undefined): string | undefined {
 
 /**
  * Creates a pivot table.
- * @throws Error when the workbook has one already, for another metric than "sum", for a field name that is not in row 1
+ * @throws Error when the workbook has one already, when the worksheet has pivot tables read from the file, for another
+ *   metric than "sum", for a field name that is not in row 1
  *   of the source worksheet, without rows or columns, or without exactly one value
  */
 function makePivotTable(worksheet: Worksheet, model: PivotTableInput): PivotTable {
@@ -115,6 +119,12 @@ function makePivotTable(worksheet: Worksheet, model: PivotTableInput): PivotTabl
 function validate(worksheet: Worksheet, model: PivotTableInput): void {
     if (worksheet.workbook.pivotTables.length === 1) {
         throw new Error("A pivot table was already added. At this time, ExcelJS supports at most one pivot table per file.");
+    }
+    // the pivot table added has a fixed name and location (A3:E15), which could be those of the pivot tables read
+    if (worksheet._pivotTableParts.length) {
+        throw new Error(
+            `The worksheet ${worksheet.name} already has pivot tables read from the file: add the pivot table to another worksheet.`
+        );
     }
 
     if (model.metric && model.metric !== "sum") {

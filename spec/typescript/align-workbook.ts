@@ -134,4 +134,35 @@ async function modelContainer(): Promise<void> {
     void bytes;
 }
 
-export { documentProperties, images, xlsx, csv, definedNames, modelContainer };
+// --- chartsheets: read-only information, removable --------------------------------------------------
+export type Chartsheets = [
+    Assert<Equals<ExcelJS.Workbook["chartsheets"], ExcelJS.Chartsheet[]>>,
+    Assert<Equals<ExcelJS.Chartsheet["state"], ExcelJS.WorksheetState>>,
+    Assert<Equals<ExcelJS.Workbook["removeChartsheet"], (name: string) => void>>,
+];
+
+function chartsheets(): void {
+    const [first] = workbook.chartsheets;
+    if (first) {
+        // @ts-expect-error -- a copy, read-only: there is no API to change a chartsheet
+        first.name = "Renamed";
+        workbook.removeChartsheet(first.name);
+    }
+    // @ts-expect-error -- a getter: assigning throws
+    workbook.chartsheets = [];
+    // @ts-expect-error -- not a worksheet: no worksheet API returns it
+    workbook.getWorksheet("Chart1")?.chartsheets;
+}
+
+// --- chartsheets created: a chart without anchor, each range naming its worksheet -------------------------
+function addChartsheet(): void {
+    const added: ExcelJS.Chartsheet = workbook.addChartsheet("Chart", { type: "pie", series: [{ values: "Data!B2:B5" }] });
+    workbook.addChartsheet("Hidden", { type: "scatter", series: [{ yValues: "Data!B2:B5" }] }, { state: "hidden" });
+    // @ts-expect-error -- the chart of a chartsheet fills the sheet: no anchor
+    workbook.addChartsheet("Anchored", { type: "pie", anchor: "A1:B2", series: [{ values: "Data!B2:B5" }] });
+    // @ts-expect-error -- a state of a sheet
+    workbook.addChartsheet("Shown", { type: "pie", series: [{ values: "Data!B2:B5" }] }, { state: "shown" });
+    void added;
+}
+
+export { documentProperties, images, xlsx, csv, definedNames, modelContainer, chartsheets, addChartsheet };

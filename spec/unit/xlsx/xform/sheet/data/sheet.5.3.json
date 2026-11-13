@@ -19,6 +19,7 @@
     "background": null,
     "mergeCells": null,
     "rowBreaks": [],
+    "colBreaks": [],
     "dataValidations": null,
     "drawing": null,
     "headerFooter": {

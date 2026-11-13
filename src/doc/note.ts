@@ -56,8 +56,8 @@ class Note {
     }
 
     /**
-     * Sets the note from a model: a single text run without font becomes a string note, anything else the comment
-     * itself (by reference).
+     * Sets the note from a model: a single text run without font, of a note without author, becomes a string note,
+     * anything else the comment itself (by reference).
      * @throws Error when the comment has no `texts`
      */
     set model(value: NoteModel) {
@@ -67,7 +67,7 @@ class Note {
             throw new Error("The model of a note needs the texts of its comment");
         }
         const [first] = texts;
-        if (texts.length === 1 && first && Object.keys(first).length === 1) {
+        if (texts.length === 1 && first && Object.keys(first).length === 1 && note.author === undefined) {
             this.note = first.text;
         } else {
             this.note = note;

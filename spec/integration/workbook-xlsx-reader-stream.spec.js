@@ -1139,6 +1139,7 @@ describe("WorkbookReader (stream)", () => {
                 const cell = row.getCell(1);
                 expect(() => row.commit()).to.throw(/^Invalid Operation: commit/);
                 expect(() => row.addPageBreak()).to.throw(/^Invalid Operation: rowBreaks/);
+                expect(() => worksheet.getColumn(1).addPageBreak()).to.throw(/^Invalid Operation: colBreaks/);
                 expect(() => cell.dataValidation).to.throw(/^Invalid Operation: dataValidations/);
                 expect(() => cell.names).to.throw(/^Invalid Operation: definedNames/);
                 expect(() => worksheet.getColumn(1).eachCell(() => {})).to.throw(/^Invalid Operation: eachRow/);

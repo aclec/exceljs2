@@ -1,8 +1,18 @@
 import * as fs from "fs";
 import { PassThrough, type Stream } from "stream";
 import { ZipWriter, type ZipOutput, type ZipWriterOptions } from "../utils/zip-stream";
-import { readZip, ZIP_INPUT_ERROR, type ZipInput, type ZipReadOptions } from "../utils/zip-reader";
+import { readZip, ZIP_INPUT_ERROR, type ZipFileEntry, type ZipInput, type ZipReadOptions } from "../utils/zip-reader";
 import RelType from "./rel-type";
+import { ChartPartWriter, loadChartParts, relativeTarget, resolveChartAnchors, writeDrawingParts } from "./chart-parts";
+import {
+    CHARTSHEET_REL_TYPE,
+    loadChartsheets,
+    prepareChartsheetDrawings,
+    prepareChartsheets,
+    reconcileChartsheets,
+    writeChartsheetParts,
+} from "./chartsheet-parts";
+import { PivotPartWriter, loadPivotParts, worksheetPivotTables } from "./pivot-parts";
 
 import { createDictionary, exists } from "../utils/utils";
 import XmlStream from "../utils/xml-stream";
@@ -32,13 +42,18 @@ import VmlNotesXform from "./xform/comment/vml-notes-xform";
 import theme1Xml from "./xml/theme1";
 import type { XlsxReadOptions } from "../../index";
 import type {
+    ChartPartModel,
+    ChartsheetWriteModel,
+    ContentTypeOverride,
     DrawingModel,
     DrawingReconcileOptions,
     MediaModel,
+    PivotTablePartModel,
     RelationshipModel,
     TableModel,
     WorkbookModel,
     WorkbookPartModel,
+    WorkbookPivotCacheModel,
     WorkbookPrepareOptions,
     WorkbookReadModel,
     WorkbookReconcileOptions,
@@ -66,12 +81,32 @@ export type XlsxReadModel = Omit<WorkbookReadModel, "sharedStrings"> & {
     styles?: XlsxStyles;
     sharedStrings?: SharedStringsXform;
     loadBudget?: WorksheetLoadBudget;
+    /** the parts of the charts of the drawings (part name → part), read by load() */
+    chartParts?: Map<string, ChartPartModel>;
+    /** the `<pivotCache>`s of xl/workbook.xml */
+    pivotCaches?: WorkbookPivotCacheModel[];
+    /** the pivot tables of the worksheets (part name → pivot table), read by load() */
+    pivotTableParts?: Map<string, PivotTablePartModel>;
 };
 
 /** The write model of {@link XLSX.write}: the document model prepared, with the managers of the styles and shared strings. */
 export type XlsxWriteModel = WorkbookWriteModel & {
     styles: XlsxStyles;
     sharedStrings: SharedStringsXform;
+    /** names and writes the parts of the charts of the worksheets */
+    chartPartWriter?: ChartPartWriter;
+    /** the parts of the charts written, for `[Content_Types].xml` */
+    chartParts?: ContentTypeOverride[];
+    /** names and writes the parts of the pivot tables carried by the worksheets */
+    pivotPartWriter?: PivotPartWriter;
+    /** the parts of the pivot tables carried, for `[Content_Types].xml` */
+    pivotParts?: ContentTypeOverride[];
+    /** the cacheId written for the pivot table added (`addPivotTable`): its own, unless a pivot table carried has it */
+    pivotCacheId?: string;
+    /** the `<pivotCache>`s of xl/workbook.xml, when pivot tables are carried (set by addWorkbookRels) */
+    pivotCaches?: WorkbookPivotCacheModel[];
+    /** the chartsheets written (chartsheet-parts.ts prepareChartsheets), in the order of their index */
+    writtenChartsheets?: ChartsheetWriteModel[];
 };
 
 /** The options of {@link XLSX.load}: index.d.ts `XlsxReadOptions`, and `base64` (the data is a base64 string). */
@@ -127,6 +162,11 @@ type ReadState = Partial<
         | "drawingRels"
         | "vmlDrawings"
         | "loadBudget"
+        | "chartParts"
+        | "pivotCaches"
+        | "pivotTableParts"
+        | "chartsheetParts"
+        | "sheetWorksheets"
     > & { sheetDefs: unknown }
 >;
 
@@ -188,8 +228,9 @@ const DRAWING_RELS_PART = /xl\/drawings\/_rels\/([a-zA-Z0-9]+)[.]xml[.]rels/;
 // vmlDrawing1.vml (Excel), commentsDrawing1.vml (openpyxl)
 const VML_DRAWING_PART = /xl\/drawings\/(vmlDrawing\d+|commentsDrawing\d+)[.]vml$/;
 
-// The parts that load() reads (keep in sync with its switch): the others (pivot tables, charts, custom XML, printer
-// settings...) are not inflated.
+// The parts that load() reads (keep in sync with its switch): the others (custom XML, printer settings...) are not inflated,
+// except the parts of the charts of the drawings and of the pivot tables of the worksheets, read afterwards (chart-parts.ts
+// loadChartParts, pivot-parts.ts loadPivotParts).
 const READ_PARTS = new Set([
     "_rels/.rels",
     "xl/workbook.xml",
@@ -213,6 +254,17 @@ const READ_PART_PATTERNS = [
 
 function isReadPart(name: string): boolean {
     return READ_PARTS.has(name) || READ_PART_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+// the entries of a zip by name, without a leading "/" (as load() names them); the last entry of a name wins
+function entriesByName(entries: readonly ZipFileEntry[]): Map<string, ZipFileEntry> {
+    const byName = new Map<string, ZipFileEntry>();
+    for (const entry of entries) {
+        if (!entry.dir) {
+            byName.set(entry.name[0] === "/" ? entry.name.substring(1) : entry.name, entry);
+        }
+    }
+    return byName;
 }
 
 // the browser bundle defines process.browser (scripts/browser-shims)
@@ -303,6 +355,10 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             media: model.media,
             mediaIndex: model.mediaIndex,
         };
+        // a chart belongs to one anchor of one drawing
+        const claimedCharts = new Set<ChartPartModel>();
+        // the parts already claimed by a worksheet (see WorksheetXform.reconcile) or a chartsheet (its drawing)
+        const claimedParts = new Set<object>();
         for (const [name, drawing] of Object.entries(model.drawings)) {
             // part names and relationship ids come from the file: ignore inherited members
             const drawingRel = Object.hasOwn(model.drawingRels, name) ? model.drawingRels[name] : undefined;
@@ -321,6 +377,13 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                     }
                 }
                 drawingXform.reconcile(drawing, drawingOptions);
+            }
+            if (drawing.chartFrames) {
+                const charts = resolveChartAnchors(name, drawing.chartFrames, drawingRel, model.chartParts ?? new Map(), claimedCharts);
+                if (charts.length) {
+                    drawing.charts = charts;
+                }
+                delete drawing.chartFrames;
             }
         }
 
@@ -343,13 +406,50 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             comments: model.comments,
             tables: model.tables,
             vmlDrawings: model.vmlDrawings,
-            // the parts already claimed by a worksheet (see WorksheetXform.reconcile)
-            claimedParts: new Set(),
+            claimedParts,
         };
+        // a pivot table belongs to one worksheet
+        const claimedPivotTables = new Set<PivotTablePartModel>();
         for (const worksheet of model.worksheets) {
             // sheetNo: the number of the part (a string)
             worksheet.relationships = model.worksheetRels[String(worksheet.sheetNo)];
+            if (model.pivotTableParts) {
+                const pivotTables = worksheetPivotTables(
+                    String(worksheet.sheetNo),
+                    worksheet.relationships,
+                    model.pivotTableParts,
+                    claimedPivotTables
+                );
+                if (pivotTables.length) {
+                    worksheet.pivotTableParts = pivotTables;
+                }
+            }
             yield* worksheetXform.reconcileSteps(worksheet, sheetOptions);
+        }
+
+        // the chartsheets, after the worksheets: a drawing claimed by a worksheet stays with it
+        const chartsheets = reconcileChartsheets(
+            {
+                sheets: model.sheets,
+                workbookRels: model.workbookRels,
+                sheetWorksheets: model.sheetWorksheets,
+                worksheetNames: (model.sheetWorksheets ?? []).flatMap((worksheet) =>
+                    worksheet?.name === undefined ? [] : [worksheet.name]
+                ),
+                chartsheetParts: model.chartsheetParts,
+                drawings: model.drawings,
+                views: model.views,
+            },
+            (drawing) => {
+                if (claimedParts.has(drawing)) {
+                    return false;
+                }
+                claimedParts.add(drawing);
+                return true;
+            }
+        );
+        if (chartsheets.length) {
+            model.chartsheets = chartsheets;
         }
 
         // delete unnecessary parts
@@ -366,6 +466,11 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         delete readState.drawingRels;
         delete readState.vmlDrawings;
         delete readState.loadBudget;
+        delete readState.chartParts;
+        delete readState.pivotCaches;
+        delete readState.pivotTableParts;
+        delete readState.chartsheetParts;
+        delete readState.sheetWorksheets;
     }
 
     async _processWorksheetEntry(
@@ -497,7 +602,8 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
 
     /**
      * Loads a file into the workbook: its worksheets, styles, shared strings, images, notes, tables, defined names and
-     * properties (pivot tables, charts... are not read).
+     * properties (slicers... are not read). The charts and the pivot tables of the worksheets and the chartsheets are
+     * carried opaque, to be written back (chart-parts.ts, pivot-parts.ts, chartsheet-parts.ts).
      *
      * @param data - the bytes of the file, a Blob, or a base64 string (`base64` option)
      * @returns the workbook (its model replaced), once every part is read
@@ -541,7 +647,8 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             throw new TypeError(ZIP_INPUT_ERROR);
         }
         // the limits (maxEntrySize...) are checked while inflating
-        for (const entry of readZip(zipBytes, options)) {
+        const entries = readZip(zipBytes, options);
+        for (const entry of entries) {
             const pause = pacer.pause();
             if (pause) {
                 await pause;
@@ -585,6 +692,7 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                         model.views = workbook.views;
                         model.properties = workbook.properties;
                         model.calcProperties = workbook.calcProperties;
+                        model.pivotCaches = workbook.pivotCaches;
                         break;
                     }
 
@@ -625,6 +733,18 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                         break;
                 }
             }
+        }
+
+        let byName: Map<string, ZipFileEntry> | undefined;
+        const zipEntries = (): Map<string, ZipFileEntry> => (byName ??= entriesByName(entries));
+        if ((model.workbookRels ?? []).some((rel) => rel.Type === CHARTSHEET_REL_TYPE)) {
+            model.chartsheetParts = await loadChartsheets(model.sheets, model.workbookRels, zipEntries());
+        }
+        if (Object.values(model.drawings).some((drawing) => drawing.chartFrames)) {
+            model.chartParts = await loadChartParts(model.drawings, model.drawingRels, zipEntries());
+        }
+        if (Object.values(model.worksheetRels).some((rels) => rels.some((rel) => rel.Type === RelType.PivotTable))) {
+            model.pivotTableParts = await loadPivotParts(model.worksheetRels, model.pivotCaches, model.workbookRels, zipEntries());
         }
 
         await pacer.run(this._reconcileSteps(model, options));
@@ -717,25 +837,27 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         );
     }
 
-    /** Adds the drawing parts of the worksheets and their relationships. */
+    /** Adds the drawing parts of the worksheets and of the chartsheets, and their relationships. */
     addDrawings(zip: ZipWriter, model: XlsxWriteModel): void {
-        const drawingXform = new DrawingXform();
-        const relsXform = new RelationshipsXform();
-
-        for (const worksheet of model.worksheets) {
-            const { drawing } = worksheet;
+        const drawings: DrawingModel[] = [];
+        for (const { drawing } of [...model.worksheets, ...(model.writtenChartsheets ?? [])]) {
             if (drawing) {
-                drawingXform.prepare(drawing);
-                let xml = drawingXform.toXml(drawing);
-                zip.append(xml, { name: `xl/drawings/${drawing.name}.xml` });
-
-                // worksheet-xform prepare gives the drawing its relationships
-                if (!drawing.rels) {
-                    throw new Error(`addDrawings: the drawing ${drawing.name} has no relationships (prepareModel was not run)`);
-                }
-                xml = relsXform.toXml(drawing.rels);
-                zip.append(xml, { name: `xl/drawings/_rels/${drawing.name}.xml.rels` });
+                drawings.push(drawing);
             }
+        }
+        writeDrawingParts(zip, drawings);
+    }
+
+    /** Adds the chartsheet parts (carried from the file read, or created) and their relationships. */
+    addChartsheets(zip: ZipWriter, model: XlsxWriteModel): void {
+        writeChartsheetParts(zip, model.writtenChartsheets ?? []);
+    }
+
+    /** Adds the parts of the charts of the worksheets and chartsheets (carried from the file read) and their relationships. */
+    addCharts(zip: ZipWriter, model: XlsxWriteModel): void {
+        if (model.chartPartWriter) {
+            // a pivot chart whose pivot table is not written is written as a static chart
+            model.chartPartWriter.write(zip, model.pivotPartWriter);
         }
     }
 
@@ -753,8 +875,11 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         }
     }
 
-    /** Adds the parts of the pivot table of the workbook (one at most). */
+    /** Adds the parts of the pivot table added to the workbook (one at most), and of those carried from the file read. */
     addPivotTables(zip: ZipWriter, model: XlsxWriteModel): void {
+        if (model.pivotPartWriter) {
+            model.pivotPartWriter.write(zip);
+        }
         const [pivotTable] = model.pivotTables;
         if (!pivotTable) return;
 
@@ -805,7 +930,8 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         // dataFields
         // pivotTableStyleInfo
 
-        xml = pivotTableXform.toXml(pivotTable);
+        // its cacheId, unless a pivot table carried has it
+        xml = pivotTableXform.toXml({ ...pivotTable, cacheId: model.pivotCacheId ?? pivotTable.cacheId });
         zip.append(xml, { name: "xl/pivotTables/pivotTable1.xml" });
 
         xml = relsXform.toXml([
@@ -863,7 +989,10 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         zip.append(xml, { name: "_rels/.rels" });
     }
 
-    /** Adds the workbook relationships; sets the `rId` of each worksheet and of the pivot table. */
+    /**
+     * Adds the workbook relationships; sets the `rId` of each worksheet, chartsheet and of the pivot table added, and the
+     * `<pivotCache>`s when pivot tables are carried from the file read.
+     */
     async addWorkbookRels(zip: ZipWriter, model: XlsxWriteModel): Promise<void> {
         let count = 1;
         const relationships: RelationshipModel[] = [
@@ -893,6 +1022,22 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
                 Type: XLSX.RelType.Worksheet,
                 Target: `worksheets/sheet${worksheet.id}.xml`,
             });
+        }
+        for (const chartsheet of model.writtenChartsheets ?? []) {
+            const rId = (chartsheet.rId = `rId${count++}`);
+            relationships.push({ Id: rId, Type: CHARTSHEET_REL_TYPE, Target: `chartsheets/sheet${chartsheet.partNo}.xml` });
+        }
+        const carriedCaches = model.pivotPartWriter ? model.pivotPartWriter.caches : [];
+        if (carriedCaches.length) {
+            const pivotCaches: WorkbookPivotCacheModel[] = pivotTable
+                ? [{ cacheId: model.pivotCacheId ?? pivotTable.cacheId, rId: pivotTable.rId }]
+                : [];
+            for (const { name, cacheId } of carriedCaches) {
+                const rId = `rId${count++}`;
+                relationships.push({ Id: rId, Type: XLSX.RelType.PivotCacheDefinition, Target: relativeTarget("xl/workbook.xml", name) });
+                pivotCaches.push({ cacheId: String(cacheId), rId });
+            }
+            model.pivotCaches = pivotCaches;
         }
         const xform = new RelationshipsXform();
         const xml = xform.toXml(relationships);
@@ -983,12 +1128,19 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         const drawings: DrawingModel[] = [];
         const commentRefs: XlsxWriteModel["commentRefs"] = [];
         const tables: TableModel[] = [];
+        const chartPartWriter = new ChartPartWriter();
+        // the parts of the pivot table added (addPivotTable, one at most) are numbered 1
+        const pivotPartWriter = new PivotPartWriter(1 + (documentModel.pivotTables ?? []).length);
+        // the chartsheets are numbered and get their sheet ids before the <sheets> are ordered (WorkbookXform.prepare)
+        const writtenChartsheets = prepareChartsheets(documentModel.worksheets, documentModel.chartsheets);
         const model: XlsxWriteModel = Object.assign(documentModel, {
             // ensure following properties have sane values
             creator: documentModel.creator || "ExcelJS",
             lastModifiedBy: documentModel.lastModifiedBy || "ExcelJS",
             created: documentModel.created || new Date(),
             modified: documentModel.modified || new Date(),
+            // only the model of a Workbook has it: not the model read by a ModelContainer
+            pivotTables: documentModel.pivotTables ?? [],
 
             useSharedStrings: options.useSharedStrings !== undefined ? options.useSharedStrings : true,
             useStyles,
@@ -1004,6 +1156,9 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             drawings,
             commentRefs,
             tables,
+            chartPartWriter,
+            pivotPartWriter,
+            writtenChartsheets,
         });
 
         // prepare all of the things before the render
@@ -1020,6 +1175,8 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             media: model.media,
             drawings,
             commentRefs,
+            chartParts: chartPartWriter,
+            pivotParts: pivotPartWriter,
         };
         let tableCount = 0;
         for (const worksheet of model.worksheets) {
@@ -1032,6 +1189,18 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
             }
 
             yield* worksheetXform.prepareSteps(worksheet, worksheetOptions);
+        }
+        // the drawings of the chartsheets are numbered after those of the worksheets
+        prepareChartsheetDrawings(writtenChartsheets, worksheetOptions, chartPartWriter);
+
+        // the chart parts referenced by those of the worksheets are named too, before [Content_Types].xml is written
+        model.chartParts = chartPartWriter.complete();
+        model.pivotParts = pivotPartWriter.contentTypes();
+        // the pivot table added keeps its cacheId, unless a pivot table carried has it
+        const [pivotTable] = model.pivotTables ?? [];
+        const preferredCacheId = pivotTable ? Number(pivotTable.cacheId) : NaN;
+        if (pivotTable && Number.isInteger(preferredCacheId)) {
+            model.pivotCacheId = String(pivotPartWriter.freeCacheId(preferredCacheId));
         }
 
         // TODO: workbook drawing list
@@ -1065,7 +1234,9 @@ class XLSX<TWorkbook extends XlsxWorkbook = XlsxWorkbook> {
         await this.addWorkbookRels(zip, model);
         await this.addWorksheets(zip, model, pacer);
         await this.addSharedStrings(zip, model); // always after worksheets
+        this.addChartsheets(zip, model);
         this.addDrawings(zip, model);
+        this.addCharts(zip, model);
         this.addTables(zip, model);
         this.addPivotTables(zip, model);
         await Promise.all([this.addThemes(zip, model), this.addStyles(zip, model)]);

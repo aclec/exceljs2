@@ -6,6 +6,7 @@
 import type * as Public from "../../index";
 import type WorkbookWriter from "../stream/xlsx/workbook-writer";
 import type WorksheetWriter from "../stream/xlsx/worksheet-writer";
+import type { WorksheetWriterChart } from "../stream/xlsx/stream-chart";
 import type WorkbookReader from "../stream/xlsx/workbook-reader";
 import type { WorkbookReaderEvents } from "../stream/xlsx/workbook-reader";
 import type WorksheetReader from "../stream/xlsx/worksheet-reader";
@@ -26,6 +27,8 @@ type StreamRules =
     | DocRules
     | [Public.stream.xlsx.WorkbookWriter, WorkbookWriter]
     | [Public.stream.xlsx.WorksheetWriter, WorksheetWriter]
+    // a chart of a streamed worksheet is declared WorksheetChart, as a chart of a document worksheet
+    | [Public.WorksheetChart, WorksheetWriterChart]
     | [Public.stream.xlsx.WorkbookReader, WorkbookReader]
     | [Public.stream.xlsx.WorksheetReader, WorksheetReader]
     | [Public.stream.xlsx.HyperlinkReader, HyperlinkReader];
@@ -51,6 +54,8 @@ export type WorksheetWriterConforms = Assert<
         }
     >
 >;
+/** The runtime chart of a streamed worksheet conforms to index.d.ts `WorksheetChart`. */
+export type WorksheetWriterChartConforms = Assert<Check<WorksheetWriterChart, Public.WorksheetChart, StreamRules>>;
 /** The runtime WorkbookReader conforms to index.d.ts `stream.xlsx.WorkbookReader`. */
 export type WorkbookReaderConforms = Assert<Check<WorkbookReader, Public.stream.xlsx.WorkbookReader, StreamRules>>;
 /** The runtime WorkbookReader constructor accepts the declared arguments. */

@@ -7,7 +7,7 @@
 //  Access/Add/Delete individual cells
 //  Manage column widths and row heights
 
-import type { WorksheetProtection, WorksheetState } from "../../index";
+import type { ChartOptions, WorksheetProtection, WorksheetState } from "../../index";
 import colCache from "../utils/col-cache";
 import Range from "./range";
 import { findCellAddress, isColumnNumber, isRowNumber, resolveCellAddress, resolveRange, type SheetRangeArgs } from "./sheet-reference";
@@ -15,6 +15,8 @@ import Row, { type RowValues } from "./row";
 import Column, { type ColumnDefn, type ColumnRanges, type ColumnSegment } from "./column";
 import { ValueType } from "./enums";
 import Image, { type ImageRangeInput } from "./image";
+import Chart from "./chart";
+import { checkSheetName } from "./sheet-name";
 import Table from "./table";
 import DataValidations from "./data-validations";
 import { makePivotTable, type PivotTable, type PivotTableInput } from "./pivot-table";
@@ -28,11 +30,14 @@ import { isFormulaResult, type CellValue, type FormulaValueObject } from "./cell
 import type Workbook from "./workbook";
 import type {
     AutoFilterModel,
+    ChartAnchorModel,
+    ColBreakModel,
     ColModel,
     ConditionalFormattingModel,
     FormulaResult,
     HeaderFooterModel,
     PageSetupModel,
+    PivotTablePartModel,
     RowBreakModel,
     RowModel,
     SheetProtectionModel,
@@ -61,11 +66,12 @@ export interface WorksheetOptions {
 
 /**
  * {@link Worksheet.model} as the getter produces it: a {@link WorksheetModel} with the fields only the getter sets
- * (`state`, `rowBreaks`, the used range `dimensions` and the merged ranges `merges`).
+ * (`state`, `rowBreaks`, `colBreaks`, the used range `dimensions` and the merged ranges `merges`).
  */
-export type DocumentWorksheetModel = Omit<WorksheetModel, "state" | "rowBreaks" | "dimensions" | "merges"> & {
+export type DocumentWorksheetModel = Omit<WorksheetModel, "state" | "rowBreaks" | "colBreaks" | "dimensions" | "merges"> & {
     state: WorksheetState;
     rowBreaks: RowBreakModel[];
+    colBreaks: ColBreakModel[];
     dimensions: Range;
     merges: string[];
 };
@@ -199,6 +205,8 @@ class Worksheet {
     _mergedCellCount: number;
     /** The manual page breaks after rows. */
     rowBreaks: RowBreakModel[];
+    /** The manual page breaks after columns. */
+    colBreaks: ColBreakModel[];
     /** Tab color, default row height, outline levels, etc. */
     properties: WorksheetPropertiesModel;
     /** For all things printing. */
@@ -213,6 +221,12 @@ class Worksheet {
     autoFilter: AutoFilterModel | null | undefined;
     /** The images (and background image). */
     _media: Image[];
+    /** The charts read from a file, carried opaque to be written back (see src/xlsx/chart-parts.ts). */
+    _charts: ChartAnchorModel[];
+    /** The pivot tables read from a file, carried opaque to be written back (no editing API: see src/xlsx/pivot-parts.ts). */
+    _pivotTableParts: PivotTablePartModel[];
+    /** The charts created by {@link addChart}, written after the charts read. */
+    _addedCharts: Chart[];
     /** The protection of the worksheet, or null when it is not protected. */
     sheetProtection: SheetProtectionModel | null | undefined;
     /** The tables by name (see setTable). */
@@ -263,6 +277,7 @@ class Worksheet {
 
         // record of all row and column pageBreaks
         this.rowBreaks = [];
+        this.colBreaks = [];
 
         // for tabColor, default row height, outline levels, etc
         this.properties = Object.assign(
@@ -320,6 +335,9 @@ class Worksheet {
 
         // for images, etc
         this._media = [];
+        this._charts = [];
+        this._pivotTableParts = [];
+        this._addedCharts = [];
 
         // worksheet protection
         this.sheetProtection = null;
@@ -340,7 +358,7 @@ class Worksheet {
     /**
      * Sets the name: nothing gives `sheet<id>`; a name longer than 31 characters is truncated (with a warning).
      * @throws Error for a name that is not a string, empty, "History", with a character among `* ? : \ / [ ]`, starting
-     *   or ending with a quote, or of another worksheet of the workbook (case-insensitive)
+     *   or ending with a quote, or of another worksheet or of a chartsheet of the workbook (case-insensitive)
      */
     set name(name: string | undefined) {
         if (name === undefined) {
@@ -349,39 +367,12 @@ class Worksheet {
 
         if (this._name === name) return;
 
-        if (typeof name !== "string") {
-            throw new Error("The name has to be a string.");
-        }
-
-        if (name === "") {
-            throw new Error("The name can't be empty.");
-        }
-
-        if (name === "History") {
-            throw new Error('The name "History" is protected. Please use a different name.');
-        }
-
-        // Illegal character in worksheet name: asterisk (*), question mark (?),
-        // colon (:), forward slash (/ \), or bracket ([])
-        if (/[*?:/\\[\]]/.test(name)) {
-            throw new Error(`Worksheet name ${name} cannot include any of the following characters: * ? : \\ / [ ]`);
-        }
-
-        if (/(^')|('$)/.test(name)) {
-            throw new Error(`The first or last character of worksheet name cannot be a single quotation mark: ${name}`);
-        }
-
-        if (name && name.length > 31) {
-            console.warn(`Worksheet name ${name} exceeds 31 chars. This will be truncated`);
-            name = name.substring(0, 31);
-        }
-
-        const lowerName = name.toLowerCase();
-        if (this._workbook._worksheets.find((ws) => ws && ws !== this && ws.name.toLowerCase() === lowerName)) {
-            throw new Error(`Worksheet name already exists: ${name}`);
-        }
-
-        this._name = name;
+        this._name = checkSheetName(
+            name,
+            (lowerName) =>
+                !!this._workbook._worksheets.find((ws) => ws && ws !== this && ws.name.toLowerCase() === lowerName) ||
+                this._workbook._chartsheets.some(({ model }) => model.name.toLowerCase() === lowerName)
+        );
     }
 
     /** The workbook. */
@@ -1337,6 +1328,24 @@ class Worksheet {
     }
 
     // =========================================================================
+    // Charts
+    /**
+     * Adds a chart over a range of cells (`anchor`) of the worksheet, its series given by ranges of cells (see index.d.ts
+     * `ChartOptions`). The values shown before a recalculation are read from the cells when the workbook is written.
+     * @throws Error for invalid options
+     */
+    addChart(options: ChartOptions): Chart {
+        const chart = new Chart(this, options);
+        this._addedCharts.push(chart);
+        return chart;
+    }
+
+    /** The charts added by {@link addChart} (not those read from a file, which are written back as they were read). */
+    getCharts(): Chart[] {
+        return [...this._addedCharts];
+    }
+
+    // =========================================================================
     // Worksheet Protection
     /**
      * Protects the worksheet, with a password (hashed with SHA-512 and a random salt, `spinCount` times: default 100000)
@@ -1413,10 +1422,7 @@ class Worksheet {
      * @throws Error for an invalid pivot table (see makePivotTable)
      */
     addPivotTable(model: PivotTableInput): PivotTable {
-        console.warn(
-            // (the message has a space at the end of its first line)
-            "Warning: Pivot Table support is experimental. \nPlease leave feedback at https://github.com/exceljs/exceljs/discussions/2575"
-        );
+        console.warn("Warning: Pivot Table support is experimental.\nPlease report problems at https://github.com/aclec/exceljs2/issues");
 
         const pivotTable = makePivotTable(this, model);
 
@@ -1469,6 +1475,15 @@ class Worksheet {
     // Model
 
     /**
+     * The charts of the model: those read, then those added, each generated from the cells now (`Chart 1`, `Chart 2`...).
+     * @throws Error when a worksheet of the data of an added chart was removed from the workbook
+     */
+    private chartModels(): ChartAnchorModel[] {
+        const carried = this._charts.length;
+        return [...this._charts, ...this._addedCharts.map((chart, index) => chart.toModel(`Chart ${carried + index + 1}`))];
+    }
+
+    /**
      * The model of the worksheet (for the xlsx writer): the settings by reference, the rows and columns as models, the
      * used range (`dimensions`) and the merged ranges (`merges`).
      */
@@ -1487,9 +1502,14 @@ class Worksheet {
             pageSetup: this.pageSetup,
             headerFooter: this.headerFooter,
             rowBreaks: this.rowBreaks,
+            colBreaks: this.colBreaks,
             views: this.views,
             autoFilter: this.autoFilter,
             media: this._media.map((medium) => medium.model),
+            // only a worksheet with charts has the member
+            ...(this._charts.length || this._addedCharts.length ? { charts: this.chartModels() } : {}),
+            // only a worksheet read with pivot tables has the member
+            ...(this._pivotTableParts.length ? { pivotTableParts: this._pivotTableParts } : {}),
             sheetProtection: this.sheetProtection,
             tables: Object.values(this.tables).map((table) => table.model),
             pivotTables: this.pivotTables,
@@ -1572,9 +1592,14 @@ class Worksheet {
         this.headerFooter = value.headerFooter;
         // a model without page breaks has none (one built by hand: the getter and a file read always give the list)
         this.rowBreaks = value.rowBreaks ?? [];
+        this.colBreaks = value.colBreaks ?? [];
         this.views = value.views;
         this.autoFilter = value.autoFilter;
         this._media = value.media.map((medium) => new Image(this, medium));
+        this._charts = value.charts ?? [];
+        this._pivotTableParts = value.pivotTableParts ?? [];
+        // the charts of the model are carried as read (those of a model of a worksheet with added charts included)
+        this._addedCharts = [];
         this.sheetProtection = value.sheetProtection;
         this.tables = value.tables.reduce<Record<string, Table>>((tables, table) => {
             const t = new Table(this);

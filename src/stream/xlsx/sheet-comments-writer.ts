@@ -1,7 +1,7 @@
 import XmlStream from "../../utils/xml-stream";
 import RelType from "../../xlsx/rel-type";
 import colCache from "../../utils/col-cache";
-import CommentXform from "../../xlsx/xform/comment/comment-xform";
+import CommentsXform from "../../xlsx/xform/comment/comments-xform";
 import VmlShapeXform from "../../xlsx/xform/comment/vml-shape-xform";
 import VmlNotesXform from "../../xlsx/xform/comment/vml-notes-xform";
 import type { ZipEntry } from "../../utils/zip-stream";
@@ -31,9 +31,8 @@ export interface SheetCommentsWriterOptions {
 }
 
 /**
- * Writes the notes of a streamed worksheet: the comments part (`xl/commentsN.xml`), as the rows are written, and its
- * VML drawing (`xl/drawings/vmlDrawingN.vml`), when the worksheet is committed. Nothing is written for a worksheet
- * without notes.
+ * Writes the notes of a streamed worksheet: the comments part (`xl/commentsN.xml`) and its VML drawing
+ * (`xl/drawings/vmlDrawingN.vml`), when the worksheet is committed. Nothing is written for a worksheet without notes.
  */
 class SheetCommentsWriter {
     /** The number of the worksheet in the workbook. */
@@ -45,9 +44,9 @@ class SheetCommentsWriter {
     /** True once the first note is written. */
     startedData?: boolean;
 
-    // VML shape ids must be unique across the workbook, and the blocks of ids a worksheet claims (VmlNotesXform) are
-    // listed before its shapes: the notes are kept until the worksheet is committed, when their number is known
-    private _vmlComments: CommentRefModel[];
+    // The notes are kept until the worksheet is committed: the authors of the comments part are listed before the
+    // notes, and so are the blocks of VML shape ids a worksheet claims (VmlNotesXform, unique across the workbook)
+    private _comments: CommentRefModel[];
     private _worksheet: CommentsWorksheet;
     private _workbook: CommentsWorkbook;
     private _sheetRelsWriter: SheetRelsWriter;
@@ -58,7 +57,7 @@ class SheetCommentsWriter {
         // in a workbook, each sheet will have a number
         this.id = options.id;
         this.count = 0;
-        this._vmlComments = [];
+        this._comments = [];
         this._worksheet = worksheet;
         this._workbook = options.workbook;
         this._sheetRelsWriter = sheetRelsWriter;
@@ -101,15 +100,6 @@ class SheetCommentsWriter {
         });
     }
 
-    private _writeOpen(): void {
-        this.commentsStream.write(
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-                '<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-                "<authors><author>Author</author></authors>" +
-                "<commentList>"
-        );
-    }
-
     private _writeVml(): void {
         const firstBlock = this._workbook._nextShapeBlock;
         this._workbook._nextShapeBlock += VmlNotesXform.blockCount(this.count);
@@ -124,38 +114,29 @@ class SheetCommentsWriter {
                 '<v:path gradientshapeok="t" o:connecttype="rect" />' +
                 "</v:shapetype>"
         );
-        this._vmlComments.forEach((comment, index) => {
+        this._comments.forEach((comment, index) => {
             const vmlXmlStream = new XmlStream();
             new VmlShapeXform().render(vmlXmlStream, comment, VmlNotesXform.shapeIndex(firstBlock, index));
             this.vmlStream.write(vmlXmlStream.xml);
         });
-        this._vmlComments = [];
         this.vmlStream.write("</xml>");
     }
 
-    private _writeComment(comment: CommentRefModel): void {
-        const commentXform = new CommentXform();
+    private _writeComments(): void {
         const commentsXmlStream = new XmlStream();
-        commentXform.render(commentsXmlStream, comment);
+        new CommentsXform().render(commentsXmlStream, { comments: this._comments });
         this.commentsStream.write(commentsXmlStream.xml);
-        this._vmlComments.push(comment);
-    }
-
-    private _writeClose(): void {
-        this.commentsStream.write("</commentList></comments>");
-        this._writeVml();
     }
 
     /**
-     * Writes the notes of a row (cell-xform prepare collects them with their `ref`). Mutates them: adds `refAddress`.
+     * Adds the notes of a row (cell-xform prepare collects them with their `ref`). Mutates them: adds `refAddress`.
      *
-     * @throws Error for a `ref` that is not a cell address
+     * @throws Error for a `ref` that is not a cell address, or a note whose author is not a string
      */
     addComments(comments: readonly (NoteModel & { ref: string })[] | undefined): void {
         if (comments && comments.length) {
             if (!this.startedData) {
                 this._worksheet.comments = [];
-                this._writeOpen();
                 this._addRelationships();
                 this._addCommentRefs();
                 this.startedData = true;
@@ -167,16 +148,20 @@ class SheetCommentsWriter {
             );
 
             for (const comment of refComments) {
-                this._writeComment(comment);
+                // checked now, not when the worksheet is committed
+                CommentsXform.authorOf(comment);
+                this._comments.push(comment);
                 this.count += 1;
             }
         }
     }
 
-    /** Ends the comments part and writes the VML drawing, if the worksheet has notes. */
+    /** Writes the comments part and the VML drawing, if the worksheet has notes. */
     commit(): void {
         if (this.count) {
-            this._writeClose();
+            this._writeComments();
+            this._writeVml();
+            this._comments = [];
             this.commentsStream.end();
             this.vmlStream.end();
         }

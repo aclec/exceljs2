@@ -18,6 +18,12 @@ async function withRowBreaks(rowBreaksXml) {
     return tamper(base, { [SHEET]: (xml) => xml.replace(/<rowBreaks.*<\/rowBreaks>/, rowBreaksXml) });
 }
 
+// a workbook whose worksheet has a column break (replaced by `colBreaksXml`), loaded
+async function withColBreaks(colBreaksXml) {
+    const base = await baseWorkbookBuffer((wb, ws) => ws.getColumn(3).addPageBreak());
+    return tamper(base, { [SHEET]: (xml) => xml.replace(/<colBreaks.*<\/colBreaks>/, colBreaksXml) });
+}
+
 // a workbook whose <pageSetup> is replaced
 async function withPageSetup(pageSetupXml) {
     const base = await baseWorkbookBuffer();
@@ -103,6 +109,126 @@ describe("Worksheet print settings round trip", () => {
             ]) {
                 let error;
                 await load(await withRowBreaks(`<rowBreaks>${brk}</rowBreaks>`)).catch((e) => {
+                    error = e;
+                });
+                expect(error, brk).to.be.an("error");
+                expect(error.message, brk).to.match(/^Invalid page break <brk /);
+            }
+        });
+    });
+
+    describe("column breaks", () => {
+        it("reads the column breaks back, written right after the row breaks", async () => {
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet("s");
+            ws.getCell("A1").value = 1;
+            ws.getRow(2).addPageBreak();
+            ws.getColumn(3).addPageBreak();
+            ws.getColumn(6).addPageBreak(5, 10);
+            const buffer = await wb.xlsx.writeBuffer();
+            const xml = await readPart(buffer, SHEET);
+            expect(xml).to.contain(
+                '</rowBreaks><colBreaks count="2" manualBreakCount="2"><brk id="3" max="1048575" man="1"/><brk id="6" max="9" man="1" min="4"/></colBreaks>'
+            );
+
+            const loaded = (await load(buffer)).getWorksheet("s");
+            expect(loaded.colBreaks).to.deep.equal([
+                { id: 3, max: 1048575, man: 1 },
+                { id: 6, max: 9, min: 4, man: 1 },
+            ]);
+            expect(loaded.rowBreaks).to.deep.equal([{ id: 2, max: 16383, man: 1 }]);
+            expect(loaded.pageSetup).to.not.have.property("colBreaks");
+
+            const rewritten = await readPart(await loaded.workbook.xlsx.writeBuffer(), SHEET);
+            expect(rewritten).to.contain(
+                '<colBreaks count="2" manualBreakCount="2"><brk id="3" max="1048575" man="1"/><brk id="6" max="9" man="1" min="4"/></colBreaks>'
+            );
+        });
+
+        it("reads the column breaks of Excel (TODO.txt notes) into a ModelContainer", async () => {
+            const buffer = await withColBreaks(
+                '<colBreaks count="3" manualBreakCount="3"><brk id="3" max="1048575" man="1"/><brk id="6" max="1048575" man="1"/>' +
+                    '<brk id="9" max="1048575" man="1"/></colBreaks>'
+            );
+            const container = new ModelContainer();
+            await container.xlsx.load(buffer);
+            expect(container.model.worksheets[0].colBreaks).to.deep.equal([
+                { id: 3, max: 1048575, man: 1 },
+                { id: 6, max: 1048575, man: 1 },
+                { id: 9, max: 1048575, man: 1 },
+            ]);
+        });
+
+        it("reads a worksheet without column breaks as no break, and writes none", async () => {
+            const wb = await load(await baseWorkbookBuffer());
+            expect(wb.getWorksheet("Sheet1").colBreaks).to.deep.equal([]);
+            expect(await readPart(await wb.xlsx.writeBuffer(), SHEET)).to.not.contain("colBreaks");
+        });
+
+        it("ignores the column breaks with ignoreNodes", async () => {
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(await withColBreaks('<colBreaks><brk id="4" max="1048575" man="1"/></colBreaks>'), {
+                ignoreNodes: ["colBreaks"],
+            });
+            expect(wb.getWorksheet("Sheet1").colBreaks).to.deep.equal([]);
+        });
+
+        it("reads more than 1023 breaks (the limit of Excel), and writes at most 1023", async () => {
+            const breaks = (n) => Array.from({ length: n }, (_, i) => `<brk id="${i + 1}" max="1048575" man="1"/>`).join("");
+            const wb = await load(await withColBreaks(`<colBreaks>${breaks(1100)}</colBreaks>`));
+            const ws = wb.getWorksheet("Sheet1");
+            expect(ws.colBreaks).to.have.length(1100);
+
+            let error;
+            await wb.xlsx.writeBuffer().catch((e) => {
+                error = e;
+            });
+            expect(error).to.be.an("error");
+            expect(error.message).to.equal("Too many column breaks in a worksheet: 1100 (Excel allows at most 1023)");
+
+            ws.colBreaks.length = 1023;
+            const reloaded = await load(await wb.xlsx.writeBuffer());
+            expect(reloaded.getWorksheet("Sheet1").colBreaks).to.have.length(1023);
+        });
+
+        it("rejects more breaks than columns (hostile input), in linear time", async () => {
+            const brk = '<brk id="1" max="1048575" man="1"/>';
+            const started = Date.now();
+            let error;
+            await load(await withColBreaks(`<colBreaks>${brk.repeat(16385)}</colBreaks>`)).catch((e) => {
+                error = e;
+            });
+            expect(error).to.be.an("error");
+            expect(error.message).to.equal("Max brk count (16384) exceeded");
+            expect(Date.now() - started).to.be.below(5000);
+
+            const wb = await load(await withColBreaks(`<colBreaks>${brk.repeat(16384)}</colBreaks>`));
+            expect(wb.getWorksheet("Sheet1").colBreaks).to.have.length(16384);
+        });
+
+        it("reads the values beyond the worksheet as its last column (id) or row (min, max)", async () => {
+            const wb = await load(
+                await withColBreaks(
+                    '<colBreaks><brk id="20000" min="2000000" max="4294967295"/><brk id="5" max="16838" man="1"/></colBreaks>'
+                )
+            );
+            expect(wb.getWorksheet("Sheet1").colBreaks).to.deep.equal([
+                { id: 16384, max: 1048575, man: 0, min: 1048575 },
+                { id: 5, max: 16838, man: 1 },
+            ]);
+        });
+
+        it("rejects a break whose attributes are not unsigned integers", async () => {
+            for (const brk of [
+                '<brk id="-1"/>',
+                '<brk id="x"/>',
+                '<brk id="1" max="1.5"/>',
+                '<brk id="1" min="1e3"/>',
+                '<brk id="1" man="yes"/>',
+                '<brk id="99999999999"/>',
+            ]) {
+                let error;
+                await load(await withColBreaks(`<colBreaks>${brk}</colBreaks>`)).catch((e) => {
                     error = e;
                 });
                 expect(error, brk).to.be.an("error");

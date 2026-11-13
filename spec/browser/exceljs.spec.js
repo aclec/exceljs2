@@ -115,8 +115,9 @@ describe("ExcelJS in the browser", function () {
                 const result = await page.evaluate(() => ({
                     workbook: typeof ExcelJS.Workbook,
                     valueType: ExcelJS.ValueType.Number,
+                    header: ExcelJS.headerFooter.build({ left: "Q&&A", right: "&[Page]" }),
                 }));
-                expect(result).to.deep.equal({ workbook: "function", valueType: 2 });
+                expect(result).to.deep.equal({ workbook: "function", valueType: 2, header: "&LQ&&A&R&P" });
             });
 
             it("reads and writes xlsx via binary buffer", async () => {
@@ -126,14 +127,15 @@ describe("ExcelJS in the browser", function () {
                     ws.getCell("A1").value = "Hello, World!";
                     ws.getCell("A2").value = 7;
                     ws.getCell("A3").value = new Date(Date.UTC(2020, 0, 2));
+                    ws.getColumn(2).addPageBreak();
                     const buffer = await wb.xlsx.writeBuffer();
 
                     const wb2 = new ExcelJS.Workbook();
                     await wb2.xlsx.load(buffer);
                     const ws2 = wb2.getWorksheet("blort");
-                    return [ws2.getCell("A1").value, ws2.getCell("A2").value, ws2.getCell("A3").value.toISOString()];
+                    return [ws2.getCell("A1").value, ws2.getCell("A2").value, ws2.getCell("A3").value.toISOString(), ws2.colBreaks];
                 });
-                expect(result).to.deep.equal(["Hello, World!", 7, "2020-01-02T00:00:00.000Z"]);
+                expect(result).to.deep.equal(["Hello, World!", 7, "2020-01-02T00:00:00.000Z", [{ id: 2, max: 1048575, man: 1 }]]);
             });
 
             it("reads and writes xlsx via base64 buffer", async () => {
@@ -186,6 +188,23 @@ describe("ExcelJS in the browser", function () {
                     return wb2.getWorksheet("cf").conditionalFormattings[0].rules[0].x14Id;
                 });
                 expect(result).to.match(/^\{[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}\}$/);
+            });
+
+            it("writes a chart created by addChart and a chartsheet, carried when read back", async () => {
+                const result = await page.evaluate(async () => {
+                    const wb = new ExcelJS.Workbook();
+                    const ws = wb.addWorksheet("My Data");
+                    ws.addRow(["Jan", 1]);
+                    ws.addRow(["Feb", 2]);
+                    ws.addChart({ type: "column", title: "T", anchor: "D2:J15", series: [{ categories: "A1:A2", values: "B1:B2" }] });
+                    wb.addChartsheet("Chart", { type: "pie", series: [{ values: "'My Data'!B1:B2" }] }, { state: "hidden" });
+                    const buffer = await wb.xlsx.writeBuffer();
+                    const wb2 = new ExcelJS.Workbook();
+                    await wb2.xlsx.load(buffer);
+                    const again = await wb2.xlsx.writeBuffer();
+                    return [buffer.length > 0, again.length > 0, wb2.getWorksheet("My Data").model.charts.length, wb2.chartsheets];
+                });
+                expect(result).to.deep.equal([true, true, 1, [{ id: 2, name: "Chart", state: "hidden" }]]);
             });
 
             it("protects a sheet with the same SHA-512 hash as node:crypto", async () => {

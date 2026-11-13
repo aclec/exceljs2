@@ -9,6 +9,5 @@
 spec/out
 bun.lock
 
-# 200 KB each: proseWrap would rewrap the whole documents
+# 200 KB: proseWrap would rewrap the whole document
 README.md
-README_zh.md

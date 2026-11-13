@@ -23,6 +23,7 @@ import WorkbookViewXform from "./workbook-view-xform";
 import WorkbookPropertiesXform from "./workbook-properties-xform";
 import WorkbookCalcPropertiesXform from "./workbook-calc-properties-xform";
 import WorkbookPivotCacheXform from "./workbook-pivot-cache-xform";
+import { mergeSheets } from "../../chartsheet-parts";
 
 // Worksheets are stored in an array indexed by sheetId. The file format allows any unsigned int, but Excel
 // numbers sheets from 1 as they are added, so a huge id is hostile: sheetId="4294967294" made an array whose
@@ -70,13 +71,21 @@ export interface WorkbookSheetWriteModel extends SheetDefModel {
     readonly pageSetup?: Pick<PageSetupModel, "printArea" | "printTitlesRow" | "printTitlesColumn"> | null;
 }
 
+/** A chartsheet as {@link WorkbookXform} writes it: its `<sheet>` and its position among the sheets. */
+export interface WorkbookChartsheetWriteModel extends SheetDefModel {
+    readonly index: number;
+}
+
 /**
  * What {@link WorkbookXform} prepares and renders: the workbook model of xlsx.ts or of the stream WorkbookWriter.
- * prepare sets `sheets` (the worksheets), adds the print areas and titles to `definedNames` and names the media.
+ * prepare sets `sheets` (the worksheets, and the chartsheets in their places), adds the print areas and titles to
+ * `definedNames` and names the media.
  */
 export interface WorkbookXformWriteModel {
     worksheets: WorkbookSheetWriteModel[];
-    sheets?: readonly WorkbookSheetWriteModel[];
+    /** the chartsheets written (xlsx.ts), inserted among the worksheets at their index */
+    writtenChartsheets?: readonly WorkbookChartsheetWriteModel[];
+    sheets?: readonly (WorkbookSheetWriteModel | WorkbookChartsheetWriteModel)[];
     definedNames: DefinedNameModel[];
     views: readonly WorkbookViewModel[];
     properties: Partial<WorkbookProperties>;
@@ -84,6 +93,8 @@ export interface WorkbookXformWriteModel {
     media?: readonly MediaModel[];
     /** a `<pivotCache>` per pivot table */
     pivotTables?: readonly WorkbookPivotCacheModel[];
+    /** the `<pivotCache>`s, when set (xlsx.ts: of the pivot table added and of those carried from the file read) */
+    pivotCaches?: readonly WorkbookPivotCacheModel[];
 }
 
 /**
@@ -151,15 +162,25 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
         };
     }
 
-    /** Sets `sheets`, adds the print areas and titles of the worksheets to the defined names, names the media. */
+    /**
+     * Sets `sheets`, adds the print areas and titles of the worksheets to the defined names (their `localSheetId` is the
+     * index among all the sheets, chartsheets included), names the media.
+     */
     override prepare(model: WorkbookXformWriteModel): void {
-        const sheets = model.worksheets;
+        const sheets = mergeSheets<WorkbookSheetWriteModel, WorkbookChartsheetWriteModel>(model.worksheets, model.writtenChartsheets);
         model.sheets = sheets;
+        const chartsheets = new Set<object>(model.writtenChartsheets);
+        const isChartsheet = (sheet: object): sheet is WorkbookChartsheetWriteModel => chartsheets.has(sheet);
 
         // collate all the print areas from all of the sheets and add them to the defined names
         const printAreas: DefinedNameModel[] = [];
         let index = 0; // sheets is sparse array - calc index manually
         sheets.forEach((sheet) => {
+            if (isChartsheet(sheet)) {
+                // a chartsheet: no print area
+                index++;
+                return;
+            }
             // quoted sheet name for a formula reference: embedded quotes are doubled
             const sheetRef = `'${sheet.name.replace(/'/g, "''")}'`;
             if (sheet.pageSetup && sheet.pageSetup.printArea) {
@@ -213,7 +234,7 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
         this.map.sheets.render(xmlStream, model.sheets);
         this.map.definedNames.render(xmlStream, model.definedNames);
         this.map.calcPr.render(xmlStream, model.calcProperties);
-        this.map.pivotCaches.render(xmlStream, model.pivotTables);
+        this.map.pivotCaches.render(xmlStream, model.pivotCaches ?? model.pivotTables);
 
         xmlStream.closeNode();
     }
@@ -269,6 +290,9 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
                 if (this.map.definedNames.model) {
                     model.definedNames = this.map.definedNames.model;
                 }
+                if (this.map.pivotCaches.model) {
+                    model.pivotCaches = this.map.pivotCaches.model;
+                }
                 this.model = model;
 
                 return false;
@@ -292,12 +316,12 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
 
         renumberSheets(model.sheets || []);
 
-        // reconcile sheet ids, rIds and names
-        const worksheets: ParsedWorksheetModel[] = [];
+        // reconcile sheet ids, rIds and names. The worksheets by the position of their <sheet>: the localSheetId of a defined
+        // name is that position, which counts every sheet (chartsheets, and sheets that are not read, included)
+        const worksheets: (ParsedWorksheetModel | undefined)[] = [];
         let worksheet: ParsedWorksheetModel | undefined;
-        let index = 0;
 
-        (model.sheets || []).forEach((sheet) => {
+        (model.sheets || []).forEach((sheet, index) => {
             const rel = sheet.rId === undefined ? undefined : rels.get(sheet.rId);
             if (!rel || typeof rel.Target !== "string") {
                 return;
@@ -305,18 +329,15 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
             // if rel.Target start with `[space]/xl/` or `/xl/` , then it will be replaced with `''` and spliced behind `xl/`,
             // otherwise it will be spliced directly behind `xl/`. i.g.
             worksheet = ownEntry(model.worksheetHash, `xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`);
-            // If there are "chartsheets" in the file, rel.Target will
-            // come out as chartsheets/sheet1.xml or similar here, and
-            // that won't be in model.worksheetHash.
-            // As we don't have the infrastructure to support chartsheets,
-            // we will ignore them for now:
+            // a chartsheet (chartsheets/sheet1.xml) is not in worksheetHash: xlsx.ts reads it (chartsheet-parts.ts)
             if (worksheet) {
                 worksheet.name = sheet.name;
                 worksheet.id = sheet.id;
                 worksheet.state = sheet.state;
-                worksheets[index++] = worksheet;
+                worksheets[index] = worksheet;
             }
         });
+        model.sheetWorksheets = worksheets;
 
         // reconcile print areas
         const definedNames: DefinedNameModel[] = [];
@@ -387,8 +408,11 @@ class WorkbookXform extends BaseXform<WorkbookPartModel | WorkbookXformWriteMode
     }
 }
 
-// the worksheet at a localSheetId of a defined name (absent or not an index: none)
-function sheetAt(worksheets: readonly ParsedWorksheetModel[], localSheetId: number | undefined): ParsedWorksheetModel | undefined {
+// the worksheet at a localSheetId of a defined name (absent, not an index, or another sheet: none)
+function sheetAt(
+    worksheets: readonly (ParsedWorksheetModel | undefined)[],
+    localSheetId: number | undefined
+): ParsedWorksheetModel | undefined {
     return localSheetId === undefined ? undefined : worksheets[localSheetId];
 }
 

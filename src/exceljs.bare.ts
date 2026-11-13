@@ -3,9 +3,11 @@
  */
 import Workbook from "./doc/workbook";
 import enums from "./doc/enums";
+import headerFooter from "./doc/header-footer";
 
 const ExcelJS = {
     Workbook,
+    headerFooter,
     ...enums,
 };
 

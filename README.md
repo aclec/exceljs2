@@ -24,10 +24,6 @@ Reverse engineered from Excel spreadsheet files as a project.
 >
 > See [CHANGELOG.md](CHANGELOG.md) for the full list and [UPGRADE-5.0.md](UPGRADE-5.0.md) for the breaking changes.
 
-# Translations
-
-* [中文文档](README_zh.md)
-
 # Installation
 
 This fork is published on npm as **`@aclec/exceljs2`** and works with any package manager:
@@ -186,6 +182,7 @@ All contributions are included under the MIT licence of this library.
       <li><a href="#data-validations">Data Validations</a></li>
       <li><a href="#cell-comments">Cell Comments</a></li>
       <li><a href="#tables">Tables</a></li>
+      <li><a href="#pivot-tables">Pivot Tables</a></li>
       <li><a href="#styles">Styles</a>
         <ul>
           <li><a href="#number-formats">Number Formats</a></li>
@@ -199,6 +196,12 @@ All contributions are included under the MIT licence of this library.
       <li><a href="#conditional-formatting">Conditional Formatting</a></li>
       <li><a href="#outline-levels">Outline Levels</a></li>
       <li><a href="#images">Images</a></li>
+      <li><a href="#charts">Charts</a>
+        <ul>
+          <li><a href="#chartsheets">Chartsheets</a></li>
+          <li><a href="#charts-of-the-streaming-writer">Charts of the streaming writer</a></li>
+        </ul>
+      </li>
       <li><a href="#sheet-protection">Sheet Protection</a></li>
       <li><a href="#file-io">File I/O</a>
         <ul>
@@ -512,13 +515,32 @@ worksheet.pageSetup.printTitlesColumn = 'A:C';
 | Double Japan Postcard Rotated |  82       |
 | 16K 197x273 mm                |  119      |
 
+**Manual page breaks**
+
+A page break goes after a row (`row.addPageBreak()`, kept in `worksheet.rowBreaks`) or after a column
+(`column.addPageBreak()`, kept in `worksheet.colBreaks`); both are read back from a file. Excel takes at most 1023 breaks of
+each kind: writing more throws an `Error`. `pageSetup.rowBreaks` / `pageSetup.colBreaks` are not used (`null` in a new worksheet).
+
+```javascript
+// a new page after row 20, across all the columns
+worksheet.getRow(20).addPageBreak();
+// a new page after column C (to the right of it), across all the rows
+worksheet.getColumn('C').addPageBreak();
+// only from row 5 to row 40 (1-based; for a row break: from column to column)
+worksheet.getColumn(8).addPageBreak(5, 40);
+
+// the breaks: id is the row (column) number, min / max the 0-based columns (rows) of the break
+expect(worksheet.colBreaks[0]).toEqual({ id: 3, max: 1048575, man: 1 });
+```
+
 ## Headers and Footers[⬆](#contents)<!-- Link generated with jump2header -->
 
 Here's how to add headers and footers.
 The added content is mainly text, such as time, introduction, file information, etc., and you can set the style of the text.
 In addition, you can set different texts for the first page and even page.
 
-Note: Images are not currently supported.
+Note: Images are not currently supported (`headerFooter.build` rejects `&[Picture]`). Excel takes at most 255 characters per
+header or footer text: `headerFooter.build` throws an `Error` for a longer one.
 
 ```javascript
 
@@ -544,6 +566,14 @@ worksheet.headerFooter.oddHeader = "&C&KCCCCCC&\"Aril\"52 exceljs";
 
 // Set the left, center, and right text of the footer. Result: “Exceljs” in the footer left. “demo.xlsx” in the footer center. “Page 2” in the footer right
 worksheet.headerFooter.oddFooter = "&Lexceljs&C&F&RPage &P";
+
+// The same with the fields of Excel's dialog (&[Page], &[Pages], &[Date], &[Time], &[Path], &[File], &[Tab]):
+// build() writes the codes, and doubles the other ampersands ("Fish & Chips" is written "Fish && Chips")
+worksheet.headerFooter.oddFooter = ExcelJS.headerFooter.build({ left: "exceljs", center: "&[File]", right: "Page &[Page]" });
+// a text with an ampersand followed by a code letter goes through escape() ("AT&T", not "AT" and the time)
+worksheet.headerFooter.oddHeader = ExcelJS.headerFooter.build({ center: ExcelJS.headerFooter.escape("AT&T") + " - &[Date]" });
+// and back: { left: "exceljs", center: "&[File]", right: "Page &[Page]" }
+const sections = ExcelJS.headerFooter.parse("&Lexceljs&C&F&RPage &P");
 
 // Add different header & footer for the first page
 worksheet.headerFooter.differentFirst = true;
@@ -1202,6 +1232,23 @@ The following table defines the properties supported by cell comments.
 | margins | N        | {}  | Determines the value of margins for automatic or custom cell comments
 | protection   | N        | {} | Specifying the lock status of objects and object text using protection attributes |
 | editAs   | N        | 'absolute' | Use the 'editAs' attribute to specify how the annotation is anchored to the cell  |
+| author   | N        |  | The author of the comment (see below) |
+
+### Cell Comments Author
+
+The author of a note is written in the comments part, and read back as `note.author`. A note without author is written with the
+placeholder author `'Author'`, which is read back as no author. The text is not changed: Excel also shows the author as a bold
+first line of the text, add it to `texts` if you want it.
+
+```javascript
+ws.getCell('C1').note = {
+  texts: [
+    {font: {bold: true}, text: 'Jane Doe:'},
+    {text: '\nPlease check this value'},
+  ],
+  author: 'Jane Doe',
+};
+```
 
 ### Cell Comments Margins
 
@@ -1329,9 +1376,10 @@ column.
 | ------------------ | ----------------- | -------- | ------------- |
 | name               | The name of the column, also used in the header | Y |    |
 | filterButton       | Switches the filter control in the header | N |  false  |
-| totalsRowLabel     | Label to describe the totals row (first column) | N | 'Total' |
+| totalsRowLabel     | Label to describe the totals row (first column, used only when that column has no totals function) | N | 'Total' |
 | totalsRowFunction  | Name of the totals function | N | 'none' |
-| totalsRowFormula   | Optional formula for custom functions | N |   |
+| totalsRowFormula   | Formula of the `custom` function (written in the totals cell and in the table part, read back from files) | N |   |
+| style              | The format of the data cells (written as the column's differential format): what it sets is merged into the style of each data cell when the table is written in the cells (on `addTable` and `commit()`); the header and totals cells keep their own style | N |   |
 
 ### Totals Functions[⬆](#contents)<!-- Link generated with jump2header -->
 
@@ -1463,6 +1511,35 @@ column.totalsRowResult = 10;
 // commit the table changes into the sheet
 table.commit();
 ```
+
+
+## Pivot Tables[⬆](#contents)<!-- Link generated with jump2header -->
+
+ExcelJS has no API to read or edit a pivot table. `worksheet.addPivotTable({ sourceSheet, rows, columns, values, metric: 'sum' })`
+(experimental, not in the typings) creates one pivot table per workbook.
+
+Since 5.0, the pivot tables of the worksheets of a file read with `xlsx.load` / `read` / `readFile` are kept and written back by
+`xlsx.write` / `writeBuffer` / `writeFile`, opaque: the pivot table, its pivot cache definition and its cache records are copied as they
+were read (part names and relationships renumbered, the `cacheId`s kept). A pivot chart stays a pivot chart when the workbook written has
+the pivot table it names (`<c:pivotSource>`: the worksheet name, compared without case, and the pivot table name); otherwise it is written
+as a static chart, as Excel does when the pivot table of a pivot chart is deleted: without its pivot source, pivot formats and pivot
+options, its series keeping their formulas and cached values. A pivot table can still be added with `addPivotTable` to a workbook read
+with pivot tables, on another worksheet than theirs (its name and location are fixed: `addPivotTable` throws on a worksheet that has pivot
+tables read from the file): its parts are numbered first, and it gets another `cacheId` when a pivot table read has its own (the
+`PivotTable` object is not changed). Limitations:
+
+- a pivot table is not updated when the workbook changes: the source of its cache (`<worksheetSource ref="A1:C4" sheet="Data">`) is not
+  rewritten when a worksheet is renamed or rows are inserted, and the cells of the pivot table are plain values (do not edit them). Excel
+  uses the saved cache until it refreshes the pivot table. The pivot source of a pivot chart is not rewritten either: renaming the worksheet
+  of its pivot table makes it a static chart;
+- a pivot table belongs to its worksheet: removing the worksheet drops it (and its cache when no other pivot table uses it, and its pivot
+  charts become static charts); a worksheet model copied to another worksheet writes the pivot table again, with the same cache;
+- slicers, timelines, the data model (Power Pivot) and external connections are not read: their parts are dropped, as are the pivot tables
+  whose cache comes from an external connection (`connectionId`, OLAP);
+- a pivot table whose parts are missing, malformed, out of the parts a pivot table may reference, or whose `cacheId` does not match the
+  `<pivotCache>` of its cache in `xl/workbook.xml` is dropped, as are the pivot tables beyond 10,000 parts per file (their pivot charts are
+  written as static charts);
+- the streaming reader and writer (`stream.xlsx`) do not read or write pivot tables.
 
 
 ## Styles[⬆](#contents)<!-- Link generated with jump2header -->
@@ -2135,6 +2212,128 @@ worksheet.addImage(imageId2, {
 });
 ```
 
+## Charts[⬆](#contents)<!-- Link generated with jump2header -->
+
+`worksheet.addChart(options)` adds a chart to a worksheet: a column, bar, line, area, pie, doughnut or scatter chart whose series are
+ranges of cells. The options are checked when the chart is added (an `Error` names the invalid one); the values of the cells are read when
+the workbook is written (`xlsx.write` / `writeBuffer` / `writeFile`), and stored in the chart as the values shown until Excel
+recalculates it.
+
+```javascript
+const sheet = workbook.addWorksheet('Sales');
+sheet.addRow(['Month', 'North', 'South']);
+sheet.addRow(['Jan', 10, 7]);
+sheet.addRow(['Feb', 12, 9]);
+sheet.addRow(['Mar', 9, 11]);
+
+const chart = sheet.addChart({
+  type: 'column',
+  title: 'Sales by month',
+  anchor: 'E2:L18', // covers the cells E2 to L18
+  series: [
+    { name: { ref: 'B1' }, categories: 'A2:A4', values: 'B2:B4' },
+    { name: 'South', categories: 'A2:A4', values: 'C2:C4', color: 'ED7D31' },
+  ],
+  axes: { value: { title: 'Units', min: 0 } },
+  legend: { position: 'b' },
+});
+```
+
+| Option   | Description |
+| -------- | ----------- |
+| type     | `column`, `bar` (horizontal bars), `line`, `area`, `pie`, `doughnut` or `scatter` |
+| anchor   | Where the chart is, as for [images](#add-image-over-a-range): a range of cells (`'E2:L18'`), `{ tl, br, editAs? }` or `{ tl, ext: { width, height } }` (pixels) |
+| series   | 1 to 255 series: `{ name?, categories?, values, color? }`, for a scatter chart `{ name?, xValues?, yValues, color? }` |
+| title    | The title of the chart (none by default) |
+| legend   | `{ position: 'r' }` (default), `'l'`, `'t'`, `'b'` or `'tr'`, or `false` for no legend |
+| grouping | column, bar: `clustered` (default), `stacked`, `percentStacked`; line, area: `standard` (default), `stacked`, `percentStacked` |
+| marker   | line and scatter: whether the points have markers (default `true`) |
+| line     | scatter: whether the points are joined by lines (default `false`) |
+| axes     | `{ category, value }` (scatter: `{ x, y }`), each `{ title?, numFmt?, majorGridlines?, visible? }`, a value axis also `{ min?, max? }`; a pie or a doughnut has no axes |
+
+The ranges of a series are one row or one column of cells: `'B2:B10'` is on the worksheet of the chart, `'Data!$B$2:$B$10'` or
+`"'My Sheet'!B2:B10"` on another worksheet of the workbook (it must exist when the chart is added). The name of a series is a text, or the
+cell that holds it (`{ ref: 'B1' }`). A color is `'RRGGBB'` or `'#RRGGBB'`; without one, Excel uses the colors of the theme.
+
+```javascript
+// a scatter chart of the data of another worksheet, placed at a cell with a size in pixels
+const scatter = sheet.addChart({
+  type: 'scatter',
+  line: true,
+  anchor: { tl: { col: 4, row: 20 }, ext: { width: 480, height: 288 } },
+  series: [{ name: 'Trend', xValues: "'Raw Data'!A2:A50", yValues: "'Raw Data'!B2:B50" }],
+  axes: { x: { title: 'Time' }, y: { title: 'Value', numFmt: '0.0' } },
+});
+
+sheet.getCharts(); // the charts added: [chart, scatter]
+scatter.remove();
+```
+
+Chartsheets are added with `workbook.addChartsheet` (see [Chartsheets](#chartsheets)); the streaming writer adds charts and chartsheets
+too (see [Charts of the streaming writer](#charts-of-the-streaming-writer)).
+
+The chart part written holds the formula of each range (the sheet name quoted when needed, `'It''s'!$B$2:$B$10`) and the values of its
+cells: numbers (a date as its serial number, a formula as its result), the texts of the categories and names; an empty cell, a cell
+merged into another one (empty for Excel too), an error or a text among the values has no value. Categories are written as numbers when
+all of their cells are numbers or dates; among texts, a date is written `yyyy-mm-dd` (with `hh:mm:ss` when it has a time: ExcelJS has no
+number formatter, Excel shows the format of the cell once it recalculates). A renamed worksheet is written with its new name. The size and
+the offsets of an anchor are bounded by the coordinates of DrawingML (27,273,042,316,900 EMU: a size up to 2,863,311,529 pixels).
+Limitations:
+
+- the charts have the default style of Excel (no style or color parts): no data labels, trendlines, secondary axes, 3D or combined charts;
+- a chart does not move when rows or columns are inserted or removed, nor do its ranges;
+- a file read back carries the chart as it was written (see [Charts read from a file](#charts-read-from-a-file)): `getCharts()` lists only
+  the charts added by `addChart`;
+- a workbook whose chart uses the data of a removed worksheet is not written (remove the chart).
+
+### Chartsheets
+
+`workbook.addChartsheet(name, chart, options?)` adds a chartsheet after the other sheets: a sheet that is a single chart, which fills the
+sheet (zoomed to fit the window). The chart takes the options of `addChart` but `anchor`, and each of its ranges names its worksheet. The
+name follows the rules of a worksheet name (unique among the worksheets and the chartsheets, case-insensitive); `options.state` is
+`visible` (default), `hidden` or `veryHidden`. The chartsheet is listed by `workbook.chartsheets` and removed by
+`workbook.removeChartsheet(name)`, as the chartsheets read from a file (see [Charts read from a file](#charts-read-from-a-file)); a file
+read back carries it as it was written.
+
+```javascript
+// { id: 2, name: 'Sales chart', state: 'visible' }
+const chartsheet = workbook.addChartsheet('Sales chart', {
+  type: 'line',
+  title: 'Sales by month',
+  series: [
+    { name: { ref: 'Sales!B1' }, categories: 'Sales!A2:A4', values: 'Sales!B2:B4' },
+    { name: { ref: 'Sales!C1' }, categories: 'Sales!A2:A4', values: 'Sales!C2:C4' },
+  ],
+});
+workbook.chartsheets; // [chartsheet]
+```
+
+### Charts of the streaming writer
+
+The streaming writer has `worksheet.addChart(options)` (the options of the document `addChart`) and `writer.addChartsheet(name, chart,
+options?)`. The charts are written when the workbook is committed, after every worksheet: a chart may show the data of a worksheet
+committed after its own, and a chart can be added once all its data is written. As a streamed row is dropped once written, the values
+shown before a recalculation are captured as the rows are written, for the ranges of the charts added before their rows are committed
+(the rows still in memory are captured when they are committed); only the cells with a value are kept, until the chart is written. A
+series with a row committed before its chart was added (or on a committed worksheet) is written with its formulas and **without cached
+values**: Excel and LibreOffice draw it from the cells, a viewer that does not recalculate (a file preview) shows it empty. Add the chart
+before committing its data to have the values cached. A chart cannot be added to a committed worksheet, and `chart.remove()` throws once
+the worksheet of the chart is committed.
+
+```javascript
+const writer = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: 'streamed-chart.xlsx' });
+const data = writer.addWorksheet('Data');
+// added before the rows are committed: the values are cached
+data.addChart({ type: 'column', anchor: 'D2:K16', series: [{ categories: 'A2:A1000', values: 'B2:B1000' }] });
+for (let i = 1; i <= 1000; i++) {
+  data.addRow([`Item ${i}`, i * 2]).commit();
+}
+await data.commit();
+// added once the data is committed: written without cached values (Excel draws it from the cells)
+writer.addChartsheet('Chart', { type: 'line', series: [{ values: 'Data!B2:B1000' }] });
+await writer.commit();
+```
+
 ## Sheet Protection[⬆](#contents)<!-- Link generated with jump2header -->
 
 Worksheets can be protected from modification by adding a password.
@@ -2194,7 +2393,7 @@ Options supported when reading XLSX files.
 | maxUncompressedSize | N        |  Number     | Maximum decompressed size of all parts of the file, in bytes. Default is 2 GiB. |
 | maxCompressionRatio | N        |  Number     | Maximum compression ratio of a part larger than 10 MiB. Default is 1000. |
 | maxMergedCells   |     N       |  Number     | Maximum number of cells covered by merges in all the worksheets. Default is `workbook.maxMergedCells` (1,048,576); one worksheet holds at most 1,048,576 whatever this option. See [Security & limits](#security--limits). |
-| ignoreNodes      |     N       |  Array      | A list of node names to ignore while loading the XLSX document. Improves performance in some situations. <br/> Available: `sheetPr`, `dimension`, `sheetViews `, `sheetFormatPr`, `cols `, `sheetData`, `autoFilter `, `mergeCells `, `rowBreaks`, `hyperlinks `, `pageMargins`, `dataValidations`, `pageSetup`, `headerFooter `, `printOptions `, `picture`, `drawing`, `sheetProtection`, `tableParts `, `conditionalFormatting`, `extLst`,|
+| ignoreNodes      |     N       |  Array      | A list of node names to ignore while loading the XLSX document. Improves performance in some situations. <br/> Available: `sheetPr`, `dimension`, `sheetViews `, `sheetFormatPr`, `cols `, `sheetData`, `autoFilter `, `mergeCells `, `rowBreaks`, `colBreaks`, `hyperlinks `, `pageMargins`, `dataValidations`, `pageSetup`, `headerFooter `, `printOptions `, `picture`, `drawing`, `sheetProtection`, `tableParts `, `conditionalFormatting`, `extLst`,|
 
 ```javascript
 // read from a file
@@ -2911,6 +3110,49 @@ specified as "main" in the package.json
 ## Splice vs Merge[⬆](#contents)<!-- Link generated with jump2header -->
 
 Fixed in 5.0: merged cells move with the rows and columns that splices move, see [Merged Cells](#merged-cells).
+
+## Charts read from a file[⬆](#contents)<!-- Link generated with jump2header -->
+
+New charts are created with `worksheet.addChart` (see [Charts](#charts)). Since 5.0, the charts of the worksheets of a file read with `xlsx.load` / `read` / `readFile` are kept and
+written back by `xlsx.write` / `writeBuffer` / `writeFile`: the anchor of each chart in the drawing of its worksheet and the chart parts
+(chart, style, colors, embedded workbook of the chart data, user shapes, images) are copied as they were read, renumbered in the file
+written. This covers the charts of Excel 2016 and later (chartEx: waterfall, histogram, treemap...), which Excel writes in an
+`<mc:AlternateContent>` with a fallback text box: both are kept. Pictures in the same drawing keep working; they are written before the
+charts. A worksheet model copied to another worksheet (`copy.model = { ...sheet.model, name: "Copy" }`) gets its own copy of the charts and
+of their parts.
+
+Chartsheets (a chart as a sheet of its own) are kept the same way, in their places among the worksheets: their part (view, zoom, tab
+color, protection, page setup, header and footer), their drawing and their chart are written back as read, with their name and state
+(hidden, very hidden), in `xl/workbook.xml`, `[Content_Types].xml` and `docProps/app.xml` ("Charts"). The worksheet APIs
+(`worksheets`, `getWorksheet`, `eachSheet`) never return them; `workbook.chartsheets` lists them (read only) and
+`workbook.removeChartsheet(name)` drops one (by its exact name, as `removeWorksheet`); `workbook.addChartsheet` creates one (see
+[Chartsheets](#chartsheets)). A worksheet cannot take the name of a chartsheet (case-insensitive), nor the sheet id of one
+(`workbook.nextId` skips them). The indexes that count every sheet tab, `localSheetId` of the print areas and titles and `activeTab` /
+`firstSheet` of `workbook.views`, count the chartsheets; removing a sheet moves them with their sheets. A chartsheet is written with its
+tab selected only when it is the active tab (`views[0].activeTab`, 0 by default), so that Excel does not open several tabs grouped.
+
+```javascript
+// [{ id: 9, name: "Chart1", state: "visible" }]
+const chartsheets = workbook.chartsheets;
+// not written
+workbook.removeChartsheet("Chart1");
+```
+
+Limitations:
+
+- a chart is not updated when the workbook changes: its series keep their formulas (`Sheet1!$B$1:$B$3`) and their cached values, so
+  renaming a worksheet, or inserting / deleting rows or columns, does not move them (Excel shows the cached values, then `#REF!` or other
+  data once it recalculates). The anchor of a chart does not move with spliced rows or columns either;
+- a chartsheet keeps its drawing and chart only: the parts it references otherwise (header and footer images, background picture,
+  printer settings, legacy drawing) are left out with the elements that reference them. A chartsheet whose part, drawing or chart is
+  missing or refused, or whose name is already the name of another sheet, is dropped (the indexes of the sheet tabs then move to the
+  sheets kept), as are the chartsheets beyond 10,000 per file;
+- a pivot chart is kept as a pivot chart when its pivot table is written too, else as a static chart (see [Pivot Tables](#pivot-tables));
+- an anchor or an `<mc:AlternateContent>` that holds both a chart and a picture is read as the picture only (as before 5.0);
+- the streaming reader (`stream.xlsx.WorkbookReader`) skips the charts and the chartsheets; the streaming writer writes only those it
+  creates (see [Charts of the streaming writer](#charts-of-the-streaming-writer));
+- a chart whose parts are missing, malformed or out of the parts a chart may reference is dropped, as are the charts beyond 10,000 parts
+  per file; external links of a chart (such as the path of a linked source workbook) are kept as they are.
 
 ## Fake timers[⬆](#contents)<!-- Link generated with jump2header -->
 

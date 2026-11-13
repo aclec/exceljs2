@@ -337,6 +337,262 @@ file(
 );
 
 // ---------------------------------------------------------------------------------------------------
+// tables, page breaks, headers and footers, note authors
+
+file(
+    "tables-styles-totals.xlsx",
+    [
+        "Sheet `Sales`: table `Sales` (A1:C6) with a totals row. In the data rows, the `Amount` column is bold blue with 2 decimals; its header and its total are NOT blue.",
+        "Total row: A6 shows `Total`; B6 counts the products (5); C6 holds the custom formula `SUM(Sales[Amount])*2` = 2 × the sum of C2:C5.",
+        "Click C6: the formula bar shows `=SUM(Sales[Amount])*2`. Table Design > Total Row: unticking and re-ticking it keeps the custom formula.",
+    ],
+    async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("Sales");
+        ws.addTable({
+            name: "Sales",
+            ref: "A1",
+            totalsRow: true,
+            columns: [
+                { name: "Product", totalsRowLabel: "Total" },
+                { name: "Count", totalsRowFunction: "count" },
+                {
+                    name: "Amount",
+                    totalsRowFunction: "custom",
+                    totalsRowFormula: "SUM(Sales[Amount])*2",
+                    style: { font: { bold: true, color: { argb: "FF1F4E79" } }, numFmt: "0.00" },
+                },
+            ],
+            rows: [
+                ["Apples", 1, 10.5],
+                ["Pears", 2, 20.25],
+                ["Plums", 3, 5],
+                ["Kiwis", 4, 7.75],
+            ],
+        });
+        await wb.xlsx.writeFile(outFile("tables-styles-totals.xlsx"));
+    }
+);
+
+file(
+    "page-breaks-header-footer.xlsx",
+    [
+        "Sheet `Report`: View > Page Break Preview shows manual breaks after column C and after column F (blue lines), and after row 20.",
+        "File > Print preview: header `Confidential` (left, bold) / sheet name `Report` (center) / `Page 1 of N` (right); footer `R&D – printed <date>` in the center (the `&` shown as is, the date filled in).",
+    ],
+    async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("Report");
+        for (let r = 1; r <= 40; r++) {
+            for (let c = 1; c <= 9; c++) {
+                ws.getCell(r, c).value = r * 100 + c;
+            }
+        }
+        ws.getColumn(3).addPageBreak();
+        ws.getColumn(6).addPageBreak();
+        ws.getRow(20).addPageBreak();
+        ws.headerFooter.oddHeader = ExcelJS.headerFooter.build({
+            left: "&BConfidential&B",
+            center: "&[Tab]",
+            right: "Page &[Page] of &[Pages]",
+        });
+        ws.headerFooter.oddFooter = ExcelJS.headerFooter.build({
+            center: `${ExcelJS.headerFooter.escape("R&D")} – printed &[Date]`,
+        });
+        await wb.xlsx.writeFile(outFile("page-breaks-header-footer.xlsx"));
+    }
+);
+
+file(
+    "note-authors.xlsx",
+    [
+        "Sheet `Notes`: A1, A2, A3 have notes (red triangle). Hover each: A1 by `Alice`, A2 by `Bob`, A3 by `Alice` (Review > Notes > Edit Note shows the author as the first bold line only if Excel adds it; the author is also in the status bar on hover).",
+        "File > Info > Inspect Workbook > Document Inspector lists comments/notes by Alice and Bob.",
+    ],
+    async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("Notes");
+        ws.getCell("A1").value = "first";
+        ws.getCell("A1").note = { texts: [{ text: "Alice:", font: { bold: true } }, { text: " check this" }], author: "Alice" };
+        ws.getCell("A2").value = "second";
+        ws.getCell("A2").note = { texts: [{ text: "Bob:", font: { bold: true } }, { text: " looks fine" }], author: "Bob" };
+        ws.getCell("A3").value = "third";
+        ws.getCell("A3").note = { texts: [{ text: "Alice:", font: { bold: true } }, { text: " done" }], author: "Alice" };
+        await wb.xlsx.writeFile(outFile("note-authors.xlsx"));
+    }
+);
+
+// ---------------------------------------------------------------------------------------------------
+// charts
+
+function salesSheet(wb, name = "Sales") {
+    const ws = wb.addWorksheet(name);
+    ws.addRow(["Month", "North", "South", "West"]);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
+    months.forEach((month, i) => ws.addRow([month, 10 + i * 3, 7 + ((i * 5) % 9), 12 - i]));
+    return ws;
+}
+
+const SALES_SERIES = [
+    { name: { ref: "B1" }, categories: "A2:A7", values: "B2:B7" },
+    { name: { ref: "C1" }, categories: "A2:A7", values: "C2:C7" },
+    { name: { ref: "D1" }, categories: "A2:A7", values: "D2:D7" },
+];
+
+file(
+    "charts-all-types.xlsx",
+    [
+        "Sheet `Sales` holds Month/North/South/West for Jan..Jun (A1:D7) and 8 charts to its right, each titled with its type:",
+        "`column (clustered)`, `bar (stacked)`, `line (markers)`, `area (percent stacked)`: 3 series North/South/West, months on the category axis, legend at the bottom.",
+        "`pie` and `doughnut`: one series (North), 6 slices labelled by month in the legend.",
+        "`scatter`: North (x) against South (y), points joined by lines, axis titles `North` and `South`.",
+        "`column (colors, axis)`: North in orange, South in green, value axis titled `Units` from 0 to 30.",
+        "Change Sales!B2 to 40: every chart using North updates.",
+    ],
+    async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = salesSheet(wb);
+        const at = (i) => `${i % 2 ? "N" : "F"}${2 + Math.floor(i / 2) * 18}:${i % 2 ? "U" : "M"}${17 + Math.floor(i / 2) * 18}`;
+        const legend = { position: "b" };
+        ws.addChart({ type: "column", title: "column (clustered)", anchor: at(0), series: SALES_SERIES, legend });
+        ws.addChart({ type: "bar", grouping: "stacked", title: "bar (stacked)", anchor: at(1), series: SALES_SERIES, legend });
+        ws.addChart({ type: "line", title: "line (markers)", anchor: at(2), series: SALES_SERIES, legend });
+        ws.addChart({
+            type: "area",
+            grouping: "percentStacked",
+            title: "area (percent stacked)",
+            anchor: at(3),
+            series: SALES_SERIES,
+            legend,
+        });
+        ws.addChart({ type: "pie", title: "pie", anchor: at(4), series: [SALES_SERIES[0]] });
+        ws.addChart({ type: "doughnut", title: "doughnut", anchor: at(5), series: [SALES_SERIES[0]] });
+        ws.addChart({
+            type: "scatter",
+            line: true,
+            title: "scatter",
+            anchor: at(6),
+            series: [{ name: "North/South", xValues: "B2:B7", yValues: "C2:C7" }],
+            axes: { x: { title: "North" }, y: { title: "South" } },
+        });
+        ws.addChart({
+            type: "column",
+            title: "column (colors, axis)",
+            anchor: at(7),
+            series: [
+                { ...SALES_SERIES[0], color: "ED7D31" },
+                { ...SALES_SERIES[1], color: "#70AD47" },
+            ],
+            axes: { value: { title: "Units", min: 0, max: 30 } },
+        });
+        await wb.xlsx.writeFile(outFile("charts-all-types.xlsx"));
+    }
+);
+
+file(
+    "charts-mixed-sheets.xlsx",
+    [
+        "Sheet `Dashboard`: an image (top left), a line chart of `'Sales Data'` (another sheet whose name has a space) and a pie chart, both titled.",
+        "Sheet `Sales Data` holds the data. Renaming `Sales Data` in Excel updates the series formulas of the charts (Select Data).",
+        "Chartsheet `Chart Sales` (a tab that is only a chart, after `Sales Data`): a column chart of North/South/West filling the window.",
+        "Chartsheet `Hidden chart` is hidden: right-click a tab > Unhide lists it.",
+    ],
+    async () => {
+        const wb = new ExcelJS.Workbook();
+        const dashboard = wb.addWorksheet("Dashboard");
+        salesSheet(wb, "Sales Data");
+        const imageId = wb.addImage({ filename: IMAGE, extension: "png" });
+        dashboard.addImage(imageId, "A1:C8");
+        const ranges = (col) => ({
+            name: { ref: `'Sales Data'!${col}1` },
+            categories: "'Sales Data'!A2:A7",
+            values: `'Sales Data'!${col}2:${col}7`,
+        });
+        dashboard.addChart({ type: "line", title: "Trend", anchor: "E1:L16", series: [ranges("B"), ranges("C")] });
+        dashboard.addChart({ type: "pie", title: "North share", anchor: "E18:L33", series: [ranges("B")] });
+        wb.addChartsheet("Chart Sales", {
+            type: "column",
+            title: "All regions",
+            series: [ranges("B"), ranges("C"), ranges("D")],
+        });
+        wb.addChartsheet("Hidden chart", { type: "line", series: [ranges("D")] }, { state: "hidden" });
+        await wb.xlsx.writeFile(outFile("charts-mixed-sheets.xlsx"));
+    }
+);
+
+file(
+    "charts-read-back.xlsx",
+    [
+        "charts-mixed-sheets.xlsx read back by ExcelJS and written again, with a worksheet `Added` (holding `added` in A1) appended: same checks as charts-mixed-sheets.xlsx, plus the `Added` tab at the end.",
+    ],
+    async () => {
+        const back = new ExcelJS.Workbook();
+        await back.xlsx.readFile(outFile("charts-mixed-sheets.xlsx"));
+        back.addWorksheet("Added").getCell("A1").value = "added";
+        await back.xlsx.writeFile(outFile("charts-read-back.xlsx"));
+    }
+);
+
+file(
+    "chartsheet-excel-read-back.xlsx",
+    [
+        "spec/integration/data/chart-sheet.xlsx (made by Excel: a chartsheet `Chart1` before the worksheet `Sheet1`) read by ExcelJS and written again: the tab `Chart1` shows the same chart as the original, `Sheet1` holds its data.",
+    ],
+    async () => {
+        const back = new ExcelJS.Workbook();
+        await back.xlsx.readFile(path.resolve(__dirname, "../../spec/integration/data/chart-sheet.xlsx"));
+        await back.xlsx.writeFile(outFile("chartsheet-excel-read-back.xlsx"));
+    }
+);
+
+file(
+    "pivot-read-back.xlsx",
+    [
+        "A pivot table and a pivot chart (built by hand, as Excel stores them) read by ExcelJS and written again, plus a pivot table added with `addPivotTable`.",
+        "Sheet `Pivot`: the pivot table `PivotTable1` (sum of Sales by Region) and its pivot chart (field buttons on the chart). PivotTable Analyze > Refresh works.",
+        "Sheet `Added`: the pivot table added by ExcelJS (Region by Product, sum of Sales). Refresh works too.",
+    ],
+    async () => {
+        global.verquire = global.verquire || require("../../spec/utils/verquire");
+        const { pivotWorkbook } = require("../../spec/utils/pivot-fixtures");
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(await pivotWorkbook({ chart: true }));
+        wb.addWorksheet("Added").addPivotTable({
+            sourceSheet: wb.getWorksheet("Data"),
+            rows: ["Region"],
+            columns: ["Product"],
+            values: ["Sales"],
+        });
+        await wb.xlsx.writeFile(outFile("pivot-read-back.xlsx"));
+    }
+);
+
+file(
+    "charts-streaming.xlsx",
+    [
+        "Written by the streaming writer. Sheet `Data`: 200 rows (Item 1..200, values 2..400) and a column chart `Cached` to the right of the data (added before the rows: its values are cached).",
+        "Chartsheet `Line (no cache)`: a line chart of Data!B2:B201, added after the data was written (no cached values: Excel draws it from the cells; the Finder / Quick Look preview may show it empty).",
+    ],
+    async () => {
+        const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: outFile("charts-streaming.xlsx") });
+        const data = wb.addWorksheet("Data");
+        data.addRow(["Item", "Value"]).commit();
+        data.addChart({
+            type: "column",
+            title: "Cached",
+            anchor: "D2:L18",
+            series: [{ name: { ref: "B1" }, categories: "A2:A201", values: "B2:B201" }],
+        });
+        for (let i = 1; i <= 200; i++) {
+            data.addRow([`Item ${i}`, i * 2]).commit();
+        }
+        await data.commit();
+        wb.addChartsheet("Line (no cache)", { type: "line", title: "Line (no cache)", series: [{ values: "Data!B2:B201" }] });
+        await wb.commit();
+    }
+);
+
+// ---------------------------------------------------------------------------------------------------
 function readme() {
     const lines = [
         "# Manual Excel check",

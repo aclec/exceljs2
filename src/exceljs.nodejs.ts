@@ -8,10 +8,12 @@ import ModelContainer from "./doc/modelcontainer";
 import WorkbookWriter from "./stream/xlsx/workbook-writer";
 import WorkbookReader from "./stream/xlsx/workbook-reader";
 import enums from "./doc/enums";
+import headerFooter from "./doc/header-footer";
 
 const ExcelJS = {
     Workbook,
     ModelContainer,
+    headerFooter,
     stream: {
         xlsx: {
             WorkbookWriter,

@@ -55,5 +55,7 @@ ExcelJS reads and writes data; it does not decide whether that data is safe to u
   upload size for untrusted files, and parse them in a worker thread or a separate process with memory and time limits.
 - **Formulas are not evaluated** by ExcelJS, but they are kept and will be evaluated by Excel when a user opens a file that you generated
   from untrusted input.
-- **Content passed through unchanged**, such as theme parts and media, is not sanitised.
+- **Content passed through unchanged**, such as theme parts, media and the parts of the charts, chartsheets and pivot tables of a file read
+  (chart XML, embedded workbooks, pivot caches and their records, the external links of a chart or a pivot cache, the XML of a chartsheet),
+  is not sanitised.
 - **Worksheet protection** (`worksheet.protect`) is an editing restriction understood by Excel, not encryption or access control.

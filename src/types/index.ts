@@ -3,7 +3,10 @@
 
 export type * from "./book";
 export type * from "./cell";
+export type * from "./chart";
+export type * from "./chartsheet";
 export type * from "./options";
+export type * from "./pivot-parts";
 export type * from "./sheet";
 export type * from "./strings";
 export type * from "./style";

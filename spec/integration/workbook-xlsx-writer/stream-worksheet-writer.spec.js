@@ -18,6 +18,54 @@ async function writeBuffer(build, options = {}) {
 }
 
 describe("WorkbookWriter (stream)", () => {
+    it("writes the column breaks as the document writer does", async () => {
+        const build = (ws) => {
+            ws.getCell("A1").value = 1;
+            ws.getColumn(3).addPageBreak();
+            ws.getColumn(6).addPageBreak(5, 10);
+        };
+        const buffer = await writeBuffer((wb) => {
+            const ws = wb.addWorksheet("Sheet");
+            build(ws);
+            expect(ws.colBreaks).to.deep.equal([
+                { id: 3, max: 1048575, man: 1 },
+                { id: 6, max: 9, min: 4, man: 1 },
+            ]);
+        });
+        const xml = await readPart(buffer, "xl/worksheets/sheet1.xml");
+        const colBreaks = xml.match(/<colBreaks.*<\/colBreaks>/)[0];
+        expect(colBreaks).to.equal(
+            '<colBreaks count="2" manualBreakCount="2"><brk id="3" max="1048575" man="1"/><brk id="6" max="9" man="1" min="4"/></colBreaks>'
+        );
+
+        const doc = new ExcelJS.Workbook();
+        build(doc.addWorksheet("Sheet"));
+        const docXml = await readPart(await doc.xlsx.writeBuffer(), "xl/worksheets/sheet1.xml");
+        expect(docXml.match(/<colBreaks.*<\/colBreaks>/)[0]).to.equal(colBreaks);
+
+        const wb2 = new ExcelJS.Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("Sheet").colBreaks).to.deep.equal([
+            { id: 3, max: 1048575, man: 1 },
+            { id: 6, max: 9, min: 4, man: 1 },
+        ]);
+    });
+
+    it("rejects more than 1023 column breaks (the limit of Excel) when the worksheet is committed", async () => {
+        let error;
+        await writeBuffer((wb) => {
+            const ws = wb.addWorksheet("Sheet");
+            for (let col = 1; col <= 1024; col++) {
+                ws.getColumn(col).addPageBreak();
+            }
+            return ws.commit();
+        }).catch((e) => {
+            error = e;
+        });
+        expect(error).to.be.an("error");
+        expect(error.message).to.equal("Too many column breaks in a worksheet: 1024 (Excel allows at most 1023)");
+    });
+
     it("writes worksheet elements in CT_Worksheet order", async () => {
         const buffer = await writeBuffer((wb) => {
             const ws = wb.addWorksheet("Sheet", {
@@ -32,6 +80,7 @@ describe("WorkbookWriter (stream)", () => {
             ws.getCell("A1").note = "a note";
             ws.getCell("B1").value = { text: "link", hyperlink: "https://example.com" };
             ws.getRow(1).addPageBreak();
+            ws.getColumn(2).addPageBreak();
             ws.addConditionalFormatting({
                 ref: "A2:A3",
                 rules: [{ type: "dataBar", cfvo: [{ type: "min" }, { type: "max" }], color: { argb: "FF638EC6" } }],
@@ -61,6 +110,7 @@ describe("WorkbookWriter (stream)", () => {
             "pageSetup",
             "headerFooter",
             "rowBreaks",
+            "colBreaks",
             "legacyDrawing",
             "picture",
             "extLst",
