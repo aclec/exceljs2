@@ -45,6 +45,19 @@ describe("ExcelJS", () => {
                     expect(wb2.getWorksheet("blort").getCell("A1").value).to.equal("Hello, World!");
                 });
 
+                it("writes a chart created by addChart and a chartsheet", async () => {
+                    const ExcelJS = require(file);
+                    const wb = new ExcelJS.Workbook();
+                    const ws = wb.addWorksheet("My Data");
+                    ws.getCell("A1").value = 1;
+                    ws.addChart({ type: "pie", anchor: "C2:H12", series: [{ values: "A1" }] });
+                    wb.addChartsheet("Chart", { type: "line", series: [{ values: "'My Data'!A1" }] });
+                    const wb2 = new ExcelJS.Workbook();
+                    await wb2.xlsx.load(await wb.xlsx.writeBuffer());
+                    expect(wb2.getWorksheet("My Data").model.charts).to.have.length(1);
+                    expect(wb2.chartsheets).to.deep.equal([{ id: 2, name: "Chart", state: "visible" }]);
+                });
+
                 it("keeps merges when rows are inserted above them (class names are minified)", () => {
                     const ExcelJS = require(file);
                     const ws = new ExcelJS.Workbook().addWorksheet("s");

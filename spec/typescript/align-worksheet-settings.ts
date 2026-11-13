@@ -43,7 +43,14 @@ function headerFooter(): void {
     const defined: Equals<typeof worksheet.headerFooter, ExcelJS.WorksheetHeaderFooter> = true;
     worksheet.headerFooter.oddFooter = "&P";
     worksheet.headerFooter = { oddHeader: "&CPage &P", evenHeader: null };
+    // the helpers of the header and footer texts
+    worksheet.headerFooter.oddHeader = ExcelJS.headerFooter.build({ left: ExcelJS.headerFooter.escape("AT&T"), right: "&[Page]" });
+    const sections: ExcelJS.HeaderFooterSections = ExcelJS.headerFooter.parse("&LLeft&RPage &P");
+    const left: Equals<typeof sections.left, string | undefined> = true;
+    // @ts-expect-error the sections are strings
+    ExcelJS.headerFooter.build({ center: 1 });
     void defined;
+    void left;
 }
 
 // --- page setup: margins null when read without <pageMargins>; printer defaults, copies, first page number ----------
@@ -100,6 +107,17 @@ function rowBreaks(): void {
     const min: Equals<ExcelJS.RowBreak["min"], number | undefined> = true;
     breaks.push({ id: 3, max: 16383, man: 1 });
     void min;
+    // column breaks: id is the column number, min / max 0-based rows
+    const colBreaks: ExcelJS.ColBreak[] = worksheet.colBreaks;
+    const colMin: Equals<ExcelJS.ColBreak["min"], number | undefined> = true;
+    colBreaks.push({ id: 3, max: 1048575, man: 1 });
+    worksheet.getColumn(3).addPageBreak();
+    worksheet.getColumn("D").addPageBreak(1, 10);
+    // @ts-expect-error the rows are numbers
+    worksheet.getColumn(3).addPageBreak("1");
+    const modelBreaks: ExcelJS.ColBreak[] = worksheet.model.colBreaks;
+    void colMin;
+    void modelBreaks;
 }
 
 // --- images: corners as fractional col / row or as native anchors --------------------------------------------------

@@ -14,11 +14,15 @@ import Column from "../../doc/column";
 
 import SheetRelsWriter from "./sheet-rels-writer";
 import SheetCommentsWriter from "./sheet-comments-writer";
+import { CapturedChart, RangeCapture, SheetCaptures, WorksheetWriterChart, type CapturedSheet } from "./stream-chart";
+import { validateChart, type ChartRange } from "../../doc/chart";
 import DataValidations from "../../doc/data-validations";
 import type Cell from "../../doc/cell";
 import type { ZipEntry } from "../../utils/zip-stream";
 import type {
     AutoFilter,
+    ChartOptions,
+    ColBreak,
     ConditionalFormattingOptions,
     PageSetup,
     RowBreak,
@@ -59,6 +63,7 @@ import PictureXform from "../../xlsx/xform/sheet/picture-xform";
 import ConditionalFormattingsXform from "../../xlsx/xform/sheet/cf/conditional-formattings-xform";
 import HeaderFooterXform, { defaultHeaderFooter } from "../../xlsx/xform/sheet/header-footer-xform";
 import RowBreaksXform from "../../xlsx/xform/sheet/row-breaks-xform";
+import ColBreaksXform from "../../xlsx/xform/sheet/col-breaks-xform";
 import ExtListXform from "../../xlsx/xform/sheet/ext-lst-xform";
 
 const xmlBuffer = new StringBuf();
@@ -81,6 +86,7 @@ const xform = {
     conditionalFormattings: new ConditionalFormattingsXform(),
     headerFooter: new HeaderFooterXform(),
     rowBreaks: new RowBreaksXform(),
+    colBreaks: new ColBreaksXform(),
     extLst: new ExtListXform(),
 };
 
@@ -117,6 +123,9 @@ function committedError(): Error {
     return new Error("Invalid Operation: the worksheet has been committed");
 }
 
+/** The relationship type of the drawing of a worksheet. */
+const DRAWING_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+
 /**
  * A worksheet of the streaming {@link WorkbookWriter}: the rows are written (and dropped) as they are committed, in
  * order; the rest of the worksheet (merges, validations, hyperlinks, page setup...) when the worksheet is committed. The
@@ -135,8 +144,10 @@ class WorksheetWriter {
     dataValidations: DataValidations;
     /** The conditional formattings (`addConditionalFormatting`). */
     conditionalFormatting: ConditionalFormattingOptions[];
-    /** The manual page breaks (`row.addPageBreak`). */
+    /** The manual page breaks after rows (`row.addPageBreak`). */
     rowBreaks: RowBreak[];
+    /** The manual page breaks after columns (`column.addPageBreak`). */
+    colBreaks: ColBreak[];
     /** The worksheet properties (tab colour, outline, default row height…). */
     properties: WorksheetWriterProperties;
     /** Headers and footers of the printed pages (`null` by default). */
@@ -186,6 +197,9 @@ class WorksheetWriter {
     private _media: unknown[];
     private _background?: { imageId?: number; rId?: string };
     private _stream?: ZipEntry;
+    // the charts of the worksheet (addChart), and the captures of the ranges of the charts that show its cells
+    private _charts: WorksheetWriterChart[];
+    private _chartCaptures?: SheetCaptures;
 
     constructor(options: WorksheetWriterOptions) {
         // in a workbook, each sheet will have a number
@@ -236,6 +250,7 @@ class WorksheetWriter {
 
         // keep a record of all row and column pageBreaks
         this.rowBreaks = [];
+        this.colBreaks = [];
 
         // for default row height, outline levels, etc
         this.properties = Object.assign(
@@ -297,6 +312,8 @@ class WorksheetWriter {
         this.autoFilter = options.autoFilter || null;
 
         this._media = [];
+
+        this._charts = [];
 
         // worksheet protection
         this.sheetProtection = null;
@@ -373,6 +390,9 @@ class WorksheetWriter {
         this._writePageSetup();
         this._writeHeaderFooter();
         this._writeRowBreaks();
+        this._writeColBreaks();
+        // the drawing of the charts (written with the charts when the workbook is committed)
+        this._writeDrawing();
         // Legacy Data tag for comments
         this._writeLegacyData();
         this._writeBackground();
@@ -721,6 +741,52 @@ class WorksheetWriter {
     }
 
     // =========================================================================
+    // Charts
+
+    /**
+     * Adds a chart over a range of cells (`anchor`) of the worksheet, with the options of the document `addChart` (see
+     * index.d.ts `ChartOptions`). The values shown before Excel recalculates the chart are captured from the cells as
+     * their rows are written; a series with a row committed before (on this worksheet or another one) is written without
+     * cached values. The chart is written when the workbook is committed.
+     *
+     * @throws Error for invalid options (as the document `addChart`), or when this worksheet is committed
+     */
+    addChart(options: ChartOptions): WorksheetWriterChart {
+        if (this.committed) {
+            throw committedError();
+        }
+        const definition = validateChart<CapturedSheet>(options, this._workbook._chartContext(this));
+        const chart = new WorksheetWriterChart(this, new CapturedChart(definition));
+        this._charts.push(chart);
+        return chart;
+    }
+
+    /** The charts added by {@link addChart} (a new array). */
+    getCharts(): WorksheetWriterChart[] {
+        return [...this._charts];
+    }
+
+    /** Removes a chart (WorksheetWriterChart.remove). */
+    _removeChart(chart: WorksheetWriterChart): void {
+        const index = this._charts.indexOf(chart);
+        if (index !== -1) {
+            this._charts.splice(index, 1);
+        }
+    }
+
+    /** @returns whether the cells of a range of this worksheet can be captured for a chart: none of its rows is committed */
+    _canCaptureChartRange(range: ChartRange<CapturedSheet>): boolean {
+        return !this.committed && range.top >= this._rowZero;
+    }
+
+    /** Registers a range of this worksheet whose values a chart shows (see {@link _canCaptureChartRange}). */
+    _captureChartRange(range: ChartRange<CapturedSheet>): RangeCapture {
+        const capture = new RangeCapture(range);
+        (this._chartCaptures ??= new SheetCaptures()).add(capture);
+        return capture;
+    }
+
+    // =========================================================================
     // Worksheet Protection
 
     /**
@@ -835,6 +901,9 @@ class WorksheetWriter {
     }
 
     private _writeRow(row: Row): void {
+        // the values that charts show
+        this._chartCaptures?.capture(row);
+
         if (!this.startedData) {
             this._writeColumns();
             this._writeOpenSheetData();
@@ -901,6 +970,10 @@ class WorksheetWriter {
         this.stream.write(xform.rowBreaks.toXml(this.rowBreaks));
     }
 
+    private _writeColBreaks(): void {
+        this.stream.write(xform.colBreaks.toXml(this.colBreaks));
+    }
+
     private _writeDataValidations(): void {
         this.stream.write(xform.dataValidations.toXml(this.dataValidations.model));
     }
@@ -952,6 +1025,14 @@ class WorksheetWriter {
                 };
             }
             this.stream.write(xform.picture.toXml({ rId: this._background.rId }));
+        }
+    }
+
+    private _writeDrawing(): void {
+        if (this._charts.length) {
+            const name = this._workbook._addChartDrawing(this._charts.map(({ _chart }) => _chart));
+            const rId = this._sheetRelsWriter.addRelationship({ Type: DRAWING_REL_TYPE, Target: `../drawings/${name}.xml` });
+            this._write(`<drawing r:id="${rId}"/>`);
         }
     }
 

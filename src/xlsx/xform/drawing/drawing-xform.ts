@@ -6,6 +6,7 @@ import type { DrawingAnchorModel, DrawingModel, DrawingReconcileOptions, ImageRa
 import BaseXform, { ownEntry } from "../base-xform";
 import TwoCellAnchorXform from "./two-cell-anchor-xform";
 import OneCellAnchorXform from "./one-cell-anchor-xform";
+import { ANCHOR_ELEMENTS, ChartAnchorCapture, renderChartAnchor } from "./chart-anchor";
 
 /** The element of an anchor. */
 type AnchorType = NonNullable<DrawingAnchorModel["anchorType"]>;
@@ -20,9 +21,29 @@ function getAnchorType(model: { readonly range: ImageRangeModel | string }): Anc
     return model.range.br ? "xdr:twoCellAnchor" : "xdr:oneCellAnchor";
 }
 
+// the namespaces declared by the attributes of an element (prefix → URI; "" for the default namespace)
+function namespaceDeclarations(node: SaxTag): Map<string, string> {
+    const scope = new Map<string, string>();
+    for (const [name, value] of Object.entries(node.attributes)) {
+        if (name === "xmlns") {
+            scope.set("", value);
+        } else if (name.startsWith("xmlns:") && !/[\s<>&"'/=:]/.test(name.slice(6))) {
+            scope.set(name.slice(6), value);
+        }
+    }
+    return scope;
+}
+
+// the namespaces of the <xdr:wsDr> written (DrawingXform.DRAWING_ATTRIBUTES)
+const WRITTEN_SCOPE: ReadonlyMap<string, string> = new Map([
+    ["xdr", "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"],
+    ["a", "http://schemas.openxmlformats.org/drawingml/2006/main"],
+]);
+
 /**
- * The drawing part of a worksheet, `xl/drawings/drawingN.xml`: its pictures, each with a two-cell or a one-cell anchor.
- * Parsing another drawing (e.g. a chart's `<c:userShapes>`) gives no model.
+ * The drawing part of a worksheet, `xl/drawings/drawingN.xml`: its pictures, each with a two-cell or a one-cell anchor,
+ * and its charts (`chartFrames`, carried opaque: see chart-anchor.ts), written after the pictures. Parsing another
+ * drawing (e.g. a chart's `<c:userShapes>`) gives no model.
  */
 class DrawingXform extends BaseXform<DrawingModel> {
     /** The namespaces of `<xdr:wsDr>`. */
@@ -32,6 +53,12 @@ class DrawingXform extends BaseXform<DrawingModel> {
     };
 
     declare map: { readonly "xdr:twoCellAnchor": TwoCellAnchorXform; readonly "xdr:oneCellAnchor": OneCellAnchorXform };
+
+    // parse: the depth of the element being parsed (1 inside <xdr:wsDr>), the namespaces declared on <xdr:wsDr>, and the
+    // capture of the anchor being parsed, when it may hold a chart
+    private depth = 0;
+    private rootScope: ReadonlyMap<string, string> = new Map();
+    private chartCapture: ChartAnchorCapture | undefined;
 
     constructor() {
         super();
@@ -68,12 +95,25 @@ class DrawingXform extends BaseXform<DrawingModel> {
             const anchor = this.map[item.anchorType ?? getAnchorType(item)];
             anchor.render(xmlStream, item);
         }
+        // the pictures have the shape ids 1 to anchors.length (pic-xform prepare)
+        let shapeId = model.anchors.length;
+        const nextShapeId = (): number => ++shapeId;
+        for (const chart of model.chartAnchors ?? []) {
+            renderChartAnchor(xmlStream, chart.anchor, chart.ids, nextShapeId);
+        }
 
         xmlStream.closeNode();
     }
 
     /** @returns `true`: every element of the part is accepted (unknown ones are skipped) */
     override parseOpen(node: SaxTag): boolean {
+        if (this.chartCapture) {
+            this.chartCapture.open(node);
+        } else if (this.depth === 1 && this.model && ANCHOR_ELEMENTS.has(node.name)) {
+            this.chartCapture = new ChartAnchorCapture(this.rootScope, WRITTEN_SCOPE);
+            this.chartCapture.open(node);
+        }
+        this.depth++;
         if (this.parser) {
             this.parser.parseOpen(node);
             return true;
@@ -84,6 +124,9 @@ class DrawingXform extends BaseXform<DrawingModel> {
                 this.model = {
                     anchors: [],
                 };
+                this.depth = 1;
+                this.chartCapture = undefined;
+                this.rootScope = namespaceDeclarations(node);
                 break;
             default: {
                 const parser = ownEntry(this.map, node.name);
@@ -98,12 +141,19 @@ class DrawingXform extends BaseXform<DrawingModel> {
     }
 
     override parseText(text: string): void {
+        if (this.chartCapture) {
+            this.chartCapture.text(text);
+        }
         if (this.parser) {
             this.parser.parseText(text);
         }
     }
 
     override parseClose(name: string): boolean {
+        this.depth--;
+        // the capture of a child of <xdr:wsDr> (an anchor, or <mc:AlternateContent>), complete when that child ends
+        const capture = this.chartCapture;
+        const captured = capture ? capture.close() : false;
         if (this.parser) {
             if (!this.parser.parseClose(name)) {
                 // an anchor outside <xdr:wsDr> (no model), or invalid (no model of the anchor), is ignored
@@ -115,7 +165,20 @@ class DrawingXform extends BaseXform<DrawingModel> {
                     this.model.anchors.push(anchor);
                 }
                 this.parser = undefined;
+                if (anchor && anchor.picture && capture) {
+                    // a picture (e.g. in a group with a chart) is read as an image, as it always was: not carried twice
+                    capture.discard();
+                }
             }
+        }
+        if (capture && captured) {
+            this.chartCapture = undefined;
+            const chartFrame = capture.result;
+            if (chartFrame && this.model) {
+                (this.model.chartFrames ??= []).push(chartFrame);
+            }
+        }
+        if (this.parser) {
             return true;
         }
         switch (name) {

@@ -7,6 +7,8 @@
 import type { CalculationProperties, WorkbookProperties, WorksheetState } from "../../index";
 import type { DrawingModel, NoteModel, TableModel, VmlNotesModel, WorksheetModel, ParsedWorksheetModel } from "./sheet";
 import type { SharedStringValue } from "./strings";
+import type { ContentTypeOverride } from "./chart";
+import type { ChartsheetModel, LoadedChartsheetModel } from "./chartsheet";
 import type { PivotTable } from "../doc/pivot-table";
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -28,12 +30,14 @@ export interface RelationshipModel {
 }
 
 /**
- * Extended properties, `docProps/app.xml` (app-xform). Render: `worksheets` (their names: TitlesOfParts, their count:
- * HeadingPairs), `company`, `manager`. Parse: `{ worksheets, company, manager }`, `worksheets` always `undefined` (the
- * titles are not parsed).
+ * Extended properties, `docProps/app.xml` (app-xform). Render: `worksheets` and `writtenChartsheets` (their names:
+ * TitlesOfParts, their counts: HeadingPairs), `company`, `manager`. Parse: `{ worksheets, company, manager }`,
+ * `worksheets` always `undefined` (the titles are not parsed).
  */
 export interface AppModel {
     worksheets?: readonly { readonly name: string }[];
+    /** the chartsheets written (the "Charts" heading) */
+    writtenChartsheets?: readonly { readonly name: string }[];
     company?: string;
     manager?: string;
 }
@@ -90,6 +94,12 @@ export interface ContentTypesModel {
     tables?: readonly { readonly target?: string }[];
     drawings?: readonly { readonly name?: string }[];
     commentRefs?: readonly CommentRefsEntry[];
+    /** the parts of the charts carried by the worksheets and the chartsheets */
+    chartParts?: readonly ContentTypeOverride[];
+    /** the parts of the pivot tables carried by the worksheets */
+    pivotParts?: readonly ContentTypeOverride[];
+    /** the chartsheets written: `xl/chartsheets/sheet<partNo>.xml` */
+    writtenChartsheets?: readonly { readonly partNo: number }[];
 }
 
 /** A comments part of the write model: `comments<N>` and its VML drawing. */
@@ -154,6 +164,8 @@ export interface WorkbookPartModel {
     views: WorkbookViewModel[];
     calcProperties: Partial<CalculationProperties>;
     definedNames?: DefinedNameModel[];
+    /** the `<pivotCache>`s of `<pivotCaches>` (absent without the element) */
+    pivotCaches?: WorkbookPivotCacheModel[];
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -220,6 +232,8 @@ export interface WorkbookModel extends CoreModel {
     media: MediaModel[];
     /** The pivot tables of the worksheets (at most one): the src/doc objects, which the pivot xforms read as {@link PivotTableModel}. */
     pivotTables: PivotTable[];
+    /** The chartsheets read from a file, carried to be written back (src/xlsx/chartsheet-parts.ts); absent when none. */
+    chartsheets?: ChartsheetModel[];
 }
 
 /**
@@ -276,4 +290,10 @@ export interface WorkbookReadModel extends CoreModel {
     manager?: string;
     /** the parsed shared strings manager (SharedStringsXform), typed by xlsx.ts */
     sharedStrings?: { getString(index: number): SharedStringValue | undefined };
+    /** the chartsheet parts read (part name → chartsheet), by xlsx.ts load */
+    chartsheetParts?: Map<string, LoadedChartsheetModel>;
+    /** WorkbookXform.reconcile: the worksheet of each `<sheet>` (by position in `sheets`; absent: not a worksheet read) */
+    sheetWorksheets?: (ParsedWorksheetModel | undefined)[];
+    /** reconcile: the chartsheets kept (chartsheet-parts.ts reconcileChartsheets) */
+    chartsheets?: ChartsheetModel[];
 }

@@ -9,6 +9,7 @@
 
 import type * as Public from "../../index";
 import type Anchor from "../doc/anchor";
+import type Chart from "../doc/chart";
 import type Cell from "../doc/cell";
 import type { FormulaValueObject } from "../doc/cell";
 import type Row from "../doc/row";
@@ -20,6 +21,7 @@ import type Table from "../doc/table";
 import type Worksheet from "../doc/worksheet";
 import type Workbook from "../doc/workbook";
 import type ModelContainer from "../doc/modelcontainer";
+import type headerFooter from "../doc/header-footer";
 import type { ColorScaleRuleModel, IconSetRuleModel, ImageHyperlinkModel } from "./sheet";
 import type { Assert, Check, ComparedAs } from "./conformance-helpers";
 
@@ -36,6 +38,7 @@ export type DocSubstitutions =
     | [Public.Column, Column]
     | [Public.DefinedNames, DefinedNames]
     | [Public.Table, Table]
+    | [Public.WorksheetChart, Chart]
     | [Public.Worksheet, Worksheet]
     | [Public.Workbook, Workbook]
     | [Public.ModelContainer, ModelContainer];
@@ -80,6 +83,8 @@ export type ColumnConforms = Assert<Check<Column, Public.Column, DocRules>>;
 export type DefinedNamesConforms = Assert<Check<DefinedNames, Public.DefinedNames, DocRules>>;
 /** The runtime Table conforms to index.d.ts `Table`. */
 export type TableConforms = Assert<Check<Table, Public.Table, DocRules>>;
+/** The runtime Chart conforms to index.d.ts `WorksheetChart`. */
+export type ChartConforms = Assert<Check<Chart, Public.WorksheetChart, DocRules>>;
 /** The runtime Worksheet conforms to index.d.ts `Worksheet`, but for the known deviations given. */
 export type WorksheetConforms = Assert<
     Check<
@@ -96,3 +101,5 @@ export type WorksheetConforms = Assert<
 export type WorkbookConforms = Assert<Check<Workbook, Public.Workbook, DocRules>>;
 /** The runtime ModelContainer conforms to index.d.ts `ModelContainer`. */
 export type ModelContainerConforms = Assert<Check<ModelContainer, Public.ModelContainer, DocRules>>;
+/** The runtime header and footer helpers conform to index.d.ts `headerFooter`. */
+export type HeaderFooterHelpersConform = Assert<Check<typeof headerFooter, typeof Public.headerFooter, DocRules>>;

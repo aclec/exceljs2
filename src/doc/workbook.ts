@@ -6,14 +6,17 @@
 //  Manage String table, Hyperlink table, etc.
 //  Manage scaffolding for contained objects to write to/read from
 
-import type { CalculationProperties, WorkbookProperties } from "../../index";
+import type { AddChartsheetOptions, CalculationProperties, Chartsheet, ChartsheetChartOptions, WorkbookProperties } from "../../index";
 import Worksheet, { type DocumentWorksheetModel, type WorksheetOptions } from "./worksheet";
 import DefinedNames from "./defined-names";
 import XLSX from "../xlsx/xlsx";
 import CSV from "../csv/csv";
 import { DEFAULT_MAX_MERGED_CELLS } from "../utils/merge-limits";
 import type { PivotTable } from "./pivot-table";
-import type { ColorModel, MediaModel, WorkbookModel, WorkbookViewModel } from "../types";
+import { createdChartsheetPart, mergeSheets, withTabSelected } from "../xlsx/chartsheet-parts";
+import { ChartsheetChart } from "./chart";
+import { checkSheetName, chartsheetState } from "./sheet-name";
+import type { ChartsheetModel, ColorModel, MediaModel, WorkbookModel, WorkbookViewModel } from "../types";
 
 /** The options of `addWorksheet` (index.d.ts `AddWorksheetOptions`). */
 export type AddWorksheetOptions = Partial<Omit<WorksheetOptions, "workbook" | "id" | "name" | "orderNo">>;
@@ -54,6 +57,12 @@ class Workbook {
     calcProperties: Partial<CalculationProperties>;
     /** The worksheets, indexed by id (sparse: index 0 and removed ids are empty). */
     _worksheets: (Worksheet | undefined)[];
+    /**
+     * The chartsheets read from a file, carried to be written back (src/xlsx/chartsheet-parts.ts), and those created by
+     * {@link addChartsheet} (with their `chart`, generated when the workbook is written), each with its place among the
+     * sheets: `orderNo` is compared with the `orderNo` of the worksheets.
+     */
+    _chartsheets: { readonly model: ChartsheetModel; orderNo: number; readonly chart?: ChartsheetChart }[];
     /** Document property: the subject ("" by default). */
     subject: string | undefined;
     /** Document property: the title ("" by default). */
@@ -101,6 +110,7 @@ class Workbook {
         this.properties = {};
         this.calcProperties = {};
         this._worksheets = [];
+        this._chartsheets = [];
         this.subject = "";
         this.title = "";
         this.views = [];
@@ -125,15 +135,23 @@ class Workbook {
         return this._csv;
     }
 
-    /** The id of the next worksheet: the first free id (from 1). */
+    /** The id of the next worksheet: the first id (from 1) of no worksheet and no chartsheet. */
     get nextId(): number {
+        const chartsheetIds = new Set(this._chartsheets.map(({ model }) => model.id));
         // find the next unique spot to add worksheet
-        for (let i = 1; i < this._worksheets.length; i++) {
-            if (!this._worksheets[i]) {
-                return i;
-            }
+        let i = 1;
+        while (this._worksheets[i] || chartsheetIds.has(i)) {
+            i++;
         }
-        return this._worksheets.length || 1;
+        return i;
+    }
+
+    /** The highest `orderNo` of the sheets (0 without any). */
+    private lastOrderNo(): number {
+        return this._chartsheets.reduce(
+            (acc, chartsheet) => (chartsheet.orderNo > acc ? chartsheet.orderNo : acc),
+            this._worksheets.reduce((acc, ws) => (ws && ws.orderNo !== undefined && ws.orderNo > acc ? ws.orderNo : acc), 0)
+        );
     }
 
     /**
@@ -172,14 +190,10 @@ class Workbook {
             }
         }
 
-        const lastOrderNo = this._worksheets.reduce(
-            (acc, ws) => (ws && ws.orderNo !== undefined && ws.orderNo > acc ? ws.orderNo : acc),
-            0
-        );
         const fullOptions: WorksheetOptions = Object.assign({}, worksheetOptions, {
             id,
             name,
-            orderNo: lastOrderNo + 1,
+            orderNo: this.lastOrderNo() + 1,
             workbook: this,
         });
 
@@ -189,13 +203,53 @@ class Workbook {
         return worksheet;
     }
 
-    /** Removes a worksheet (a worksheet removed twice does not remove the worksheet that took its id). */
+    /**
+     * Removes a worksheet (a worksheet removed twice does not remove the worksheet that took its id). The `activeTab` /
+     * `firstSheet` of the workbook views keep their sheets (the next one for the sheet removed, the last one at the end).
+     */
     removeWorksheetEx(worksheet: Worksheet): void {
         // a worksheet removed twice must not remove the worksheet that took its id
         if (this._worksheets[worksheet.id] === worksheet) {
+            const position = this._sheetOrder().indexOf(worksheet);
             this._mergedCellCount -= worksheet._mergedCellCount;
             // eslint-disable-next-line @typescript-eslint/no-array-delete -- deliberate: no splice, the indexes are the worksheet ids
             delete this._worksheets[worksheet.id];
+            this._sheetRemoved(position);
+        }
+    }
+
+    /** The worksheets and the chartsheets (their entries), in their order among the sheets (a worksheet of the same orderNo first). */
+    _sheetOrder(): (Worksheet | Workbook["_chartsheets"][number])[] {
+        const { worksheets } = this;
+        const sheets: (Worksheet | Workbook["_chartsheets"][number])[] = [];
+        let w = 0;
+        for (const entry of this._chartsheets) {
+            for (let worksheet = worksheets[w]; worksheet && !(entry.orderNo < Number(worksheet.orderNo)); worksheet = worksheets[++w]) {
+                sheets.push(worksheet);
+            }
+            sheets.push(entry);
+        }
+        return sheets.concat(worksheets.slice(w));
+    }
+
+    /**
+     * Moves the `activeTab` / `firstSheet` of the workbook views once the sheet at a position (among all the sheets) is
+     * removed: those after it move back by one, those on it stay (the next sheet), all within the sheets left.
+     */
+    _sheetRemoved(position: number): void {
+        if (position < 0) {
+            return;
+        }
+        const last = Math.max(this._worksheets.filter(Boolean).length + this._chartsheets.length - 1, 0);
+        const move = (index: number | undefined): number | undefined =>
+            index === undefined || !Number.isInteger(index) ? index : Math.min(index > position ? index - 1 : index, last);
+        for (const view of this.views) {
+            if (view.activeTab !== undefined) {
+                view.activeTab = move(view.activeTab);
+            }
+            if (view.firstSheet !== undefined) {
+                view.firstSheet = move(view.firstSheet);
+            }
         }
     }
 
@@ -233,6 +287,50 @@ class Workbook {
         );
     }
 
+    /**
+     * The chartsheets (sheets that are a single chart): read from a file (written back as they were read) or created by
+     * {@link addChartsheet}, in their order among the sheets: their id, name and state (copies).
+     */
+    get chartsheets(): Chartsheet[] {
+        return this._chartsheets.map(({ model }) => ({ id: model.id, name: model.name, state: model.state ?? "visible" }));
+    }
+
+    /**
+     * Adds a chartsheet after the other sheets: a sheet that is a single chart. Its ranges name their worksheet
+     * (`"Data!B2:B10"`); the values shown before Excel recalculates the chart are read from the cells when the workbook
+     * is written.
+     * @param name - the name of the sheet tab: the rules of a worksheet name (see the Worksheet name setter)
+     * @throws Error for an invalid or duplicate name, invalid chart options (see `worksheet.addChart`; a range without a
+     *   worksheet name, an `anchor`), or an invalid `state`
+     */
+    addChartsheet(name: string, chart: ChartsheetChartOptions, options?: AddChartsheetOptions): Chartsheet {
+        const sheetName = checkSheetName(
+            name,
+            (lowerName) =>
+                this._worksheets.some((ws) => ws && ws.name.toLowerCase() === lowerName) ||
+                this._chartsheets.some(({ model }) => model.name.toLowerCase() === lowerName)
+        );
+        const state = chartsheetState(options);
+        const chartsheetChart = new ChartsheetChart(this, chart);
+        const id = this.nextId;
+        const model: ChartsheetModel = { ...createdChartsheetPart(), id, name: sheetName, state, index: 0, charts: [] };
+        this._chartsheets.push({ model, orderNo: this.lastOrderNo() + 1, chart: chartsheetChart });
+        return { id, name: sheetName, state };
+    }
+
+    /**
+     * Removes a chartsheet by its exact name, as `getWorksheet` / `removeWorksheet` take a name (nothing for an unknown
+     * name). The `activeTab` / `firstSheet` of the workbook views keep their sheets (the next one for the sheet removed).
+     */
+    removeChartsheet(name: string): void {
+        const entry = this._chartsheets.find(({ model }) => model.name === name);
+        if (entry) {
+            const position = this._sheetOrder().indexOf(entry);
+            this._chartsheets = this._chartsheets.filter((chartsheet) => chartsheet !== entry);
+            this._sheetRemoved(position);
+        }
+    }
+
     /** Calls `iteratee` with each worksheet (in their order) and its id. */
     eachSheet(iteratee: (sheet: Worksheet, id: number) => void): void {
         this.worksheets.forEach((sheet) => {
@@ -267,8 +365,28 @@ class Workbook {
         return this.media[id];
     }
 
-    /** The model of the workbook (for the xlsx writer): the worksheet models and the settings (by reference). */
+    /**
+     * The model of the workbook (for the xlsx writer): the worksheet models and the settings (by reference); the
+     * chartsheets (copies, sharing their parts) with their index among the sheets.
+     */
     get model(): DocumentWorkbookModel {
+        const { worksheets } = this;
+        // the chartsheets in their places among the worksheets (a worksheet of the same orderNo first)
+        const chartsheets: ChartsheetModel[] = [];
+        let position = 0;
+        let w = 0;
+        for (const { model, orderNo, chart } of this._chartsheets) {
+            while (w < worksheets.length && !(orderNo < Number(worksheets[w]?.orderNo))) {
+                w++;
+                position++;
+            }
+            // its tab selected only when it is the active tab of a workbook view (the active tab of the first one when there
+            // are no views)
+            const index = position++;
+            const sheet = withTabSelected(model.sheet, (viewId) => index === (this.views[viewId]?.activeTab ?? 0));
+            // a chartsheet created: its chart generated now
+            chartsheets.push(chart ? { ...model, sheet, charts: [chart.toModel(model.name)], index } : { ...model, sheet, index });
+        }
         return {
             creator: this.creator || "Unknown",
             lastModifiedBy: this.lastModifiedBy || "Unknown",
@@ -276,8 +394,8 @@ class Workbook {
             created: this.created,
             modified: this.modified,
             properties: this.properties,
-            worksheets: this.worksheets.map((worksheet) => worksheet.model),
-            sheets: this.worksheets.map((ws) => ws.model).filter(Boolean),
+            worksheets: worksheets.map((worksheet) => worksheet.model),
+            sheets: worksheets.map((ws) => ws.model).filter(Boolean),
             definedNames: this._definedNames.model,
             views: this.views,
             company: this.company,
@@ -294,7 +412,38 @@ class Workbook {
             media: this.media,
             pivotTables: this.pivotTables,
             calcProperties: this.calcProperties,
+            // only a workbook with chartsheets has the member
+            ...(chartsheets.length ? { chartsheets } : {}),
         };
+    }
+
+    /**
+     * Sets the chartsheets of a model (after its worksheets): a chartsheet whose name is the name of a worksheet or of an
+     * earlier chartsheet (case-insensitive) is left out. The worksheets and the chartsheets are numbered (`orderNo`) by
+     * their positions among all the sheets.
+     */
+    _setChartsheets(chartsheets: readonly ChartsheetModel[]): void {
+        const { worksheets } = this;
+        const names = new Set(worksheets.map((worksheet) => worksheet.name.toLowerCase()));
+        const kept = chartsheets.filter((chartsheet) => {
+            const name = chartsheet.name.toLowerCase();
+            if (names.has(name)) {
+                return false;
+            }
+            names.add(name);
+            return true;
+        });
+        const entries = kept.map((model) => ({ model, orderNo: 0 }));
+        const indexed = entries.map((entry) => ({ entry, index: entry.model.index }));
+        mergeSheets<Worksheet, (typeof indexed)[number]>(worksheets, indexed).forEach((sheet, orderNo) => {
+            if (sheet instanceof Worksheet) {
+                sheet.orderNo = orderNo;
+            } else {
+                sheet.entry.orderNo = orderNo;
+            }
+        });
+        // in their order among the sheets
+        this._chartsheets = entries.sort((a, b) => a.orderNo - b.orderNo);
     }
 
     /**
@@ -320,6 +469,8 @@ class Workbook {
 
         this.properties = value.properties;
         this.calcProperties = value.calcProperties;
+        // the chartsheets first: those of the workbook replaced must not clash with the names of the new worksheets
+        this._chartsheets = [];
         this._worksheets = [];
         this._mergedCellCount = 0;
         // index of the first <sheet> of each id, looked up once per worksheet (a findIndex per worksheet was
@@ -342,6 +493,10 @@ class Workbook {
             }));
             worksheet.model = worksheetModel;
         });
+
+        if (value.chartsheets && value.chartsheets.length) {
+            this._setChartsheets(value.chartsheets);
+        }
 
         this._definedNames.model = value.definedNames;
         this.views = value.views;

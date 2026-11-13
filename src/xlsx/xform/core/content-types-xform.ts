@@ -2,6 +2,7 @@ import XmlStream, { type XmlAttributes } from "../../../utils/xml-stream";
 import type { ContentTypesModel } from "../../../types";
 
 import BaseXform from "../base-xform";
+import { CHARTSHEET_CONTENT_TYPE } from "../../chartsheet-parts";
 
 /**
  * `[Content_Types].xml`: the content type of each part of the package, from the write model. Render only: parsing
@@ -48,6 +49,12 @@ class ContentTypesXform extends BaseXform<ContentTypesModel> {
                 ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
             });
         }
+        for (const chartsheet of model.writtenChartsheets ?? []) {
+            xmlStream.leafNode("Override", {
+                PartName: `/xl/chartsheets/sheet${chartsheet.partNo}.xml`,
+                ContentType: CHARTSHEET_CONTENT_TYPE,
+            });
+        }
 
         if ((model.pivotTables || []).length) {
             // Note(2023-10-06): assuming at most one pivot table for now.
@@ -63,6 +70,10 @@ class ContentTypesXform extends BaseXform<ContentTypesModel> {
                 PartName: "/xl/pivotTables/pivotTable1.xml",
                 ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml",
             });
+        }
+        // the parts of the pivot tables carried from the file read (pivot-parts.ts)
+        for (const part of model.pivotParts ?? []) {
+            xmlStream.leafNode("Override", { PartName: `/${part.name}`, ContentType: part.contentType });
         }
 
         xmlStream.leafNode("Override", {
@@ -98,6 +109,11 @@ class ContentTypesXform extends BaseXform<ContentTypesModel> {
                     ContentType: "application/vnd.openxmlformats-officedocument.drawing+xml",
                 });
             }
+        }
+
+        // the parts of the charts (their content types are fixed by kind: chart-parts.ts)
+        for (const part of model.chartParts ?? []) {
+            xmlStream.leafNode("Override", { PartName: `/${part.name}`, ContentType: part.contentType });
         }
 
         if (model.commentRefs) {

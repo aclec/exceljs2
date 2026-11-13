@@ -6,6 +6,8 @@
 
 import type { FormulaCellModel, MergeCellModel } from "./cell";
 import type { CommentRefsEntry, MediaModel, RelationshipModel } from "./book";
+import type { ChartPartRegistry } from "./chart";
+import type { PivotPartRegistry } from "./pivot-parts";
 import type { DrawingModel, NoteModel, SheetHyperlinkModel, TableModel, VmlNotesModel } from "./sheet";
 import type { StyleLookup, StyleRegistry } from "./style";
 import type { SharedStringLookup, SharedStringRegistry } from "./strings";
@@ -35,6 +37,10 @@ export interface WorkbookPrepareOptions extends ListItemOptions {
     drawings: DrawingModel[];
     /** collects the comments parts (the same array as the write model's `commentRefs`) */
     commentRefs: CommentRefsEntry[];
+    /** names the parts of the charts carried by the worksheets (without it, their charts are not written) */
+    chartParts?: ChartPartRegistry;
+    /** names the parts of the pivot tables carried by the worksheets (without it, their pivot tables are not written) */
+    pivotParts?: PivotPartRegistry;
 }
 
 /**

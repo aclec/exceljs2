@@ -15,7 +15,7 @@ import ColXform from "../../xlsx/xform/sheet/col-xform";
 import RowXform from "../../xlsx/xform/sheet/row-xform";
 import SheetFormatPropertiesXform from "../../xlsx/xform/sheet/sheet-format-properties-xform";
 import type { CellFormulaValue, WorksheetProperties, WorksheetState } from "../../../index";
-import type { ColModel, RowBreakModel } from "../../types";
+import type { ColBreakModel, ColModel, RowBreakModel } from "../../types";
 import type WorkbookReader from "./workbook-reader";
 import type { WorkbookReaderOptions } from "./workbook-reader";
 
@@ -278,6 +278,15 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         throw readOnly("rowBreaks");
     }
 
+    /**
+     * Not available for a read column.
+     *
+     * @throws Error always
+     */
+    get colBreaks(): ColBreakModel[] {
+        throw readOnly("colBreaks");
+    }
+
     /** This reader, as the worksheet of its rows and columns (see above). */
     private get _host(): RowWorksheet & ColumnWorksheet {
         return this;
@@ -435,6 +444,8 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
         let row: Row | null = null;
         let c: CellBeingParsed | null = null;
         let current: { text: string } | null = null;
+        // inside an <rPh> (phonetic run) of an inline string: its <t> is not the text of the cell
+        let inPhonetic = false;
         let rowNumber = 0;
         let colNumber = 0;
         // the masters of the shared formulas seen, by si (no prototype: the keys come from the file)
@@ -519,10 +530,27 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                                 }
                                 break;
                             case "v":
-                            case "is":
-                            case "t":
                                 if (c) {
                                     current = c.v = { text: "" };
+                                }
+                                break;
+                            case "is":
+                                // an inline string: the text of its <t> (of its runs, as one string), phonetic runs
+                                // excluded, as for shared strings
+                                if (c) {
+                                    c.v = { text: "" };
+                                    current = null;
+                                }
+                                break;
+                            case "t":
+                                if (c && !inPhonetic) {
+                                    current = c.v ??= { text: "" };
+                                }
+                                break;
+                            case "rPh":
+                                if (c) {
+                                    inPhonetic = true;
+                                    current = null;
                                 }
                                 break;
                             default:
@@ -579,11 +607,22 @@ class WorksheetReader extends EventEmitter<WorksheetReaderEvents> {
                             }
                             break;
 
+                        case "f":
+                        case "v":
+                        case "t":
+                            // the text after the element (white space before </c>...) is not part of it
+                            current = null;
+                            break;
+                        case "rPh":
+                            inPhonetic = false;
+                            break;
                         case "c":
                             if (row && c) {
                                 this._reconcileCell(row, c, sharedStrings, styles, date1904, sharedFormulas);
                                 c = null;
                             }
+                            current = null;
+                            inPhonetic = false;
                             break;
                         case "hyperlinks":
                             inHyperlinks = false;

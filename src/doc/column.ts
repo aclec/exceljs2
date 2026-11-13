@@ -1,10 +1,11 @@
 // A column of a worksheet: header, key, width, style, outline. The worksheet condenses runs of equivalent columns into
 // `<col>` ranges when it is written (Column.toModel).
 
-import type { ColModel, StyleModel } from "../types";
+import type { ColBreakModel, ColModel, StyleModel } from "../types";
 import { isEqual } from "../utils/under-dash";
 import colCache from "../utils/col-cache";
 import { ValueType } from "./enums";
+import { isRowNumber } from "./sheet-reference";
 import type Cell from "./cell";
 import type { CellValue, StyleName } from "./cell";
 
@@ -30,7 +31,7 @@ export interface ColumnDefn {
 
 /**
  * What a {@link Column} reads of its worksheet (a Worksheet, or the streaming WorksheetWriter / WorksheetReader): the
- * cells of the column, the column keys, and the properties.
+ * cells of the column, the column keys, the properties, and the page breaks.
  */
 export interface ColumnWorksheet {
     getCell(row: number, col: number): Cell;
@@ -42,6 +43,8 @@ export interface ColumnWorksheet {
         iteratee: (row: { getCell(col: number): Cell }, rowNumber: number) => void
     ): void;
     readonly properties: { readonly outlineLevelCol?: number | undefined; readonly defaultColWidth?: number | undefined };
+    /** The page breaks after columns (the streaming WorksheetReader throws: read only). */
+    readonly colBreaks: ColBreakModel[];
 }
 
 /** A range of columns of a loaded `<col>` (see {@link Column.rangesFromModel}): `min`..`max`, 1-based. */
@@ -344,6 +347,36 @@ class Column {
         v.forEach((value, index) => {
             this._worksheet.getCell(index + offset, colNumber).value = value;
         });
+    }
+
+    // =========================================================================
+    // Page Breaks
+    /**
+     * Adds a manual page break after this column (to `worksheet.colBreaks`), from row `top` to row `bottom` (1-based;
+     * absent or 0: from the first row, to the last one).
+     * @throws Error for a row that is not one of the worksheet (an integer from 1 to 1,048,576), and for a `top` row after
+     * the `bottom` one
+     */
+    addPageBreak(top?: number, bottom?: number): void {
+        for (const row of [top, bottom]) {
+            if (row !== undefined && row !== 0 && !isRowNumber(row)) {
+                throw new Error(`Invalid page break row: ${String(row)} (the rows are numbered from 1 to ${colCache.MAX_ROWS})`);
+            }
+        }
+        // the break model holds 0-based rows: the last one is MAX_ROWS - 1 (absent or 0: the first / last row)
+        const first = top ? top - 1 : 0;
+        const last = bottom ? bottom - 1 : colCache.MAX_ROWS - 1;
+        if (first > last) {
+            throw new Error(`Invalid page break rows: ${String(top)} to ${String(bottom)} (the first row is after the last one)`);
+        }
+        const pb: ColBreakModel = {
+            id: this._number,
+            max: last,
+            man: 1,
+        };
+        if (first) pb.min = first;
+
+        this._worksheet.colBreaks.push(pb);
     }
 
     // =========================================================================

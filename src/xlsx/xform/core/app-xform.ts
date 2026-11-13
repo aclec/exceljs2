@@ -55,8 +55,10 @@ class AppXform extends BaseXform<AppModel> {
         xmlStream.leafNode("DocSecurity", undefined, "0");
         xmlStream.leafNode("ScaleCrop", undefined, "false");
 
-        this.map.HeadingPairs.render(xmlStream, model.worksheets);
-        this.map.TitleOfParts.render(xmlStream, model.worksheets);
+        // the names of the worksheets, then of the chartsheets (as Excel lists them, under their headings)
+        const chartsheets = model.writtenChartsheets ?? [];
+        this.map.HeadingPairs.render(xmlStream, model.worksheets, chartsheets);
+        this.map.TitleOfParts.render(xmlStream, chartsheets.length ? [...model.worksheets, ...chartsheets] : model.worksheets);
         this.map.Company.render(xmlStream, model.company || "");
         this.map.Manager.render(xmlStream, model.manager);
 

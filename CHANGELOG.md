@@ -119,6 +119,74 @@ All fixes have regression tests in `spec/integration/security`.
 - Development: bun is the package manager (`bun.lock`); mocha 12, chai 6 and tsx replace mocha 7, chai 4 and ts-node; `bun audit` reports no
   known vulnerability. No dependency runs install scripts.
 
+### Features
+
+- Page breaks between columns: `column.addPageBreak(top?, bottom?)` adds a manual break after the column (`worksheet.colBreaks`, type
+  `ColBreak`), written as `<colBreaks>` right after `<rowBreaks>` by the document and streaming writers and read back from files (also into
+  a `ModelContainer`; `ignoreNodes: ["colBreaks"]` skips them). As for the row breaks, at most 1023 breaks are written (Excel's limit) and
+  at most one per column (16,384) is read. `pageSetup.colBreaks` stays `null`, as in 4.x.
+- Header and footer texts: `ExcelJS.headerFooter.build({ left, center, right })` writes the text of `worksheet.headerFooter.oddHeader`...
+  from its sections, with the fields of Excel's dialog (`&[Page]`, `&[Pages]`, `&[Date]`, `&[Time]`, `&[Path]`, `&[File]`, `&[Tab]`), the
+  formatting codes kept and the other `&` doubled; `headerFooter.parse(text)` gives the sections back, `headerFooter.escape(text)` doubles
+  every `&`. `build` throws for `&[Picture]` (the header image part is not written) and for a text longer than 255 characters (Excel's
+  limit). The header and footer properties stay plain strings.
+- Note authors: the `<authors>` of the comments part are read as `note.author` (`Comment.author`) and written back, by both writers, with
+  the `authorId` of each note (every note was written by `Author` and the author was dropped on read); a note without author is still
+  written with the placeholder `Author`, read back as no author.
+- Charts: `worksheet.addChart(options)` creates column, bar, line, area, pie, doughnut and scatter charts whose series are ranges of cells
+  (`'B2:B10'`, `"'My Sheet'!$B$2:$B$10"`), with a title, legend, grouping (clustered, stacked, percent stacked), markers, colors and axis
+  options (title, min / max, number format, gridlines), anchored like images; `worksheet.getCharts()` and `chart.remove()`. The options are
+  validated when the chart is added (a clear `Error`: a range that is not one row or one column, an unknown worksheet, an option of another
+  type of chart...). The DrawingML chart part is generated when the workbook is written, valid against `dml-chart.xsd`, with the formulas of
+  the ranges (sheet names quoted when needed) and the values of the cells cached (numbers, dates, formula results, texts; the cells merged
+  into another one empty, as Excel reads them; a date among texts as `yyyy-mm-dd`), so that viewers that do not recalculate show the data;
+  it is written by the code that writes the charts read from a file, in the same drawing as the images and those charts. See
+  [Charts](README.md#charts).
+- Charts kept on read → write: the charts of the worksheets read by `xlsx.load` / `read` / `readFile` are written back (their drawing
+  anchors and chart, style, colors, embedded workbook, user shapes and image parts, as read, with their relationships renumbered), including
+  chartEx charts in their `<mc:AlternateContent>`; a worksheet model copied to another worksheet writes its own copy of the charts. The
+  streaming reader still ignores charts; see [Charts read from a file](README.md#charts-read-from-a-file). Reading a drawing stays linear in
+  its size, whatever its namespace declarations. The parts are reached only through the relationships of chart types, resolved to entries of
+  the zip (`../` normalized, no scheme, no escape above the root), bounded to 10,000 per file, and written under names and content types
+  chosen by ExcelJS; a chart with a missing or refused part is dropped.
+- Pivot tables kept on read → write: the pivot tables of the worksheets read by `xlsx.load` / `read` / `readFile` are written back, opaque
+  (the pivot table, its pivot cache definition and records as read, the relationships renumbered, the `cacheId`s and the `<pivotCaches>` of
+  `xl/workbook.xml` kept). A pivot chart stays a pivot chart when the pivot table that its `<c:pivotSource>` names (worksheet and pivot
+  table name) is written; otherwise (its pivot table dropped on read, its worksheet removed or renamed) it is written as a static chart, as
+  Excel does when the pivot table of a pivot chart is deleted (no `<c:pivotSource>`, `<c:pivotFmts>` or pivot options extensions). No
+  editing API; `addPivotTable` still creates one pivot table per workbook, numbered first and given another `cacheId` when a pivot table
+  read has its own, and throws on a worksheet that has pivot tables read from the file (its name and location are fixed). Slicers,
+  timelines, the data model and external connections are still dropped (with the pivot tables whose cache uses a connection); the source of
+  a cache is not rewritten when a worksheet is renamed; the streaming reader / writer ignore pivot tables; see
+  [Pivot Tables](README.md#pivot-tables). The parts are reached only through the pivot table relationships (worksheet → pivot table → cache
+  → records), resolved to entries of the zip as for charts, bounded to 10,000 per file; a pivot table is carried whole or dropped (a
+  missing, malformed or refused part, a `cacheId` that does not match its `<pivotCache>`, or a `cacheId` listed twice).
+- Chartsheets kept on read → write: the chartsheets (a chart as a sheet of its own) read by `xlsx.load` / `read` / `readFile` were dropped;
+  they are written back in their places among the worksheets, with their name, state and part (views, tab color, protection, page setup,
+  header and footer, carried as read), their drawing and their chart, and listed in `[Content_Types].xml` and `docProps/app.xml` ("Charts").
+  `workbook.chartsheets` lists them (`Chartsheet`: id, name, state; read only) and `workbook.removeChartsheet(name)` drops one; the
+  worksheet APIs never return them, and a worksheet cannot take the name of a chartsheet. The parts are reached only through relationships
+  of the chartsheet and drawing types resolved to entries of the zip, each part and drawing belongs to one sheet, at most 10,000 chartsheets
+  are read; the elements of a chartsheet that reference other parts (header and footer images, background picture, printer settings) are
+  left out; a chartsheet with a missing, malformed or refused part, without chart, or named as another sheet is dropped. The streaming
+  reader still skips them. A chartsheet is written with its tab selected only when it is the active tab of the workbook view (a tab selected
+  as read is not kept otherwise: Excel would open the tabs grouped). See [Charts](README.md#charts).
+- Chartsheets created: `workbook.addChartsheet(name, chart, options?)` adds a chartsheet after the other sheets, its chart taking the
+  options of `addChart` but `anchor` (each range names its worksheet), `options.state` visible / hidden / veryHidden. The name follows the
+  worksheet name rules (unique among all the sheets, case-insensitive); `workbook.nextId` skips the sheet ids of the chartsheets. It is
+  written by the code path of the chartsheets read (part with `sheetPr`, `sheetViews` zoomed to fit, `pageMargins`, `drawing`; a drawing
+  with an `xdr:absoluteAnchor`; the chart part generated with the values of the cells when the workbook is written), listed by
+  `workbook.chartsheets`, removed by `workbook.removeChartsheet`, and carried as written once read back. See
+  [Chartsheets](README.md#chartsheets).
+- Charts and chartsheets in the streaming writer: `worksheet.addChart(options)` and `writer.addChartsheet(name, chart, options?)` of
+  `stream.xlsx.WorkbookWriter` validate the options and generate the chart parts with the code of the document API (byte for byte the same
+  chart part for the same data). The drawings, chartsheets and charts are written when the workbook is committed, so a chart may show a
+  worksheet committed after its own. The cached values are captured from the cells as the rows are written, for the charts added before the
+  rows of their data are committed; only the cells with a value of their ranges are kept until written, and writing a row costs one look per
+  range being captured. A series with a row committed before its chart was added (or on a committed worksheet) is written with its formulas
+  and no cache (Excel and LibreOffice draw it from the cells, viewers that do not recalculate show it empty). See
+  [Charts of the streaming writer](README.md#charts-of-the-streaming-writer).
+
 ### Bug fixes
 
 Upstream numbers refer to issues / pull requests of exceljs/exceljs that reported the bug. Every fix was re-implemented in this fork (no
@@ -151,6 +219,16 @@ upstream PR code was merged) and has a regression test.
       (#3087);
     - both readers parse `t="d"` values with the same rules (`T24:00`, offsets, years 0-99); hyperlinks on number or boolean cells keep
       their value type on write.
+    - inline strings (`<is>`) with phonetic runs (`<rPh>`, `<phoneticPr>`, the furigana of Japanese text): the document reader lost the cell
+      and the following cells of its row, the streaming reader gave the reading instead of the text; the reading is dropped, as for shared
+      strings. The streaming reader also kept only the last run of a rich inline string, and the white space after a `<v>` in an indented
+      sheet.
+    - print areas and print titles of a file with a chartsheet (or another sheet that is not read) before a worksheet: their `localSheetId`
+      counts every sheet, it was taken as an index among the worksheets, giving the area to the wrong worksheet or dropping it; it is now
+      read as the position of the `<sheet>`, and written counting the chartsheets. `activeTab` / `firstSheet` of the workbook views move to
+      the same sheets when a sheet is not kept.
+- The warning of `addPivotTable` sent feedback to the unmaintained upstream repository; it points to this fork's issues.
+- A `ModelContainer` that loaded a file could not write it back (`TypeError` in the pivot table step: a model read has no `pivotTables`).
 - Files that failed to load: unusual `docProps` parts (#2846); relationships to missing or absolute-path parts and VML notes (#3051, #3105);
   relationships without a `Target` (drawing, background image, worksheet); unmodelled table filter elements such as `dynamicFilter` (#2973);
   bare data bars and rules without formulae on write (#3019, #2883).
@@ -164,7 +242,9 @@ upstream PR code was merged) and has a regression test.
   the master style (#2055, #2781); `spliceRows` stale rows (#1600); column keys / table names / CSV headers named like `Object.prototype`
   members (#2080), with `worksheet.tables` kept a plain object; assigning the model of a merged cell keeps its master, and releasing a merge
   reference twice no longer throws; a value inserted inside a merge by column key is checked with the keys that `row.values` uses (a value
-  could be lost); setting `worksheet.model` replaces the merges of the worksheet.
+  could be lost); setting `worksheet.model` replaces the merges of the worksheet; removing a worksheet (or a chartsheet) moves the
+  `activeTab` / `firstSheet` of `workbook.views` with their sheets (the next sheet for the one removed, the last one at the end), they could
+  point past the last tab.
 - `writeBuffer()` of a small workbook no longer waits for a timer, so it settles under fake timers (Vitest, Jest, sinon); see the README
   (Known Issues > Fake timers) for what still does.
 - Browser bundle: loading it in Node.js 25+ no longer prints a `localStorage` ExperimentalWarning (from the `util-deprecate` and `util`
@@ -257,6 +337,8 @@ Found while aligning the typings with the runtime (each with a regression test t
   writer wrote merge references without XML escaping; a gradient stop or a colour scale entry with an automatic colour lost its `<color>`;
   `addPageBreak()` wrote `max="16838"` (the last column is 16383); `NoIcons` was written in the main `<iconSet>`; icon set names that are
   not `ST_IconSetType` values were written as is.
+- `row.addPageBreak(1, 1)` broke across all the columns instead of the first one only (the last column was read as "absent"), and
+  `row.addPageBreak(10, 5)` wrote a break whose first column is after its last one: it now throws an `Error`.
 - Data lost or wrong on round trip: custom icon sets lost their icons, and `iconId` was overwritten with the icon position; font sizes with
   decimals were read as integers (10.5 → 10); automatic colours were dropped; data-validation formulas that are references or formulas
   (`$B$1`, `TODAY()`) were read as `NaN` / `Invalid Date` and written back as `NaN`; row breaks were not read; automatic page numbering
@@ -277,6 +359,17 @@ Found while aligning the typings with the runtime (each with a regression test t
   formatting (`reverse`, `showValue`, `custom`...).
 - A table without `<tableStyleInfo>` loaded but could not be written back (`TypeError`); it round-trips without style. Tables read from a
   file are edited with the table API like created ones. `totalsRowCount` / `headerRowCount` are read as counts.
+- Table columns: the column `style` was written as a `dxfId` attribute, which CT_TableColumn does not have; it is written as `dataDxfId`
+  (the `dxfId` of files written by exceljs 4.x / 5.0 is still read). The formula of a `custom` totals row function was only written in the
+  cell: it is also written as `<totalsRowFormula>` and read back into `totalsRowFormula` (a committed change of a table read from a file
+  cleared its totals cell). `<calculatedColumnFormula>` and the `array` flag of both formulas are kept on read → write; a formula longer
+  than 8,192 characters makes the table part invalid (skipped). A `totalsRowFunction` on the first column is written in the totals row
+  instead of the default label `Total` (it was replaced by the label, with both written in the table part). The column `style` is the format
+  of the data cells: `addTable` and `commit()` merge what it sets into the style of each data cell, through the cell setters (they replaced
+  the whole `font`, `alignment`, `border`... of the cell, mutating the style object that the cells of a file read share), and no longer
+  apply it to the header and totals cells (a format read from an Excel file restyled them on `commit()`). A pattern fill of a differential
+  format without pattern is applied as a solid fill of its `bgColor`. The calculated column formulas read from a file are dropped when the
+  table or a column is renamed or columns are removed (their structured references would be stale).
 - `tint` is read and written with any colour (rgb, indexed, auto), not only theme colours.
 - Conditional formatting rules of an unsupported type (`duplicateValues`, `uniqueValues`...) were kept and written back as an empty
   `<conditionalFormatting>` (a corrupt file); they are not read. A hyperlink whose text is an error value was written as the shared string
@@ -313,6 +406,7 @@ without decoding them); reading and CSV are unchanged. The minified browser bund
 - README: installation with any package manager, requirements, a "Security & limits" section, streaming reader defaults (#1531), tab colour
   example (#2577), formulas without a leading `=` (#3011).
 - New [UPGRADE-5.0.md](UPGRADE-5.0.md) and [SECURITY.md](SECURITY.md).
+- The Chinese translation of the README (`README_zh.md`, not maintained since 4.x) is removed: the documentation is in English only.
 - README examples are type-checked against `index.d.ts` in CI (`bun run check:readme`); the examples that failed at run time were fixed
   (`ExcelJS.` instead of the undefined `Excel` / `Enums`, note protection values, a table row with too many values, CSV `quote: null`).
 - Every exported symbol and public member of `src/` has TSDoc (`bun run check:tsdoc`).

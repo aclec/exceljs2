@@ -136,6 +136,21 @@ async function workbookReader(): Promise<void> {
     void options;
 }
 
+// --- charts and chartsheets of the streaming writer: the options of the document API -----------------
+function streamCharts(writer: WorkbookWriter, worksheet: WorksheetWriter): void {
+    const chart: ExcelJS.WorksheetChart = worksheet.addChart({ type: "column", anchor: "D2:K16", series: [{ values: "B2:B10" }] });
+    const charts: ExcelJS.WorksheetChart[] = worksheet.getCharts();
+    chart.remove();
+    // @ts-expect-error -- a chart of a worksheet has an anchor
+    worksheet.addChart({ type: "column", series: [{ values: "B2:B10" }] });
+    const chartsheet: ExcelJS.Chartsheet = writer.addChartsheet(
+        "Chart",
+        { type: "line", series: [{ values: "Data!B2:B10" }] },
+        { state: "veryHidden" }
+    );
+    void [charts, chartsheet];
+}
+
 // --- removed: the worksheet and hyperlink readers are not runtime values ----------------------
 function removed(): void {
     // @ts-expect-error WorksheetReader is a type only: it is created by the WorkbookReader
@@ -146,4 +161,4 @@ function removed(): void {
     void [zlib, chunked];
 }
 
-void [workbookWriter, worksheetWriter, workbookReader, removed];
+void [workbookWriter, worksheetWriter, workbookReader, streamCharts, removed];

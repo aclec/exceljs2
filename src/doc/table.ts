@@ -4,7 +4,8 @@
 import colCache from "../utils/col-cache";
 import type { TableColumnModel, TableModel } from "../types";
 import type Cell from "./cell";
-import type { DxfModel, StyleModel } from "../types";
+import type { DxfModel } from "../types";
+import type { Fill } from "../../index";
 
 /**
  * What a {@link Table} reads of its worksheet: its rows, to write the table in their cells, and its cells, to read the data
@@ -61,6 +62,14 @@ function isTotalsRowFunction(value: unknown): value is keyof typeof SUBTOTAL_FUN
     return typeof value === "string" && Object.prototype.hasOwnProperty.call(SUBTOTAL_FUNCTIONS, value);
 }
 
+/**
+ * Whether the totals row cell of a column holds a function (any but `none`). Excel writes a label or a function, never
+ * both (they share the cell): the first column shows its label only without a function.
+ */
+function hasTotalsRowFunction(column: TableColumnModel): boolean {
+    return column.totalsRowFunction !== undefined && column.totalsRowFunction !== "none";
+}
+
 /** `count` and the noun, plural unless the count is 1 (`"1 column"`, `"2 columns"`). */
 function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -93,10 +102,49 @@ function checkRow(name: string, values: unknown, rowNumber: number, width: numbe
     );
 }
 
-/** Copies the properties of a column style into the style of a cell (no copy on write: as it always did). */
-function assignStyle(cell: Cell, style: StyleModel | DxfModel | undefined): void {
-    if (style) {
-        Object.assign(cell.style, style);
+/**
+ * The cell fill of a differential fill, or `undefined` for none. A dxf pattern fill without pattern is solid and its color
+ * is `bgColor` (as Excel writes the fills of differential formats).
+ */
+function cellFill(fill: DxfModel["fill"]): Fill | undefined {
+    if (!fill || fill.type === undefined || fill.type === "gradient") {
+        return fill?.type ? fill : undefined;
+    }
+    if (fill.pattern !== undefined) {
+        return { ...fill, pattern: fill.pattern };
+    }
+    const color = fill.bgColor ?? fill.fgColor;
+    return color ? { type: "pattern", pattern: "solid", fgColor: color } : undefined;
+}
+
+/**
+ * Applies the style of a table column (a differential format: what it sets, over the style of the cell) to a data cell:
+ * its font, alignment, protection and border properties are merged into those of the cell, its number format and fill
+ * replace the cell's. Through the cell setters, which copy the style object: cells read from a file share one per style.
+ */
+function applyColumnStyle(cell: Cell, style: DxfModel | undefined): void {
+    if (!style) {
+        return;
+    }
+    const { numFmt, font, alignment, protection, border } = style;
+    if (numFmt) {
+        cell.numFmt = numFmt;
+    }
+    if (font) {
+        cell.font = { ...cell.font, ...font };
+    }
+    if (alignment) {
+        cell.alignment = { ...cell.alignment, ...alignment };
+    }
+    if (protection) {
+        cell.protection = { ...cell.protection, ...protection };
+    }
+    if (border) {
+        cell.border = { ...cell.border, ...border };
+    }
+    const fill = cellFill(style.fill);
+    if (fill) {
+        cell.fill = fill;
     }
 }
 
@@ -127,6 +175,9 @@ class Column {
         return this.column.name;
     }
     set name(value: string) {
+        if (value !== this.column.name) {
+            this.table._dropCalculatedColumnFormulas();
+        }
         this._set("name", value);
     }
 
@@ -146,7 +197,7 @@ class Column {
         this.column.style = value;
     }
 
-    /** The text of the totals row in this column (used for the first column); needs `table.commit()`. */
+    /** The text of the totals row in this column (used for the first column without function); needs `table.commit()`. */
     get totalsRowLabel(): string | undefined {
         return this.column.totalsRowLabel;
     }
@@ -281,7 +332,7 @@ class Table {
         assert(col > 0, "Table must be on valid col");
         table.columns.forEach((column, i) => {
             assert(column.name, `Column ${i} must have a name`);
-            if (i > 0 && column.totalsRowFunction !== undefined) {
+            if (column.totalsRowFunction !== undefined) {
                 // throws for an unknown function
                 this.getFormula(column);
             }
@@ -312,13 +363,15 @@ class Table {
         table.tableRef = tableRef;
 
         table.columns.forEach((column, i) => {
-            if (i === 0) {
+            if (i === 0 && !hasTotalsRowFunction(column)) {
                 assign(column, "totalsRowLabel", "Total");
             } else {
                 assign(column, "totalsRowFunction", "none");
                 // getFormula gives null (no formula) for the function "none"
                 column.totalsRowFormula = this.getFormula(column) ?? undefined;
             }
+            // the totals row cell is written with a plain (not array) formula
+            delete column.totalsRowFormulaArray;
         });
         return { row, col };
     }
@@ -342,8 +395,8 @@ class Table {
     }
 
     /**
-     * Writes the headers, data and totals row of the table in the cells of a worksheet: with the column styles (and
-     * clearing the totals cells without formula), or without (`load`).
+     * Writes the headers, data and totals row of the table in the cells of a worksheet: with the column styles (the format
+     * of the data cells, see {@link applyColumnStyle}) and clearing the totals cells without formula, or without (`load`).
      */
     _write(worksheet: TableWorksheet, tl: TablePosition, rows: readonly TableRow[], withStyles: boolean): void {
         const { table } = this;
@@ -354,9 +407,6 @@ class Table {
             table.columns.forEach((column, j) => {
                 const cell = r.getCell(col + j);
                 cell.value = column.name;
-                if (withStyles) {
-                    assignStyle(cell, column.style);
-                }
             });
         }
         rows.forEach((data) => {
@@ -367,7 +417,7 @@ class Table {
                     const cell = r.getCell(col + j);
                     cell.value = data[j];
                     if (withStyles) {
-                        assignStyle(cell, column.style);
+                        applyColumnStyle(cell, column.style);
                     }
                 }
             });
@@ -377,7 +427,7 @@ class Table {
             const r = worksheet.getRow(row + count++);
             table.columns.forEach((column, j) => {
                 const cell = r.getCell(col + j);
-                if (j === 0) {
+                if (j === 0 && !hasTotalsRowFunction(column)) {
                     cell.value = column.totalsRowLabel;
                 } else if (this.getFormula(column)) {
                     cell.value = {
@@ -386,9 +436,6 @@ class Table {
                     };
                 } else if (withStyles) {
                     cell.value = null;
-                }
-                if (withStyles) {
-                    assignStyle(cell, column.style);
                 }
             });
         }
@@ -584,11 +631,24 @@ class Table {
     removeColumns(colIndex: number, count = 1): void {
         const { rows } = this._editable();
         this.cacheState();
+        this._dropCalculatedColumnFormulas();
 
         this.table.columns.splice(colIndex, count);
         rows.forEach((row) => {
             row.splice(colIndex, count);
         });
+    }
+
+    /**
+     * Drops the calculated column formulas read from a file (written back as is, they have no API): renaming the table or
+     * a column, or removing columns, would leave stale structured references in them (`T[Old]`). The cells keep their
+     * formulas.
+     */
+    _dropCalculatedColumnFormulas(): void {
+        for (const column of this.table.columns) {
+            delete column.calculatedColumnFormula;
+            delete column.calculatedColumnFormulaArray;
+        }
     }
 
     /** Sets a field of the model, after saving the table state (for commit). */
@@ -610,6 +670,9 @@ class Table {
         return this.table.name;
     }
     set name(value: string) {
+        if (value !== this.table.name) {
+            this._dropCalculatedColumnFormulas();
+        }
         this.table.name = value;
     }
 

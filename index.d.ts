@@ -213,9 +213,15 @@ export interface WorkbookView {
     width: number;
     /** The height of the window, in twips. */
     height: number;
-    /** The 0-based index of the first worksheet tab shown; absent when the file does not set it. */
+    /**
+     * The 0-based index of the first sheet tab shown (among all the sheets: the chartsheets count); absent when the file
+     * does not set it.
+     */
     firstSheet?: number;
-    /** The 0-based index of the active worksheet; absent when the file does not set it. */
+    /**
+     * The 0-based index of the active sheet tab (among all the sheets: the chartsheets count); absent when the file does
+     * not set it.
+     */
     activeTab?: number;
     /** `"visible"`, `"hidden"` or `"veryHidden"`. */
     visibility: string;
@@ -692,6 +698,12 @@ export type ImageEditAs = "twoCell" | "oneCell" | "absolute";
  */
 export interface Comment {
     texts?: RichText[];
+    /**
+     * The author of the note (the `<authors>` of the comments part). A note without author is written with the
+     * placeholder author `"Author"`, and that placeholder is read as no author. The text of the note is not changed:
+     * Excel also shows the author as a bold first run (`"Name:"`) of the text, add it to `texts` if wanted.
+     */
+    author?: string;
     margins?: Partial<CommentMargins>;
     protection?: Partial<CommentProtection>;
     editAs?: CommentEditAs;
@@ -983,7 +995,8 @@ export interface Row extends StyleProperties {
      * Adds a manual page break after this row (to `worksheet.rowBreaks`), from column `lft` to column `rght` (1-based;
      * absent or 0: from the first column, to the last one).
      *
-     * @throws Error for a column that is not one of the worksheet (an integer from 1 to 16,384)
+     * @throws Error for a column that is not one of the worksheet (an integer from 1 to 16,384), and for an `lft` column
+     * after the `rght` one
      */
     addPageBreak(lft?: number, rght?: number): void;
 }
@@ -1069,6 +1082,15 @@ export interface Column extends StyleProperties {
      */
     get defn(): ColumnDefinition;
     set defn(value: ColumnDefinition | null | undefined);
+
+    /**
+     * Adds a manual page break after this column (to `worksheet.colBreaks`), from row `top` to row `bottom` (1-based;
+     * absent or 0: from the first row, to the last one).
+     *
+     * @throws Error for a row that is not one of the worksheet (an integer from 1 to 1,048,576), and for a `top` row after
+     * the `bottom` one
+     */
+    addPageBreak(top?: number, bottom?: number): void;
 }
 
 /** The definition of a column: an element of `worksheet.columns = [...]`, and `column.defn`. */
@@ -1412,6 +1434,141 @@ export interface ImagePosition {
     ext: { width: number; height: number };
 }
 
+/**
+ * The type of a chart (`worksheet.addChart`): `column` (vertical bars), `bar` (horizontal bars), `line`, `area`, `pie`,
+ * `doughnut`, or `scatter` (points at x and y values).
+ */
+export type ChartType = "bar" | "column" | "line" | "pie" | "doughnut" | "area" | "scatter";
+
+/**
+ * How the series of a chart are grouped: `clustered` (bar and column, the default: side by side), `standard` (line and
+ * area, the default: each series on its own), `stacked` (each series on top of the previous ones), `percentStacked`
+ * (stacked, as a percentage of the total of each category).
+ */
+export type ChartGrouping = "clustered" | "standard" | "stacked" | "percentStacked";
+
+/** The position of the legend of a chart: right, left, top, bottom, top right. */
+export type ChartLegendPosition = "r" | "l" | "t" | "b" | "tr";
+
+/**
+ * A series of a chart other than scatter. The ranges are one row or one column of cells: `"B2:B10"` (on the worksheet of
+ * the chart), `"Sheet1!$B$2:$B$10"` or `"'My Sheet'!B2:B10"` (on another worksheet of the workbook).
+ */
+export interface ChartSeries {
+    /** The name shown in the legend: a text, or the cell that holds it (`{ ref: "B1" }`). */
+    name?: string | { ref: string };
+    /** The categories (the labels of the category axis, or of the slices of a pie). */
+    categories?: string;
+    /** The values. */
+    values: string;
+    /** The color of the series, `"RRGGBB"` or `"#RRGGBB"` (otherwise the colors of the theme). */
+    color?: string;
+}
+
+/** A series of a scatter chart (the ranges as for {@link ChartSeries}). */
+export interface ScatterChartSeries {
+    /** The name shown in the legend: a text, or the cell that holds it (`{ ref: "B1" }`). */
+    name?: string | { ref: string };
+    /** The x values (otherwise 1, 2, 3...). */
+    xValues?: string;
+    /** The y values. */
+    yValues: string;
+    /** The color of the markers and lines of the series, `"RRGGBB"` or `"#RRGGBB"`. */
+    color?: string;
+}
+
+/** An axis of a chart. */
+export interface ChartAxisOptions {
+    /** The title of the axis. */
+    title?: string;
+    /** The number format of the labels (`"0%"`, `"#,##0"`...): by default, the format of the cells. */
+    numFmt?: string;
+    /** Whether the major gridlines are drawn: by default, for the value axis (y) only. */
+    majorGridlines?: boolean;
+    /** `false` hides the axis (default `true`). */
+    visible?: boolean;
+}
+
+/** A value axis of a chart: its bounds, by default chosen from the values. */
+export interface ChartValueAxisOptions extends ChartAxisOptions {
+    /** The minimum. */
+    min?: number;
+    /** The maximum (greater than `min`). */
+    max?: number;
+}
+
+/**
+ * Where a chart is in its worksheet, as for an image (`worksheet.addImage`): over a range of cells (`"E2:L20"`), between
+ * two corners (with `editAs`: how the chart moves with the cells, `twoCell` by default: moved and sized with them), or at
+ * a corner with a size in pixels.
+ */
+export type ChartAnchor = string | ({ editAs?: ImageEditAs } & ImageRange) | ImagePosition;
+
+/** The options of a chart common to every type. */
+export interface ChartOptionsBase {
+    /** The title of the chart (none by default). */
+    title?: string;
+    /** The legend (`{ position: "r" }` by default), or `false` for none. */
+    legend?: false | { position?: ChartLegendPosition };
+    /** Where the chart is in the worksheet. */
+    anchor: ChartAnchor;
+}
+
+/** A chart of categories: bar, column, line, area, pie or doughnut (see {@link ChartOptions}). */
+export interface CategoryChartOptions extends ChartOptionsBase {
+    type: "bar" | "column" | "line" | "area" | "pie" | "doughnut";
+    /** bar, column, line, area: how the series are grouped. */
+    grouping?: ChartGrouping;
+    /** line: whether the points have markers (default `true`). */
+    marker?: boolean;
+    /** The series: 1 to 255. A pie shows the first one; a doughnut shows each one as a ring. */
+    series: ChartSeries[];
+    /** bar, column, line, area: the axes (a pie or a doughnut has none). */
+    axes?: { category?: ChartAxisOptions; value?: ChartValueAxisOptions };
+}
+
+/** A scatter chart: points at x and y values (see {@link ChartOptions}). */
+export interface ScatterChartOptions extends ChartOptionsBase {
+    type: "scatter";
+    /** Whether the points have markers (default `true`). */
+    marker?: boolean;
+    /** Whether the points of a series are joined by lines (default `false`). */
+    line?: boolean;
+    /** The series: 1 to 255. */
+    series: ScatterChartSeries[];
+    /** The axes: x (horizontal) and y (vertical), both value axes. */
+    axes?: { x?: ChartValueAxisOptions; y?: ChartValueAxisOptions };
+}
+
+/**
+ * A chart to add to a worksheet (`worksheet.addChart`). The options are checked when it is added (an Error names the
+ * invalid one); the series keep their formulas (`Sheet1!$B$2:$B$10`) and the values of the cells are read when the
+ * workbook is written, as the values shown before Excel recalculates the chart.
+ */
+export type ChartOptions = CategoryChartOptions | ScatterChartOptions;
+
+/**
+ * The chart of a chartsheet (`workbook.addChartsheet`): the options of {@link ChartOptions} but `anchor` (the chart fills
+ * the sheet); each range names its worksheet (`"Data!B2:B10"`, `"'My Sheet'!$B$2:$B$10"`).
+ */
+export type ChartsheetChartOptions = Omit<CategoryChartOptions, "anchor"> | Omit<ScatterChartOptions, "anchor">;
+
+/** The options of `workbook.addChartsheet`. */
+export interface AddChartsheetOptions {
+    /** Whether the sheet tab is visible (default `visible`). */
+    state?: WorksheetState;
+}
+
+/** A chart added to a worksheet (`worksheet.addChart`, `worksheet.getCharts()`). */
+export interface WorksheetChart {
+    /** The type of the chart. */
+    readonly type: ChartType;
+    /** The title of the chart. */
+    readonly title: string | undefined;
+    /** Removes the chart from its worksheet. */
+    remove(): void;
+}
+
 export interface ImageHyperlinkValue {
     hyperlink: string;
     tooltip?: string;
@@ -1481,6 +1638,49 @@ export interface Range extends Location {
 /** The header and footer of a worksheet: a {@link HeaderFooter} whose fields may also be `null` (the defaults). */
 export type WorksheetHeaderFooter = { [K in keyof HeaderFooter]?: HeaderFooter[K] | null };
 
+/** The three sections of a header or footer text (see {@link headerFooter}). */
+export interface HeaderFooterSections {
+    /** The text on the left. */
+    left?: string | undefined;
+    /** The text in the center. */
+    center?: string | undefined;
+    /** The text on the right. */
+    right?: string | undefined;
+}
+
+/**
+ * Helpers for the texts of `worksheet.headerFooter` (`oddHeader`, `oddFooter`...), which are written with Excel's `&`
+ * codes: `&L` / `&C` / `&R` start the left / center / right section, `&P` is the page number, `&&` a literal `&`...
+ */
+export namespace headerFooter {
+    /**
+     * The text of a header or footer from its sections: `&L`, `&C`, `&R` then the text of each section given (absent or
+     * empty sections are left out). In a section, the fields of Excel's dialog become their codes (`&[Page]` → `&P`,
+     * `&[Pages]` → `&N`, `&[Date]` → `&D`, `&[Time]` → `&T`, `&[Path]` → `&Z`, `&[File]` → `&F`, `&[Tab]` → `&A`); the
+     * formatting codes (`&B`, `&I`, `&U`, `&"Font,Style"`, `&14`, `&KFF0000`...), the field codes (`&P`...) and `&&` are
+     * kept; any other `&` is a literal ampersand (written `&&`). A text that may hold `&` followed by a code letter
+     * (`AT&T`) goes through {@link escape} first. `build({ left: "Fish & Chips", right: "Page &[Page] of &[Pages]" })` is
+     * `"&LFish && Chips&RPage &P of &N"`.
+     *
+     * @throws Error for `&[Picture]` (`&G`): a picture needs an image part that the library does not write; for a
+     * section code in a section (`&L`, `&C`, `&R`); for a section that is not a string; and for a result longer than 255
+     * characters, which Excel does not take
+     */
+    function build(sections: HeaderFooterSections): string;
+    /**
+     * The sections of a header or footer text (as read from a file): the text before any section code is the center (as
+     * in Excel), a section given twice has its texts joined. Each section is given in the form that {@link build} takes:
+     * the field codes as the fields of Excel's dialog (`&P` → `&[Page]`, `&G` → `&[Picture]`), `&&` and the formatting
+     * codes as they are. Sections without text are left out.
+     */
+    function parse(text: string): HeaderFooterSections;
+    /**
+     * A text with its ampersands doubled (`AT&T` → `AT&&T`): a text shown as it is, in a section given to {@link build}
+     * or in a header or footer text set directly.
+     */
+    function escape(text: string): string;
+}
+
 /** A manual page break after a row (`row.addPageBreak()`; `worksheet.rowBreaks`). */
 export interface RowBreak {
     /** The row number (the break is after it). */
@@ -1490,6 +1690,18 @@ export interface RowBreak {
     /** The first column of the break (0-based); absent for the first column. */
     min?: number;
     /** `1`: a manual break (`row.addPageBreak()`); `0`: an automatic one (read from a file). */
+    man: number;
+}
+
+/** A manual page break after a column (`column.addPageBreak()`; `worksheet.colBreaks`). */
+export interface ColBreak {
+    /** The column number (the break is after it). */
+    id: number;
+    /** The last row of the break (0-based). */
+    max: number;
+    /** The first row of the break (0-based); absent for the first row. */
+    min?: number;
+    /** `1`: a manual break (`column.addPageBreak()`); `0`: an automatic one (read from a file). */
     man: number;
 }
 
@@ -1607,6 +1819,8 @@ export interface WorksheetModel {
     headerFooter: WorksheetHeaderFooter;
     /** The page breaks after rows. */
     rowBreaks: RowBreak[];
+    /** The page breaks after columns. */
+    colBreaks: ColBreak[];
     /** The views (`[]` by default). */
     views: WorksheetViewModel[];
     /** The auto filter: `null` or `undefined` when there is none. */
@@ -1634,19 +1848,21 @@ export interface WorksheetModel {
 /**
  * What setting `worksheet.model` reads: a {@link WorksheetModel} (such as the one of another worksheet, or one of a
  * file read by a {@link ModelContainer}) whose fields that the setter does not need may be absent: `id` and `state` (the
- * worksheet keeps its own; `workbook.model =` reads them), `rowBreaks` (none when absent), `dimensions` (not read: a
+ * worksheet keeps its own; `workbook.model =` reads them), `rowBreaks` / `colBreaks` (none when absent), `dimensions` (not read: a
  * Range from the getter, the `ref` text in a model read from a file) and `merges` (the merged cells are read from
  * `mergeCells`, else from `merges`).
  *
  * @throws Error (the setter) for a merged range that is invalid or names another sheet
  */
-export interface WorksheetModelInput extends Omit<WorksheetModel, "id" | "state" | "rowBreaks" | "dimensions" | "merges"> {
+export interface WorksheetModelInput extends Omit<WorksheetModel, "id" | "state" | "rowBreaks" | "colBreaks" | "dimensions" | "merges"> {
     /** The id of the worksheet in the workbook (read by `workbook.model =` only). */
     id?: number;
     /** Whether the worksheet is visible (read by `workbook.model =` only: visible when absent). */
     state?: WorksheetState;
     /** The page breaks after rows (none when absent). */
     rowBreaks?: RowBreak[];
+    /** The page breaks after columns (none when absent). */
+    colBreaks?: ColBreak[];
     /** Not read. */
     dimensions?: Range | string;
     /** The merged ranges, read when `mergeCells` is absent. */
@@ -2002,6 +2218,9 @@ export interface Worksheet {
     /** The page breaks after rows, added by `row.addPageBreak()` or read from a file. */
     rowBreaks: RowBreak[];
 
+    /** The page breaks after columns, added by `column.addPageBreak()` or read from a file. */
+    colBreaks: ColBreak[];
+
     /** The conditional formattings (`addConditionalFormatting`), in order. */
     conditionalFormattings: ConditionalFormattingOptions[];
 
@@ -2260,6 +2479,19 @@ export interface Worksheet {
 
     /** The images of the worksheet (not the background image). */
     getImages(): WorksheetImage[];
+
+    /**
+     * Adds a chart to the worksheet (see {@link ChartOptions}). Written by `xlsx.write` / `writeBuffer` / `writeFile`
+     * (the streaming writer has its own `addChart`); a file read back has the chart, carried as it was written (not in
+     * `getCharts()`).
+     *
+     * @throws Error for invalid options: a range that is not one row or one column of a series, a worksheet that does not
+     *   exist, an option of another type of chart...
+     */
+    addChart(options: ChartOptions): WorksheetChart;
+
+    /** The charts added by {@link addChart} (not the charts of a file read, which are written back as they were read). */
+    getCharts(): WorksheetChart[];
 
     /** The model of the worksheet (see {@link WorksheetModel}). */
     get model(): WorksheetModel;
@@ -2918,6 +3150,20 @@ export interface WorkbookModel {
 }
 
 /**
+ * A chartsheet of a workbook (`workbook.chartsheets`): a sheet that is a single chart, read from a file or added by
+ * `workbook.addChartsheet`. It is kept, in its place among the worksheets, and written back as it was read; there is no
+ * API to change it.
+ */
+export interface Chartsheet {
+    /** The sheet id (`sheetId`). */
+    readonly id: number;
+    /** The name of the sheet tab (unique among all the sheets, case-insensitive). */
+    readonly name: string;
+    /** Whether the sheet tab is visible. */
+    readonly state: WorksheetState;
+}
+
+/**
  * A workbook: its worksheets, defined names, images, properties and document properties; `xlsx` and `csv` read and
  * write it.
  */
@@ -2970,7 +3216,7 @@ export class Workbook {
      */
     readonly csv: Csv;
 
-    /** The id that the next worksheet added gets: the first free id (from 1). */
+    /** The id that the next worksheet added gets: the first id (from 1) of no worksheet and no chartsheet. */
     readonly nextId: number;
 
     /** The defined names. */
@@ -3007,15 +3253,43 @@ export class Workbook {
     readonly worksheets: Worksheet[];
 
     /**
+     * The chartsheets, in their order (copies, in a new array): sheets that are a single chart, read from a file (written
+     * back as they were read) or added by {@link addChartsheet}, in their places among the worksheets. `[]` for a new
+     * workbook. The worksheet APIs (`worksheets`, `getWorksheet`, `eachSheet`) never return them.
+     */
+    readonly chartsheets: Chartsheet[];
+
+    /**
+     * Adds a chartsheet after the other sheets: a sheet that is a single chart (see {@link ChartsheetChartOptions}). The
+     * values shown before Excel recalculates the chart are read from the cells when the workbook is written.
+     * @param name - the name of the sheet tab, with the rules of a worksheet name (unique among all the sheets,
+     *   case-insensitive)
+     * @returns the chartsheet added
+     * @throws Error for an invalid or duplicate name, invalid chart options (a range without a worksheet name, an
+     *   `anchor`...), or an invalid `state`
+     */
+    addChartsheet(name: string, chart: ChartsheetChartOptions, options?: AddChartsheetOptions): Chartsheet;
+
+    /**
+     * Removes a chartsheet by its exact name, as {@link getWorksheet} and {@link removeWorksheet} take a name (nothing for an
+     * unknown one): it is not written. The `activeTab` / `firstSheet` of {@link views} keep their sheets (the next sheet for
+     * the one removed, the last one at the end).
+     */
+    removeChartsheet(name: string): void;
+
+    /**
      * Add a new worksheet and return a reference to it
      * @param name - the name (default `sheet<id>`)
-     * @throws Error for an invalid or duplicate name
+     * @throws Error for an invalid or duplicate name (the name of another worksheet or of a chartsheet, case-insensitive)
      */
     addWorksheet(name?: string, options?: Partial<AddWorksheetOptions>): Worksheet;
 
-    /** Removes a worksheet (a worksheet removed twice does not remove the worksheet that took its id). */
+    /**
+     * Removes a worksheet (a worksheet removed twice does not remove the worksheet that took its id). The `activeTab` /
+     * `firstSheet` of {@link views} keep their sheets (the next sheet for the one removed, the last one at the end).
+     */
     removeWorksheetEx(worksheet: Worksheet): void;
-    /** Removes a worksheet by id or name (nothing for an unknown one). */
+    /** Removes a worksheet by id or name (nothing for an unknown one), as {@link removeWorksheetEx}. */
     removeWorksheet(indexOrName: number | string): void;
 
     /**
@@ -3429,7 +3703,7 @@ export namespace stream {
             stream: NodeJS.WritableStream;
             /** The defined names of the workbook, written by {@link commit}. */
             readonly definedNames: DefinedNames;
-            /** The id that the next worksheet added gets: the first free one. */
+            /** The id that the next worksheet added gets: the first id (from 1) of no worksheet and no chartsheet. */
             readonly nextId: number;
 
             /**
@@ -3454,8 +3728,23 @@ export namespace stream {
              * Adds a worksheet, written as its rows are committed.
              *
              * @param name - default `sheet<id>`
+             * @throws Error for the name of a chartsheet (case-insensitive)
              */
             addWorksheet(name?: string, options?: Partial<AddWorksheetWriterOptions>): WorksheetWriter;
+            /**
+             * Adds a chartsheet after the sheets added so far: a sheet that is a single chart (see
+             * {@link ChartsheetChartOptions}), written by {@link commit}. The values shown before Excel recalculates the
+             * chart are captured from the cells as their rows are written; a series with a row committed before the
+             * chartsheet was added is written without cached values (Excel and LibreOffice draw it from the cells, a
+             * viewer that does not recalculate shows it empty).
+             *
+             * @param name - the name of the sheet tab, with the rules of a worksheet name (unique among all the sheets,
+             *   case-insensitive)
+             * @returns the chartsheet added
+             * @throws Error for an invalid or duplicate name, invalid chart options (a range without a worksheet name, an
+             *   `anchor`...), or an invalid `state`
+             */
+            addChartsheet(name: string, chart: ChartsheetChartOptions, options?: AddChartsheetOptions): Chartsheet;
             /**
              * The first worksheet (no argument), the worksheet with this id, or the one with this name; `undefined` when
              * there is none.
@@ -3527,8 +3816,10 @@ export namespace stream {
             dataValidations: DataValidations;
             /** The conditional formattings (see {@link addConditionalFormatting}). */
             conditionalFormatting: ConditionalFormattingOptions[];
-            /** The manual page breaks (`row.addPageBreak()`). */
+            /** The manual page breaks after rows (`row.addPageBreak()`). */
             rowBreaks: RowBreak[];
+            /** The manual page breaks after columns (`column.addPageBreak()`). */
+            colBreaks: ColBreak[];
             /** The worksheet properties (default row height 15, dyDescent 55, outline levels 0, and those given). */
             properties: Partial<WorksheetProperties> &
                 Pick<WorksheetProperties, "defaultRowHeight" | "dyDescent" | "outlineLevelCol" | "outlineLevelRow">;
@@ -3660,6 +3951,20 @@ export namespace stream {
             addBackgroundImage(imageId: number): void;
             /** The id of the background image, if any. */
             getBackgroundImageId(): number | undefined;
+
+            /**
+             * Adds a chart to the worksheet, with the options of the document `addChart` (see {@link ChartOptions}),
+             * written when the workbook is committed (a chart may show the data of a worksheet committed after its own).
+             * The values shown before Excel recalculates the chart are captured from the cells as their rows are written; a
+             * series with a row committed before the chart was added (on this worksheet or another one) is written without
+             * cached values (Excel and LibreOffice draw it from the cells, a viewer that does not recalculate shows it
+             * empty). Its `remove()` throws once this worksheet is committed.
+             *
+             * @throws Error for invalid options (as the document `addChart`), or when this worksheet is committed
+             */
+            addChart(options: ChartOptions): WorksheetChart;
+            /** The charts added by {@link addChart} (a new array). */
+            getCharts(): WorksheetChart[];
 
             /**
              * Protects the worksheet, with a password hashed with SHA-512 (`spinCount` iterations, 100000 by default).

@@ -87,6 +87,7 @@ describe("github issues", () => {
             rules: [{ type: "dataBar", cfvo: [{ type: "min" }, { type: "max" }], color: { argb: "FF638EC6" } }],
         });
         ws.getRow(3).addPageBreak();
+        ws.getColumn(2).addPageBreak();
         ws.headerFooter.oddFooter = "page &P";
         const imageId = wb.addImage({ buffer: PNG, extension: "png" });
         ws.addImage(imageId, "F2:G3");
@@ -101,7 +102,9 @@ describe("github issues", () => {
 
         const xml = await readPart(await wb.xlsx.writeBuffer(), "xl/worksheets/sheet1.xml");
         const names = topLevelElements(xml);
-        ["legacyDrawing", "drawing", "picture", "tableParts", "extLst"].forEach((name) => expect(names).to.include(name));
+        ["rowBreaks", "colBreaks", "legacyDrawing", "drawing", "picture", "tableParts", "extLst"].forEach((name) =>
+            expect(names).to.include(name)
+        );
         names.forEach((name) => expect(CT_WORKSHEET).to.include(name));
         const positions = names.map((name) => CT_WORKSHEET.indexOf(name));
         const sorted = [...positions].sort((a, b) => a - b);

@@ -21,7 +21,7 @@ export interface PhoneticTextModel {
     richText?: RichTextRun[];
 }
 
-/** A phonetic run of a shared string (`<rPh>`). Shared strings parse it but do not keep it. */
+/** A phonetic run of a shared or inline string (`<rPh>`). Strings parse it but do not keep it. */
 class PhoneticTextXform extends BaseXform<PhoneticTextModel> {
     declare map: { readonly r: RichTextXform; readonly t: TextXform };
 
