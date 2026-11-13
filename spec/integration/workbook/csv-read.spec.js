@@ -80,6 +80,22 @@ describe("CSV read", () => {
             expect(error.message).to.equal("bad value");
         });
 
+        it("rejects with an Error when a custom map throws something else", async () => {
+            const error = await readCsv("a\n", {
+                map: () => {
+                    throw "bad value";
+                },
+            }).catch((e) => e);
+            expect(error).to.be.an.instanceOf(Error);
+            expect(error.message).to.equal("bad value");
+        });
+
+        it("writeFile throws a clear TypeError for an unknown encoding", () => {
+            const wb = new ExcelJS.Workbook();
+            wb.addWorksheet("s");
+            expect(() => wb.csv.writeFile("spec/out/never.csv", { encoding: "bogus" })).to.throw(TypeError, 'Invalid encoding: "bogus"');
+        });
+
         it("rejects when the input stream fails", async () => {
             const input = new Readable({ read() {} });
             const promise = new ExcelJS.Workbook().csv.read(input);
@@ -172,6 +188,13 @@ describe("CSV read", () => {
             expect(ws.getRow(2).values.slice(1)).to.deep.equal(["x", "y"]);
             expect(ws.getRow(3).values.slice(1)).to.deep.equal([1, 2]);
             expect(ws.getColumn("null").number).to.equal(2);
+            // a column without header (it had a null header, which ColumnDefinition does not admit), but its header cell is there
+            expect(ws.getColumn("null").header).to.equal(undefined);
+            expect(ws.getColumn("p").header).to.equal("p");
+            expect(ws.getRow(1).cellCount).to.equal(2);
+            // the header row is there even when no column has a header
+            const unnamed = await readCsv("x,y\n", { parserOptions: { headers: [null, null] } });
+            expect(unnamed.getRow(2).values.slice(1)).to.deep.equal(["x", "y"]);
         });
 
         it("keeps the values of duplicate names returned by a header transform", async () => {

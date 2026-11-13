@@ -15,11 +15,11 @@ npm install exceljs@npm:@aclec/exceljs2
 
 ## Runtime requirements
 
-|          | ExcelJS 4.x                               | ExcelJS 5.0                       |
-| -------- | ----------------------------------------- | --------------------------------- |
-| Node.js  | >= 8.3 (ES5 build for older versions)     | **>= 22.12**                      |
-| Bun      | not supported                             | **>= 1.4**                        |
-| Browsers | ES5 bundles with core-js polyfills, IE 11 | **ES2020** (all current browsers) |
+|          | ExcelJS 4.x                               | ExcelJS 5.0                                                                     |
+| -------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
+| Node.js  | >= 8.3 (ES5 build for older versions)     | **>= 22.12**                                                                    |
+| Bun      | not supported                             | **>= 1.4**                                                                      |
+| Browsers | ES5 bundles with core-js polyfills, IE 11 | **ES2020 syntax, ES2022 built-ins** (Chrome / Edge 93, Firefox 92, Safari 15.4) |
 
 Applications that must run on an older Node.js or on Internet Explorer should stay on 4.x.
 
@@ -41,6 +41,13 @@ Applications that must run on an older Node.js or on Internet Explorer should st
   `exceljs/dist/...`, `exceljs/excel(.js)` and `exceljs/package.json`. Other paths (`exceljs/index.d.ts`, `exceljs/lib/doc/data/theme1`
   without `.json`, ...) no longer resolve. The internal modules `lib/csv/stream-converter.js`, `lib/utils/auto-drain`,
   `browser-buffer-encode`, `iterate-stream`, `stream-base64`, `string-builder`, `stuttered-pipe` and `typed-stack` were removed.
+- **Internal modules are compiled from TypeScript.** The library is written in TypeScript (`src/`) and `lib/` holds the compiled CommonJS
+  output with its `.d.ts` files. The package entry point is unchanged (`require('exceljs')` returns the same object), but a deep import of
+  an internal module that used to be `module.exports = X` now exposes `X` as its default export: use
+  `require('exceljs/lib/doc/workbook').default`. TypeScript compiled to CommonJS can write
+  `import Workbook from 'exceljs/lib/doc/workbook'`; in native ES modules the default import is the CommonJS exports object, so the class is
+  `(await import('exceljs/lib/doc/workbook')).default.default`. Internal modules are not part of the public API and may change in any
+  release.
 - **The `browser` condition** resolves the package to the browser bundle `dist/exceljs.min.js` (bundlers targeting browsers did so through
   the `browser` field already). The bundle has no `stream` namespace and no file APIs. Test runners that apply the `browser` condition in
   Node now load the bundle too: **Jest with the jsdom environment** does by default (`customExportConditions: ['browser']`). To test with
@@ -273,6 +280,45 @@ restyling many cells: about twice as slow per setter, and about 26 MB of heap fo
   `undefined`) that resolves once the output can take more data. `await worksheet.addRow(values).commit()` keeps memory bounded on large
   sheets; code that ignores the promise works as before (and keeps all the pending data in memory until it yields to the event loop). See
   the [README](README.md#streaming-xlsx). In TypeScript, `commit()` is typed `void | Promise<void>`.
+- **Invalid references throw.** `getCell`, `getRow`, `getRows`, `mergeCells`, `mergeCellsWithoutStyle`, `unMergeCells` and `fillFormula`
+  (document and streaming worksheets) throw a clear `Error` for an address or range they cannot place: row 0, NaN or fractional numbers,
+  bounds outside the grid, no arguments, unparsable or lowercase references (`"a1:b2"` merged A1:A2 in 4.x), or a sheet name other than the
+  worksheet's. The worksheet's own sheet name is accepted and dropped (`mergeCells("Sheet1!A1:B2")` on `Sheet1`). `findCell` returns
+  `undefined` in those cases. `fillFormula` stores its `ref` without sheet name or `$`, and fills a single cell (`"C3"`).
+- **Views and header/footer after a load.** `worksheet.views` and `workbook.views` are `[]`, and `worksheet.headerFooter` the default
+  object, for a file without them (4.x: `null` / `undefined`, so `views.push(...)` threw).
+- **Page setup.** Row breaks are read (a value beyond the worksheet, such as the `max="16838"` that 4.x wrote, is read as its last row or
+  column; text that is not a number rejects the load), and writing more than 1,023 of them (Excel's limit) throws. `firstPageNumber` is not
+  set when the file uses automatic numbering, and `useFirstPageNumber` is read and written as given (4.x read `firstPageNumber: 1`).
+- **Icon sets.** A rule read without `iconSet` has the schema default `"3TrafficLights1"` (4.x: `"3TrafficLights"`, which is not a valid
+  value; it is still accepted on write, as the default). Custom icons are written with their `iconId`, which is required (except for
+  `NoIcons`): 4.x replaced it with the icon position. A rule with `icons` is written in the x14 extension, also without `custom`. An unknown
+  icon set, an `iconId` outside its set or a number of icons different from the number of thresholds throws on write.
+- **Colours and fonts.** An automatic colour (`auto="1"`) reads as `{ auto: true }` (4.x: `undefined`); font sizes keep their decimals.
+- **Data-validation formulas** that are not plain numbers or dates (`$B$1`, `TODAY()`, `A1+1`) are read and written as text (4.x: `NaN`). A
+  `date` rule takes a `Date`, an ISO 8601 date string or a formula string; an invalid date, a non-finite number or a date written as text in
+  another way (`"2020/01/05"`, `"Jan 5, 2020"`, which 4.x converted with `new Date()`) throws on write.
+- **Cell value markers** are recognised by their type, not their truthiness: `{ text: "", hyperlink }`, `{ sharedString: 0 }`,
+  `{ formula: "", result }` are hyperlink, shared string and formula values (4.x stored them as JSON text), and an object whose marker has
+  the wrong type (`{ formula: 1 }`, `{ richText: "x" }`) is a JSON value. `{ hyperlink }` without text is a hyperlink on a cell without
+  value, as read from a file (4.x: a JSON value). `cell.text` is always a string.
+- **Defined names.** Removing a cell or a range from a range kept as a rectangle (more than 100,000 cells) keeps the rest of the range, cut
+  into at most four rectangles (4.x removed the whole range). Invalid range bounds throw.
+- **Tables.** `addTable`, `table.addRow`, `addColumn` and `commit` validate the whole table first and throw a clear `Error` (a row with more
+  values than columns, ...) without writing any cell; `getColumn(index)` out of range throws. A table read from a file without style returns
+  `null` / `undefined` for `theme` and the `show*` properties.
+- **Streaming reader hyperlinks.** With `hyperlinks: "cache"`, `worksheetReader.hyperlinks` entries have their `target` and `targetMode`.
+- **Cell values are checked.** Setting `cell.value` to an object that is not a cell value of its kind throws a clear `Error` and leaves the
+  cell unchanged: a hyperlink whose text is not a cell value or whose tooltip is not a string, a formula with a wrong-typed `formula`,
+  `sharedFormula`, `ref`, `shareType` or `result`, rich text runs that are not `{ text, font? }`, a bigint, a symbol or a function.
+  `fillFormula` checks all its results before filling any cell. A `null` formula result or tooltip counts as absent. Other objects are still
+  stored as JSON values.
+- **Malformed files.** Invalid values of enumerated attributes read as the schema default (for example an unknown `orientation` is
+  `portrait`, a `<xdr:twoCellAnchor>` without `editAs` is `twoCell`); conditional formatting rules of a type ExcelJS does not model are
+  dropped; a table part without name or columns is skipped (as Excel repairs it), a sheet without name throws a clear `Error`. Valid files
+  read as before.
+- **Shared formulas.** In the streaming reader, a clone has the formula of its master, translated to its cell (4.x: an empty formula). In
+  both readers, a reference translated beyond the grid is `#REF!`, as in Excel (`cell.formula` threw).
 
 ## TypeScript
 
@@ -303,13 +349,92 @@ worksheet.addImage(imageId, position);
 `Buffer`, or the Buffer polyfill in the browser bundle): it can be passed to `fs.writeFile` or cast to `Buffer`, and still to
 `new Blob([data])`. Assigning it to an `ArrayBuffer` variable no longer compiles (it never was one); copy it with
 `data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)` when an `ArrayBuffer` is needed. `xlsx.load()` is typed
-`ArrayBuffer | Uint8Array` (Node Buffers included).
+`ArrayBuffer | ArrayBufferView | Blob | number[]` (Node Buffers included), or base64 text with `{ base64: true }`.
 
 New or widened types: `worksheet.dataValidations` (`DataValidations`: `add`, `find`, `remove`, `model`), `DataValidationType`,
 `ImageEditAs`, all `cellIs` operators (`notEqual`, `greaterThanOrEqual`, `lessThanOrEqual`, `notBetween`), optional conditional-formatting
 `priority`, data bar colours, optional `worksheet.protect()` arguments, optional `WorkbookReader` options, `WorksheetReader`
 `id`/`name`/`state`, and the EventEmitter methods of the streaming readers. `xlsx.load()` accepts Node Buffers and `Uint8Array`, and
 `Image.buffer` accepts Node Buffers, with TypeScript 5.7+ typed arrays.
+
+### Typings checked against the runtime
+
+`index.d.ts` is now checked at compile time against the TypeScript sources (`src/types/doc-conformance.ts`,
+`src/types/stream-conformance.ts`): every public member must exist at run time with a compatible type. Aligning it changed the following;
+each item can break code that compiled with 4.x.
+
+Values that are `undefined` or `null` in normal use now say so:
+
+| Member                                                                                                          | 5.0                                                  |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `cell.numFmt`, `font`, `alignment`, `protection`, `border`, `fill` (also on rows and columns)                   | `... \| undefined`                                   |
+| `cell.hyperlink`, `name`, `dataValidation`, `note`, `formula`, `result`, `formulaType`                          | `... \| undefined`                                   |
+| `row.height`                                                                                                    | optional                                             |
+| `row.model`                                                                                                     | getter `RowModel \| null`; the setter rejects `null` |
+| `worksheet.getSheetValues()`                                                                                    | `(CellValue[] \| undefined)[]` (sparse)              |
+| `pageSetup.margins`                                                                                             | `\| null` for a sheet read from a file without them  |
+| `worksheet.columns`                                                                                             | getter `Column[] \| null`                            |
+| `worksheet.getTable()`, `findRows()` items, `insertRows()`, `getBackgroundImageId()`                            | `\| undefined`                                       |
+| `workbook.title`, `creator`, `created` and the other document properties                                        | `\| undefined` (absent in the file)                  |
+| `workbook.getImage()`; streaming `getWorksheet()`, `getImage()`, `lastRow`, `findRow()`, `findCell()`           | `\| undefined`                                       |
+| `outlineProperties.summaryBelow` / `summaryRight`, `RowBreak.min`, `WorkbookView.firstSheet` / `activeTab`      | optional                                             |
+| Conditional-formatting `rule.style` parts (`DifferentialStyle`), gradient `degree` / stop `color`, `top10.rank` | `null` / optional as read from a file                |
+
+Removed (they did not exist, or had no effect): the `Anchor` class (now an interface), `config.setValue`, `cell.release()` and the other
+internal merge helpers, `worksheet.commit()` (on document worksheets), `Table.columns` / `rows` / `style`, `DefinedNames.getMatrix()`,
+`WorksheetProperties.showGridLines` (set `views[].showGridLines`), `date1904` on formula values, `stream` / `filename` in
+`XlsxWriteOptions`, the `Workbook` base of `stream.xlsx.WorkbookWriter` / `WorkbookReader` (they are not workbooks: no `xlsx`, `csv`,
+`worksheets`...), the constructor of `stream.xlsx.WorksheetReader` (an interface: it is not exported) and the fields of `ZlibOptions` other
+than `level`.
+
+Corrected signatures:
+
+- `getCell(address)` / `getCell(row, col)` and `findCell(address)` / `findCell(row, col)`: a row number with a column letter
+  (`getCell(2, "B")`) threw or returned `undefined` and no longer compiles.
+- `fillFormula(range, ...)` takes an address string (a `Range` or `Location` threw); its `results` may hold strings and booleans; new
+  `shareType`.
+- `mergeCells` / `unMergeCells` take the range arguments the runtime accepts (`RangeArguments`).
+- `Range.containsEx()` needs `row` and `col`.
+- `CellErrorValue.error` admits any error code (Excel writes `#SPILL!`, `#CALC!`...); `Font.vertAlign` admits `"baseline"`,
+  `PageSetup.orientation` `"default"`, `DataValidationType` `"time"`, and `TableStyleProperties.theme` a custom style name: code that
+  switches exhaustively on them needs a default branch.
+- `mergeCells()` / `unMergeCells()` without arguments no longer compile (they merged A1 or threw); `IconSetRuleType.iconSet` no longer
+  accepts `"3TrafficLights"` (not a schema value; still written as the default at run time); new `Color.auto`.
+- `addRow` / `insertRow` / `addRows` take `RowValues` and a `RowStyleOption` (`"n" | "i" | "i+" | "o" | "o+"`); `row.splice()` takes
+  `CellValue`s; `TableProperties.rows` is `CellValue[][]`; conditional-formatting `formulae` are `CfFormula[]`
+  (`string | number | boolean`), and `colorScale` / `iconSet` rules require `cfvo` (writing threw without them).
+- `CellHyperlinkValue.text` may be a number, boolean, date, error or rich text (as read back), or absent (a hyperlink on a cell without
+  value).
+- `CellIsOperators` has the text operators of the schema (`containsText`, `notContains`, `beginsWith`, `endsWith`).
+- `removeConditionalFormatting(filter?)` takes an index or a filter function.
+- `Media` describes `workbook.media` (`type: "image"`, optional `name` / `buffer`, `base64`, `filename`); `WorkbookModel` and
+  `WorksheetModel` describe the real models (`WorksheetModel.media` holds worksheet images, `revision` is a number, `themes` a record,
+  `mergeCells` for the setter).
+- `workbook.worksheets` is `readonly` (a getter).
+- `xlsx.write(output)` takes any object with `write` / `end` or a Node writable stream and resolves with the `Xlsx` object; `csv.read()`
+  takes a Node readable stream, `csv.write()` a writable one; CSV `map` options take and return `CellValue`, and the fast-csv row types hold
+  `unknown` instead of `any`.
+- Streaming: `stream.xlsx.WorkbookWriter.commit()` resolves with the writer; the `stream` option is a `NodeJS.WritableStream`; reader events
+  are typed (`WorkbookReaderEvents`, `WorksheetReaderEvents`): unknown event names and wrong listener arguments no longer compile; `parse()`
+  yields typed events (`WorkbookReaderEvent`, `WorksheetReaderEvent[]`) instead of `any`.
+
+New at run time: `ExcelJS.PaperSize` (`ExcelJS.PaperSize.A4`), an object of the common paper sizes; it was a `const enum`, unusable with
+`isolatedModules`. `pageSetup.paperSize` accepts any paper size number of the standard (`8` for A3).
+
+`Range` addresses and `count` are `readonly` (they are getters: setting them threw). `xlsx.load(data, { base64: true })` takes the text as a
+string or as its bytes (a Buffer, a `Uint8Array`, an `ArrayBuffer`, a `Blob`...; 4.x decoded only a string or a Buffer).
+`new ModelContainer()` takes an optional model; `container.model` is a `WorkbookModelInput | undefined` (a model read from a file has no
+`rowBreaks` or `merges`, and its worksheet `dimensions` is a string). `worksheet.model` and `workbook.model` accept the narrower
+`WorksheetModelInput` / `WorkbookModelInput` when set. The `style` of a column of `WorksheetModel.tables` is a `TableColumnStyle` (its parts
+may be `null`, as read from a file).
+
+Added (they existed at run time): `ModelContainer`; `cell.html`; `row.style`; `CellFormulaValue.shareType` / `ref`; `comment.anchor`;
+`Range.setTLBR()` / `forEachAddress()`; `worksheet.sheetProtection`, `rowBreaks`, `conditionalFormattings`; `PageSetup.copies`,
+`usePrinterDefaults`, `useFirstPageNumber`; the `autoFilter` option of `addWorksheet`; `addImage` corners given as `{ col, row }` or native
+offsets (`ImageAnchorPosition`); `TableColumnProperties.totalsRowResult`; `Color.tint` / `indexed`; `Font.condense` / `extend` / `shadow`;
+`Borders.color`; icon-set `icons` (`CfIcon`); `workbook.language`, `revision`, `contentStatus`, `media`; `xlsx.load()` with a `Blob`, any
+`ArrayBufferView`, a byte array or base64 text; `xlsx.read()` with an async iterable; the full `stream.xlsx.WorksheetWriter` and
+`WorksheetReader` APIs, the `HyperlinkReader` and the document properties of `WorkbookWriter`.
 
 `index.d.ts` now starts with `/// <reference types="node" />`, so that it works with TypeScript 6 and 7, which no longer load `@types/*`
 packages automatically. Install `@types/node` as a dev dependency (also in browser projects), or enable `skipLibCheck`. As a consequence,

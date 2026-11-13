@@ -23,6 +23,43 @@ const expectations = [
         parsedModel: { date1904: true },
         tests: ["render", "renderIn", "parse"],
     },
+    // date1904 is an xsd:boolean: "true" / "1" or "false" / "0"
+    {
+        title: 'date1904="true"',
+        create() {
+            return new WorkbookPropertiesXform();
+        },
+        xml: '<workbookPr date1904="true"></workbookPr>',
+        parsedModel: { date1904: true },
+        tests: ["parse"],
+    },
+    {
+        title: 'date1904="false"',
+        create() {
+            return new WorkbookPropertiesXform();
+        },
+        xml: '<workbookPr date1904="false"></workbookPr>',
+        parsedModel: { date1904: false },
+        tests: ["parse"],
+    },
+    {
+        title: 'date1904="0"',
+        create() {
+            return new WorkbookPropertiesXform();
+        },
+        xml: '<workbookPr date1904="0"></workbookPr>',
+        parsedModel: { date1904: false },
+        tests: ["parse"],
+    },
+    {
+        title: "date1904 absent",
+        create() {
+            return new WorkbookPropertiesXform();
+        },
+        xml: '<workbookPr defaultThemeVersion="164011"></workbookPr>',
+        parsedModel: { date1904: false },
+        tests: ["parse"],
+    },
 ];
 
 describe("WorkbookPropertiesXform", () => {

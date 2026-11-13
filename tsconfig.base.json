@@ -1,0 +1,29 @@
+{
+    // Compiler options shared by tsconfig.json (type checking, editors, typescript-eslint) and tsconfig.build.json (emit to lib/)
+    "compilerOptions": {
+        // Node >= 22.12 runs ES2022 natively; the browser bundle is down-levelled to ES2020 by esbuild (scripts/build.mjs).
+        // lib stays at ES2022 so that the code only uses runtime APIs that the supported browsers have, without polyfills.
+        "target": "es2022",
+        "lib": ["es2022", "dom"],
+        // package.json has no "type": the .ts sources use import/export and are emitted as CommonJS
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "types": ["node"],
+        "esModuleInterop": true,
+        "isolatedModules": true,
+        "forceConsistentCasingInFileNames": true,
+        "newLine": "lf",
+        // third-party declarations are not ours to fix (saxes 6 fails under TS 6 strict); index.d.ts is still fully
+        // checked by tsconfig.types.json
+        "skipLibCheck": true,
+
+        // strictness
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noFallthroughCasesInSwitch": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false
+    }
+}

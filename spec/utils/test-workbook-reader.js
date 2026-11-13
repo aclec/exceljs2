@@ -42,7 +42,7 @@ module.exports = {
                                 expect(row.getCell("A").value).to.equal(7);
                                 expect(row.getCell("A").type).to.equal(ExcelJS.ValueType.Number);
                                 expect(row.getCell("B").value).to.deep.equal(streamedValues.B1);
-                                expect(row.getCell("B").type).to.equal(ExcelJS.ValueType.String);
+                                expect(row.getCell("B").type).to.equal(ExcelJS.ValueType.SharedString);
                                 expect(Math.abs(row.getCell("C").value - streamedValues.C1)).to.be.below(dateAccuracy);
                                 expect(row.getCell("C").type).to.equal(ExcelJS.ValueType.Number);
 
@@ -93,11 +93,11 @@ module.exports = {
                             case 5:
                                 // test fonts and formats
                                 expect(row.getCell("A").value).to.deep.equal(streamedValues.B1);
-                                expect(row.getCell("A").type).to.equal(ExcelJS.ValueType.String);
+                                expect(row.getCell("A").type).to.equal(ExcelJS.ValueType.SharedString);
                                 expect(row.getCell("B").value).to.deep.equal(streamedValues.B1);
-                                expect(row.getCell("B").type).to.equal(ExcelJS.ValueType.String);
+                                expect(row.getCell("B").type).to.equal(ExcelJS.ValueType.SharedString);
                                 expect(row.getCell("C").value).to.deep.equal(streamedValues.B1);
-                                expect(row.getCell("C").type).to.equal(ExcelJS.ValueType.String);
+                                expect(row.getCell("C").type).to.equal(ExcelJS.ValueType.SharedString);
 
                                 expect(Math.abs(row.getCell("D").value - 1.6)).to.be.below(0.00000001);
                                 expect(row.getCell("D").type).to.equal(ExcelJS.ValueType.Number);

@@ -12,13 +12,19 @@ Read [UPGRADE-5.0.md](UPGRADE-5.0.md) before upgrading.
 ### Breaking changes
 
 - Requires Node.js >= 22.12. Bun >= 1.4 is supported.
-- The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles target ES2020 and need no polyfills.
+- The ES5 build (`exceljs/dist/es5`) was removed; the browser bundles use ES2020 syntax and ES2022 built-ins (`Object.hasOwn`) and need no
+  polyfills on Chrome / Edge 93, Firefox 92, Safari 15.4 or later.
 - Hardened parsing of untrusted files changes a few behaviours: grid bounds are enforced, merged cells are capped per worksheet (1,048,576)
   and per workbook (`maxMergedCells`, 1,048,576 by default, the same when building, streaming and loading a workbook), large data-validation
   and defined-name ranges are kept as ranges, and out-of-range sheet ids are renumbered. See
   [UPGRADE-5.0.md](UPGRADE-5.0.md#limits-when-reading-files).
-- TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers). See
-  [UPGRADE-5.0.md](UPGRADE-5.0.md#typescript).
+- The library is written in TypeScript: `src/**/*.ts` is compiled to CommonJS in `lib/` (with `.d.ts` and source maps). The package entry
+  point keeps its shape; deep imports of internal `lib/` modules now expose their main value as the default export. See
+  [UPGRADE-5.0.md](UPGRADE-5.0.md#package-exports).
+- TypeScript typings corrected to match the runtime (for example `cell.col` / `cell.row` are numbers) and now checked against it at compile
+  time: nullable values say so, members that did not exist are removed, signatures follow what the code accepts, the streaming classes are
+  no longer declared as workbooks, and missing members are declared. See
+  [UPGRADE-5.0.md](UPGRADE-5.0.md#typings-checked-against-the-runtime).
 - Behaviour changes when reading and writing: internal hyperlinks are read as hyperlink cells and written as a `location`; style setters
   copy shared styles instead of modifying them; CSV whitespace-only cells, large integers and `parserOptions.headers`; table header
   defaults; streaming `WorksheetReader.id` and `sharedStrings: 'emit'` event shape. See [UPGRADE-5.0.md](UPGRADE-5.0.md).
@@ -94,6 +100,11 @@ All fixes have regression tests in `spec/integration/security`.
       merges on a worksheet whose `sheetId` is 65535: 7.6 s); the workbook keeps a running total.
     - XML: a truncated part (an element left open) is rejected by both readers instead of being read as if complete (the streaming reader
       returned the first rows of a cut worksheet without an error).
+- Hostile names (found while porting to TypeScript): XML elements named after `Object.prototype` members (`<constructor/>`, `<toString/>`,
+  `__proto__`…) are skipped as unknown instead of crashing the load; zip parts named `constructor` / `toString` (themes, drawings, media,
+  tables, comments, worksheets) are kept apart from the prototype; a `<comment>` with `note=`, `type=` or `texts=` attributes no longer
+  crashes the load; the x14 data bar / icon set extensions no longer write a model property named after the file; `_.keyBy` returns a
+  null-prototype object.
 
 ### Dependencies
 
@@ -104,6 +115,7 @@ All fixes have regression tests in `spec/integration/security`.
 - saxes ^5.0.1 → ^6.0.0
 - Removed `readable-stream` (replaced by `node:stream`), `tmp` (replaced by `fs.promises.mkdtemp`) and `uuid` (replaced by
   `crypto.randomUUID` / `crypto.getRandomValues`).
+- Development: typescript ^6.0.3 and typescript-eslint ^8.72.0 (type-aware lint of `src/`, `any` banned).
 - Development: bun is the package manager (`bun.lock`); mocha 12, chai 6 and tsx replace mocha 7, chai 4 and ts-node; `bun audit` reports no
   known vulnerability. No dependency runs install scripts.
 
@@ -223,11 +235,87 @@ upstream PR code was merged) and has a regression test.
 - An empty shared string (`<si/>`) reads as `""` in both readers; it used to be re-saved as `[object Object]`.
 - A link to another workbook such as `"Book2.xlsx#Sheet1!A1"` is written as an external link again (not as a place in this workbook).
 
+Found while porting to TypeScript (each with a regression test that fails on the JavaScript code):
+
+- Streaming writer: distinct shared formulas were all written with `si="0"` (the counter was copied per row); `findCell` never found a cell.
+- Streaming reader: with `hyperlinks: "cache"`, a `<hyperlinks>` before `<sheetData>` erased the cell values; a stray `</row>` emitted a
+  `null` row; `HyperlinkReader.each` threw; a row with `s="0"` threw with `styles: "ignore"` (the default).
+- A styles part without dxfs or without cellXfs, or a workbook without styles part whose rows, columns or conditional formattings are
+  styled, made the load throw.
+- `cell.text` of a merged cell threw when its master was empty and gave `[object Object]` for a rich text or formula master; `cell.text` and
+  `toCsvString()` of a formula error gave `[object Object]`; `toCsvString()` of rich text threw.
+- `table.displayName` always returned the name (typo) and could not be set; `table.theme` read and wrote the wrong property.
+- `worksheet.addPivotTable()` threw on a loaded workbook (`pivotTables` was undefined).
+- `pageSetup.cellComments: "asDisplayed"` (the documented value) was not written.
+- The internal `StreamBuf` is a real `Duplex`: `on('data')`, `pause()`, `destroy()` behave as in Node.
+- Malformed files: a part without `<workbook>` / `<worksheet>`, a conditional formatting rule without range, an unknown shared string index,
+  an invalid data-validation range or a colorScale / iconSet without `cfvo` throw an explicit `Error` instead of a `TypeError`.
+
+Found while aligning the typings with the runtime (each with a regression test that fails before the fix):
+
+- Files Excel may reject: a sheet name in a merge reference (`mergeCells("Sheet1!A1:B2")`) was written into `<mergeCell>`; the streaming
+  writer wrote merge references without XML escaping; a gradient stop or a colour scale entry with an automatic colour lost its `<color>`;
+  `addPageBreak()` wrote `max="16838"` (the last column is 16383); `NoIcons` was written in the main `<iconSet>`; icon set names that are
+  not `ST_IconSetType` values were written as is.
+- Data lost or wrong on round trip: custom icon sets lost their icons, and `iconId` was overwritten with the icon position; font sizes with
+  decimals were read as integers (10.5 → 10); automatic colours were dropped; data-validation formulas that are references or formulas
+  (`$B$1`, `TODAY()`) were read as `NaN` / `Invalid Date` and written back as `NaN`; row breaks were not read; automatic page numbering
+  became "start at 1"; `date1904="true"` (a valid xsd:boolean) was read as false; `worksheet.model = other.model` dropped the merges.
+- Cell values: hyperlink, shared-string and formula values with an empty or zero marker (`{ text: "", hyperlink }`, `{ sharedString: 0 }`,
+  `{ formula: "", result }`) were stored as JSON text; `cell.text` of a hyperlink whose text is a number or rich text was not a string; a
+  formula with a falsy result had an empty text.
+- Worksheets: `getCell("A0")`, `getCell(0, 1)` created a cell outside the grid, `getCell("foo")` threw an unrelated error,
+  `mergeCells(10, 10)` and `mergeCells()` registered broken merges, lowercase references merged the wrong cells, `fillFormula` ignored a
+  single cell or an invalid range and threw a `TypeError` with fewer result rows than the range: they throw a clear `Error` or work.
+- Defined names: removing a range (`remove("S!$A$1:$B$2", name)`, `removeEx(range)`) did nothing; removing one cell from a huge range kept
+  as a rectangle removed the whole range.
+- Tables: a row longer than the columns threw a `TypeError` and left a half-written table; a second `commit()` after a move cleared the
+  wrong cells; tables read from a file threw `TypeError`s from `height`, their mutators and style setters.
+- Streaming reader: `hyperlinks: "cache"` never read the hyperlink targets.
+- xsd:boolean attributes written `"true"` / `"false"` (valid, written by other tools) were read as false in the workbook properties, page
+  setup, print options, sheet views, sheet protection, cell protection, outline properties, header / footer, table styles and conditional
+  formatting (`reverse`, `showValue`, `custom`...).
+- A table without `<tableStyleInfo>` loaded but could not be written back (`TypeError`); it round-trips without style. Tables read from a
+  file are edited with the table API like created ones. `totalsRowCount` / `headerRowCount` are read as counts.
+- `tint` is read and written with any colour (rgb, indexed, auto), not only theme colours.
+- Conditional formatting rules of an unsupported type (`duplicateValues`, `uniqueValues`...) were kept and written back as an empty
+  `<conditionalFormatting>` (a corrupt file); they are not read. A hyperlink whose text is an error value was written as the shared string
+  `[object Object]`; it is written as an error cell. A formula cell without formula text (an orphan shared-formula clone) was written with
+  an empty `<f/>`; it is written as its cached value.
+- Data validation dates follow the 1904 date system of the workbook, on read and write; `type="time"` rules are kept.
+- Streaming reader: shared-formula clones get the formula of their master, translated as `workbook.xlsx.load` does (they had an empty
+  formula).
+- `spliceColumns` dropped the values inserted for rows past the last one, and inserted `0`, `false` and `""` as empty cells.
+- Data validations set cell by cell were written as overlapping ranges (`G2:G20` as `G10:G20` and `G2:G20`), and one on column `XFD` made
+  the writer throw. A cellIs rule lost the text operators of the schema; a two-cell image anchor without `editAs` was written back as
+  `oneCell`. A shared-formula reference translated beyond the grid is `#REF!` (it threw), and the streaming reader no longer aborts on a
+  malformed shared-formula master.
+- `xlsx.load(data, { base64: true })` decodes base64 text given as bytes (a `Uint8Array`, `ArrayBuffer`, `Blob`...), not only as a string or
+  a Buffer. The streaming reader gives the numeric result of a formula in a date-formatted cell as a Date, and the `t="s"` cells of a
+  workbook without shared strings part an empty value, as `xlsx.load` does. A hyperlink on a date is written as a date (it was written as
+  its locale text). Defined names no longer mutate the cell addresses that the address cache shares.
+- `<formula1>` outside `<dataValidation>`, a `<sheet>` or table without name, a table without `<tableColumns>` and other malformed parts
+  threw `TypeError`s: they are skipped or throw a clear `Error`. Invalid enumerated attribute values (page orientation, pane, view style,
+  validation type or operator, cfvo type, data bar axis, border style, pattern type, underline, image `editAs`, sheet state...) read as the
+  schema default instead of being kept as is.
+- Internal: no type assertion is left to silence the compiler in `src/` (`no-non-null-assertion` and `no-unsafe-type-assertion` are lint
+  errors); the 410 assertions were replaced by checks, which turned several `TypeError`s on invalid input into clear errors.
+
+### Performance
+
+The TypeScript port was measured against the JavaScript code on every hot path (`bun run benchmark:suite`, median of 7 runs, Node 26):
+writing a workbook (`writeBuffer`) is 30 % faster, the streaming writer 45 % faster, the streaming reader 11 % faster (cells are written
+with one string per start tag, the style registry skips the cells that only have a number format, the reader scans canonical cell references
+without decoding them); reading and CSV are unchanged. The minified browser bundle is 448 KiB instead of 471 KiB.
+
 ### Documentation
 
 - README: installation with any package manager, requirements, a "Security & limits" section, streaming reader defaults (#1531), tab colour
   example (#2577), formulas without a leading `=` (#3011).
 - New [UPGRADE-5.0.md](UPGRADE-5.0.md) and [SECURITY.md](SECURITY.md).
+- README examples are type-checked against `index.d.ts` in CI (`bun run check:readme`); the examples that failed at run time were fixed
+  (`ExcelJS.` instead of the undefined `Excel` / `Enums`, note protection values, a table row with too many values, CSV `quote: null`).
+- Every exported symbol and public member of `src/` has TSDoc (`bun run check:tsdoc`).
 
 ### Zip library (fflate)
 

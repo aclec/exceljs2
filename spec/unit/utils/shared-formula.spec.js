@@ -22,6 +22,10 @@ function referenceSlideFormula(formula, fromCell, toCell) {
         }
         const col = colCache.l2n(colStr) + (match[1] ? 0 : to.col - offset.col);
         const row = parseInt(match[4], 10) + (match[3] ? 0 : to.row - offset.row);
+        if (col < 1 || col > 16384 || row < 1 || row > 1048576) {
+            // a reference slid off the grid: Excel's #REF!
+            return `${sheet || ""}#REF!`;
+        }
         return (sheet || "") + (match[1] || "") + colCache.n2l(col) + (match[3] || "") + row;
     });
 }
@@ -38,6 +42,10 @@ describe("shared-formula", () => {
             { args: ["$A1+A1", "A2", "B2"], result: "$A1+B1" },
             { args: ["A$1+A1", "A2", "A3"], result: "A$1+A2" },
             { args: ["A$1+A1", "A2", "B2"], result: "B$1+B1" },
+            // a reference slid off the grid is #REF!, as in Excel
+            { args: ["XFD1*2", "XFC1", "XFD1"], result: "#REF!*2" },
+            { args: ["A1+Sheet2!B1", "A2", "A1"], result: "#REF!+Sheet2!#REF!" },
+            { args: ["$A$1+A1048576", "A1", "A2"], result: "$A$1+#REF!" },
         ];
         expectations.forEach(({ args, result }) => {
             it(`${args[0]} from ${args[1]} to ${args[2]}`, () => {
@@ -46,7 +54,7 @@ describe("shared-formula", () => {
         });
 
         it("translates like the regular expression implementation", () => {
-            // a reference slid off the grid throws in both
+            // a reference slid off the grid is #REF! in both
             const outcome = (fn, ...args) => {
                 try {
                     return fn(...args);

@@ -183,7 +183,7 @@ describe("prototype-named keys in xlsx parts", function () {
         const ext =
             '<extLst><ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">' +
             '<x14:conditionalFormattings><x14:conditionalFormatting xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">' +
-            '<x14:cfRule type="attacker-type" priority="7" id="__proto__" operator="attacker-op"><xm:f>attacker-formula</xm:f></x14:cfRule>' +
+            '<x14:cfRule type="cellIs" priority="7" id="__proto__" operator="attacker-op"><xm:f>attacker-formula</xm:f></x14:cfRule>' +
             "<xm:sqref>A1</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst>";
         const buffer = await tamper(await baseWorkbookBuffer(), {
             "xl/worksheets/sheet1.xml": (xml) =>
@@ -199,9 +199,11 @@ describe("prototype-named keys in xlsx parts", function () {
         await wb.xlsx.load(buffer);
         expect(snapshotPrototypes()).to.deep.equal(before);
         expect({}.type).to.equal(undefined);
-        // the x14 rule is kept as a rule of its own
+        // the x14 rule is kept as a rule of its own (its unknown operator is not read)
         const rules = wb.getWorksheet("Sheet1").conditionalFormattings.flatMap((cf) => cf.rules);
-        expect(rules.map((rule) => rule.type)).to.deep.equal(["expression", "attacker-type"]);
+        expect(rules.map((rule) => rule.type)).to.deep.equal(["expression", "cellIs"]);
+        expect(rules[1].operator).to.equal(undefined);
+        expect(rules[1].x14Id).to.equal("__proto__");
         expect(await writeUnrelatedWorkbook()).to.equal("hello");
     });
 
@@ -288,17 +290,28 @@ describe("prototype-named keys in xlsx parts", function () {
                 "xl/worksheets/sheet1.xml": (xml) => xml.replace('r="A1"', 'r="toString"'),
             });
             const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), { hyperlinks: "cache", sharedStrings: "cache" });
-            const cells = [];
-            for await (const ws of reader) {
-                for await (const row of ws) {
-                    // used to throw: the inherited toString was taken for the cell's hyperlink
-                    row.eachCell((cell) => cells.push([cell.value, cell.hyperlink]));
+            const read = async () => {
+                for await (const ws of reader) {
+                    for await (const row of ws) {
+                        // used to throw a TypeError: the inherited toString was taken for the cell's hyperlink
+                        row.eachCell(() => {});
+                    }
                 }
-            }
-            expect(cells).to.deep.equal([
-                ["hello", undefined],
-                ["x", undefined],
-            ]);
+            };
+            // not a cell reference: rejected before any lookup, as the document reader does (the streaming reader put
+            // the cell in column S, the only capital letter of the text)
+            const error = await read().then(
+                () => undefined,
+                (e) => e
+            );
+            expect(error).to.be.an.instanceOf(Error);
+            expect(error.message).to.equal("Invalid Address: toString");
+            const loaded = await new ExcelJS.Workbook().xlsx.load(buffer).then(
+                () => undefined,
+                (e) => e
+            );
+            expect(loaded).to.be.an.instanceOf(Error);
+            expect(loaded.message).to.equal("Invalid Address: toString");
         });
     });
 

@@ -1,0 +1,214 @@
+import type { SaxTag } from "../../utils/parse-sax";
+import type XmlStream from "../../utils/xml-stream";
+import type { XmlAttributes } from "../../utils/xml-stream";
+import type { ListItemOptions } from "../../types";
+import BaseXform from "./base-xform";
+
+/** The options of a {@link ListXform}. */
+export interface ListXformOptions<TItem, TParsed extends TItem = TItem> {
+    /** The list element, e.g. `cols`. */
+    readonly tag: string;
+    /** The xform of one item (one child element); its `tag`, if any, names the items in the `maxItems` error. */
+    readonly childXform: ItemXform<TItem, TParsed>;
+    /** Render the list element even when the list is empty or missing. */
+    readonly always?: boolean;
+    /** Write the number of items as an attribute (named by `$count`). */
+    readonly count?: boolean;
+    /** Render an empty list element (`<tag/>`) when the list is empty or missing (and `always` is not set). */
+    readonly empty?: boolean;
+    /** The name of the count attribute. Default: `count`. */
+    readonly $count?: string;
+    /** Attributes of the list element. */
+    readonly $?: XmlAttributes;
+    /** Parsing fails when the list has more items than this (a limit against hostile files). Default: no limit. */
+    readonly maxItems?: number;
+}
+
+/**
+ * The xform of the items of a {@link ListXform}: it renders a `TItem`, and parses a `TParsed` (its `model`, narrower when
+ * the parse gives a model of its own, e.g. a row of raw cells).
+ */
+export type ItemXform<TItem, TParsed extends TItem = TItem> = BaseXform<TItem> & {
+    readonly tag?: string;
+    readonly model: TParsed | null | undefined;
+};
+
+/** The state of a ListXform item step: an item has been processed (the caller may pause). */
+type Steps = Generator<void, void, undefined>;
+
+// runs all the steps of a generator at once. pacer.ts has the same runSteps, but it is not typed yet (its static
+// Pacer.runSteps is not visible to TypeScript): use its named export once it has one.
+function runSteps(steps: Steps): void {
+    for (let step = steps.next(); !step.done; step = steps.next());
+}
+
+/**
+ * The xform of a list element whose children are all items of one kind, e.g. `<cols><col/><col/></cols>`: the model is
+ * the array of the item models.
+ *
+ * `prepare`, `render` and `reconcile` process the items one at a time and have generator versions (`prepareSteps`,
+ * `renderSteps`, `reconcileSteps`) that yield after each item, so that a caller can pause between them (utils/pacer).
+ * Holes of a sparse array are skipped. Parsing skips an item whose xform gives no model (`null` / `undefined`).
+ *
+ * @typeParam TItem - the model of one item
+ * @typeParam TParsed - the model of one parsed item (see {@link ItemXform}): the parsed model is a `TParsed[]`
+ */
+class ListXform<TItem, TParsed extends TItem = TItem> extends BaseXform<TItem[]> {
+    /** The parsed items (prepare and render take `TItem` items: see the type parameters). */
+    declare model: TParsed[] | null | undefined;
+
+    /** The list element. */
+    readonly tag: string;
+    /** See {@link ListXformOptions.always}. */
+    readonly always: boolean;
+    /** See {@link ListXformOptions.count}. */
+    readonly count: boolean | undefined;
+    /** See {@link ListXformOptions.empty}. */
+    readonly empty: boolean | undefined;
+    /** See {@link ListXformOptions.$count}. */
+    readonly $count: string;
+    /** See {@link ListXformOptions.$}. */
+    readonly $: XmlAttributes | undefined;
+    /** The xform of one item. */
+    readonly childXform: ItemXform<TItem, TParsed>;
+    /** See {@link ListXformOptions.maxItems}. */
+    readonly maxItems: number | undefined;
+
+    constructor(options: ListXformOptions<TItem, TParsed>) {
+        super();
+
+        this.tag = options.tag;
+        this.always = !!options.always;
+        this.count = options.count;
+        this.empty = options.empty;
+        this.$count = options.$count || "count";
+        this.$ = options.$;
+        this.childXform = options.childXform;
+        this.maxItems = options.maxItems;
+    }
+
+    /** Prepares each item with the item xform; `options.index` is set to the index of the item. */
+    override prepare(model: readonly TItem[] | undefined, options: ListItemOptions): void {
+        runSteps(this.prepareSteps(model, options));
+    }
+
+    /** {@link prepare}, one item per step. */
+    *prepareSteps(model: readonly TItem[] | undefined, options: ListItemOptions): Steps {
+        const { childXform } = this;
+        if (model) {
+            // for-of with a counter: as fast as an index loop, and typed (entries() allocates a pair per item)
+            let index = 0;
+            for (const item of model) {
+                // `in`: holes of a sparse array are skipped (an item that is present may still be undefined)
+                if (index in model) {
+                    options.index = index;
+                    childXform.prepare(item, options);
+                    yield;
+                }
+                index++;
+            }
+        }
+    }
+
+    /** Writes the list element and its items (the item xform gets the index of the item as third argument). */
+    override render(xmlStream: XmlStream, model: readonly TItem[] | null | undefined): void {
+        runSteps(this.renderSteps(xmlStream, model));
+    }
+
+    /** {@link render}, one item per step. */
+    *renderSteps(xmlStream: XmlStream, model: readonly TItem[] | null | undefined): Steps {
+        if (this.always || (model && model.length)) {
+            xmlStream.openNode(this.tag, this.$);
+            if (this.count) {
+                xmlStream.addAttribute(this.$count, (model && model.length) || 0);
+            }
+
+            const { childXform } = this;
+            const items = model || [];
+            let index = 0;
+            for (const item of items) {
+                if (index in items) {
+                    childXform.render(xmlStream, item, index);
+                    yield;
+                }
+                index++;
+            }
+
+            xmlStream.closeNode();
+        } else if (this.empty) {
+            xmlStream.leafNode(this.tag);
+        }
+    }
+
+    /** @returns `true` for the list element and for an element the item xform accepts */
+    override parseOpen(node: SaxTag): boolean {
+        if (this.parser) {
+            this.parser.parseOpen(node);
+            return true;
+        }
+        switch (node.name) {
+            case this.tag:
+                this.model = [];
+                return true;
+            default:
+                if (this.childXform.parseOpen(node)) {
+                    this.parser = this.childXform;
+                    return true;
+                }
+                return false;
+        }
+    }
+
+    override parseText(text: string): void {
+        if (this.parser) {
+            this.parser.parseText(text);
+        }
+    }
+
+    /**
+     * @returns `false` at the end of the list element
+     * @throws Error when the list has more than `maxItems` items
+     */
+    override parseClose(name: string): boolean {
+        if (this.parser) {
+            if (!this.parser.parseClose(name)) {
+                this.parser = undefined;
+                // the item xform has its model once its element is closed; an item without model (an invalid element the
+                // item xform gives none for) is skipped. An item outside the list element (no model) is ignored
+                const items = this.model;
+                const item = this.childXform.model;
+                if (items && item !== null && item !== undefined) {
+                    items.push(item);
+                    if (this.maxItems && items.length > this.maxItems) {
+                        throw new Error(`Max ${String(this.childXform.tag)} count (${this.maxItems}) exceeded`);
+                    }
+                }
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /** Reconciles each item with the item xform. */
+    override reconcile(model: readonly TItem[] | undefined, options?: unknown): void {
+        runSteps(this.reconcileSteps(model, options));
+    }
+
+    /** {@link reconcile}, one item per step. */
+    *reconcileSteps(model: readonly TItem[] | undefined, options?: unknown): Steps {
+        if (model) {
+            const { childXform } = this;
+            let index = 0;
+            for (const item of model) {
+                if (index in model) {
+                    childXform.reconcile(item, options);
+                    yield;
+                }
+                index++;
+            }
+        }
+    }
+}
+
+export default ListXform;

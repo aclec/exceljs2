@@ -79,4 +79,9 @@ describe("XmlStream", () => {
         xmlStream.closeNode();
         expect(xmlStream.xml).to.equal('<root in="1" also="2"><valid/></root>');
     });
+
+    it("throws a clear TypeError on a rollback without rollback point", () => {
+        const xmlStream = new XmlStream();
+        expect(() => xmlStream.rollback()).to.throw(TypeError, "XmlStream.rollback: there is no rollback point");
+    });
 });

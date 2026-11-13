@@ -1,6 +1,7 @@
 const testXformHelper = require("../test-xform-helper");
 
 const IntegerXform = verquire("xlsx/xform/simple/integer-xform");
+const XmlStream = verquire("utils/xml-stream");
 
 const expectations = [
     {
@@ -35,4 +36,10 @@ const expectations = [
 
 describe("IntegerXform", () => {
     testXformHelper(expectations);
+
+    it("throws a clear Error for no value in text mode with the zero option", () => {
+        const xform = new IntegerXform({ tag: "xdr:col", zero: true });
+        const xmlStream = new XmlStream();
+        expect(() => xform.render(xmlStream, undefined)).to.throw(Error, "No integer to write in <xdr:col>");
+    });
 });

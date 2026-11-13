@@ -39,6 +39,21 @@ const expectations = [
         },
         tests: ["render", "renderIn", "parse"],
     },
+    {
+        title: "xsd:boolean true / false",
+        create() {
+            return new TableStyleInfoXform();
+        },
+        xml: '<tableStyleInfo name="TableStyleLight1" showFirstColumn="true" showLastColumn="false" showRowStripes="true" showColumnStripes="true" />',
+        parsedModel: {
+            theme: "TableStyleLight1",
+            showFirstColumn: true,
+            showLastColumn: false,
+            showRowStripes: true,
+            showColumnStripes: true,
+        },
+        tests: ["parse"],
+    },
 ];
 
 describe("TableStyleInfoXform", () => {

@@ -52,3 +52,9 @@ Thumbs.db
 # Temporary files
 /tmp/
 /tasks/
+
+# Compiled from src/ by `bun run build:lib` (tsc -p tsconfig.build.json)
+/lib/
+
+# Claude Code agent worktrees (local copies of the repository)
+/.claude/worktrees/

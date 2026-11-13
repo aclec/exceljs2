@@ -29,4 +29,14 @@ describe("Workbook Writer", () => {
 
             writer.commit();
         }));
+
+    it("eachRow visits the rows with values, and throws a clear TypeError without iteratee", () => {
+        const writer = new WorksheetWriter({ id: 1, workbook: { _openStream: () => new StreamBuf() } });
+        writer.getCell("A2").value = 1;
+        const visited = [];
+        writer.eachRow((row, rowNumber) => visited.push(rowNumber));
+        writer.eachRow({ includeEmpty: true }, (row, rowNumber) => visited.push(-rowNumber));
+        expect(visited).to.deep.equal([2, -1, -2]);
+        expect(() => writer.eachRow({ includeEmpty: true })).to.throw(TypeError, "eachRow: the iteratee must be a function");
+    });
 });

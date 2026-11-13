@@ -544,3 +544,66 @@ const expectations = [
 describe("CellXform", () => {
     testXformHelper(expectations);
 });
+
+describe("CellXform formula cells", () => {
+    const XmlStream = verquire("utils/xml-stream");
+
+    function prepareAndRender(model) {
+        const xform = new CellXform();
+        xform.prepare(model, { styles: fakeStyles, hyperlinks: [], comments: [], formulae: {}, siFormulae: 0 });
+        const xmlStream = new XmlStream();
+        xform.render(xmlStream, model);
+        return xmlStream.xml;
+    }
+
+    it("writes a formula cell without formula text as its cached value (no empty <f>)", () => {
+        // CT_CellFormula may be empty only for a clone of a shared formula: an empty normal formula is not a formula
+        const cases = [
+            [{ formula: "", result: 5 }, '<c r="A1"><v>5</v></c>'],
+            [{ formula: "", result: "x" }, '<c r="A1" t="str"><v>x</v></c>'],
+            [{ formula: "", result: true }, '<c r="A1" t="b"><v>1</v></c>'],
+            [{ formula: "", result: { error: "#N/A" } }, '<c r="A1" t="e"><v>#N/A</v></c>'],
+            [{ formula: "" }, '<c r="A1"/>'],
+            // a clone of a shared formula whose master is not in the file (read as a formula without text)
+            [{ formula: undefined, sharedFormula: undefined, result: 3 }, '<c r="A1"><v>3</v></c>'],
+        ];
+        for (const [value, xml] of cases) {
+            expect(prepareAndRender({ address: "A1", type: Enums.ValueType.Formula, ...value }), JSON.stringify(value)).to.equal(xml);
+        }
+    });
+
+    it("still writes the empty <f> of a shared formula clone", () => {
+        const xform = new CellXform();
+        const xmlStream = new XmlStream();
+        xform.render(xmlStream, { address: "A2", type: Enums.ValueType.Formula, si: 0, result: 2 });
+        expect(xmlStream.xml).to.equal('<c r="A2"><f t="shared" si="0"/><v>2</v></c>');
+    });
+
+    it("tells the type of a formula result by the presence and type of its markers, as Cell does", () => {
+        // a hyperlink, formula or shared string object is not a formula result, whatever the truthiness of its markers
+        for (const result of [{ text: "", hyperlink: "http://x" }, { formula: "", result: 1 }, { sharedString: 0 }, { richText: [] }]) {
+            expect(
+                () => prepareAndRender({ address: "B3", type: Enums.ValueType.Formula, formula: "A1", result }),
+                JSON.stringify(result)
+            ).to.throw(Error, /Cell B3: the result of a formula must be/);
+        }
+    });
+});
+
+describe("CellXform reconcile of a shared string", () => {
+    const options = { styles: fakeStyles, hyperlinkMap: {}, formulae: {} };
+
+    it('reads the string of a t="s" cell from the shared strings', () => {
+        const sharedStrings = new SharedStringsXform();
+        sharedStrings.add("hello");
+        const model = { address: "A1", type: Enums.ValueType.String, value: 0 };
+        new CellXform().reconcile(model, { ...options, sharedStrings });
+        expect(model).to.deep.equal({ address: "A1", type: Enums.ValueType.String, value: "hello" });
+    });
+
+    it('makes a t="s" cell of a workbook without shared strings part an empty cell (its string is missing)', () => {
+        const model = { address: "A1", type: Enums.ValueType.String, value: 0 };
+        new CellXform().reconcile(model, options);
+        expect(model).to.deep.equal({ address: "A1", type: Enums.ValueType.Null });
+    });
+});

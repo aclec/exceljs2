@@ -64,6 +64,60 @@ const expectations = [
         tests: ["render", "renderIn", "parse"],
     },
     {
+        title: "Auto",
+        create: () => new ColorXform(),
+        preparedModel: { auto: true },
+        xml: '<color auto="1"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
+        title: "Auto (xsd:boolean true)",
+        create: () => new ColorXform(),
+        xml: '<color auto="true"/>',
+        parsedModel: { auto: true },
+        tests: ["parse"],
+    },
+    {
+        title: "Not auto, without color",
+        create: () => new ColorXform(),
+        xml: '<color auto="0"/>',
+        parsedModel: undefined,
+        tests: ["parse"],
+    },
+    {
+        title: "RGB with Tint",
+        create: () => new ColorXform(),
+        preparedModel: { argb: "FF00FF00", tint: -0.25 },
+        xml: '<color rgb="FF00FF00" tint="-0.25"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
+        title: "Indexed with Tint",
+        create: () => new ColorXform(),
+        preparedModel: { indexed: 64, tint: 0.4 },
+        xml: '<color indexed="64" tint="0.4"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
+        title: "Auto with Tint",
+        create: () => new ColorXform(),
+        preparedModel: { auto: true, tint: 0.5 },
+        xml: '<color auto="1" tint="0.5"/>',
+        get parsedModel() {
+            return this.preparedModel;
+        },
+        tests: ["render", "renderIn", "parse"],
+    },
+    {
         title: "Undefined",
         create: () => new ColorXform(),
         preparedModel: undefined,

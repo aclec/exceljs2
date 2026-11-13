@@ -130,8 +130,8 @@ describe("colCache", () => {
     });
 
     describe("with a malformed address", () => {
-        it("tolerates a missing row number", () => {
-            expect(colCache.decodeAddress("$B")).to.deep.equal({
+        it("decodes a side of a reference without row number (a column)", () => {
+            expect(colCache.decodeReference("$B")).to.deep.equal({
                 address: "B",
                 col: 2,
                 row: undefined,
@@ -139,14 +139,36 @@ describe("colCache", () => {
             });
         });
 
-        it("tolerates a missing column number", () => {
-            expect(colCache.decodeAddress("$2")).to.deep.equal({
+        it("decodes a side of a reference without column letters (a row)", () => {
+            expect(colCache.decodeReference("$2")).to.deep.equal({
                 address: "2",
                 col: undefined,
                 row: 2,
                 $col$row: "$$2",
             });
         });
+
+        it("rejects an address without row number or column letters (it gave undefined, typed number)", () => {
+            for (const value of ["$B", "B", "$2", "12", "", "$", "a1"]) {
+                expect(() => colCache.decodeAddress(value), value).to.throw(Error, `Invalid Address: ${value}`);
+            }
+        });
+    });
+
+    it("freezes the decoded addresses it shares (the cached top-left cells)", () => {
+        const shared = colCache.decodeAddress("C3");
+        expect(colCache.decodeAddress("$C$3")).to.equal(shared);
+        expect(Object.isFrozen(shared)).to.equal(true);
+        expect(Reflect.set(shared, "row", 4)).to.equal(false);
+        expect(shared.row).to.equal(3);
+        // an address out of the cache is a new object of the caller
+        expect(Object.isFrozen(colCache.decodeAddress("C300"))).to.equal(false);
+    });
+
+    it("rejects a column number that is not an integer (it gave undefined, typed string)", () => {
+        for (const n of [1.5, NaN]) {
+            expect(() => colCache.n2l(n), String(n)).to.throw(Error, "is not a column number");
+        }
     });
 
     it("convert [sheetName!][$]col[$]row[[$]col[$]row] into address or range structures", () => {
@@ -191,6 +213,35 @@ describe("colCache", () => {
         expect(addr.col).to.equal(5);
         expect(colCache.getAddress("E4")).to.equal(addr);
         expect(colCache.getAddress(4, 5)).to.equal(addr);
+    });
+
+    it("throws for a column 0 given by number (it decoded the row number as an address)", () => {
+        expect(() => colCache.getAddress(5, 0)).to.throw("0 is out of bounds");
+    });
+
+    it("decodes whole rows and whole columns as the rectangles they cover (print titles; they gave NaN bounds)", () => {
+        const rows = colCache.decodeEx("Sheet1!$2:$1");
+        expect(rows).to.deep.include({ sheetName: "Sheet1", top: 1, left: 1, bottom: 2, right: 16384, dimensions: "A1:XFD2" });
+        expect(rows.tl).to.deep.equal({ address: "A1", col: 1, row: 1, $col$row: "$A$1", sheetName: "Sheet1" });
+        expect(rows.br).to.deep.equal({ address: "XFD2", col: 16384, row: 2, $col$row: "$XFD$2", sheetName: "Sheet1" });
+        const columns = colCache.decodeEx("'My Sheet'!$A:$B");
+        expect(columns).to.deep.include({ sheetName: "My Sheet", top: 1, left: 1, bottom: 1048576, right: 2, dimensions: "A1:B1048576" });
+        expect(colCache.decode("C:B")).to.deep.include({ top: 1, left: 2, bottom: 1048576, right: 3, dimensions: "B1:C1048576" });
+        expect(colCache.decode("3:3")).to.deep.include({ top: 3, left: 1, bottom: 3, right: 16384, dimensions: "A3:XFD3" });
+        expect(colCache.decode("A1:B2:C3")).to.include({ address: "A1" });
+        expect(colCache.decodeEx("A1:B2:C3")).to.include({ dimensions: "A1:B2" });
+    });
+
+    it("rejects a range whose sides are of different kinds, or neither a row nor a column", () => {
+        for (const value of ["A1:3", "A:3", "1:B2", "A1:", ":", "Sheet1!$A$1:$"]) {
+            expect(() => colCache.decodeEx(value), value).to.throw(Error, "Invalid range");
+        }
+        expect(() => colCache.decode("A:1"), "A:1").to.throw(Error, "Invalid range");
+    });
+
+    it("decodes an error reference without sheet (#REF! was read as the sheet #REF)", () => {
+        expect(colCache.decodeEx("#REF!")).to.deep.equal({ error: "#REF!" });
+        expect(colCache.decodeEx("Sheet1!#REF!")).to.deep.equal({ sheetName: "Sheet1", error: "#REF!" });
     });
 
     it("decodes addresses and ranges", () => {

@@ -497,7 +497,7 @@ describe("hostile input", function () {
             const names = [0, 1, 2].map((i) => `<definedName name="n${i}">Sheet1!$A$1:$CV$1000</definedName>`).join("");
             const wb = await load(await tamper(await baseWorkbookBuffer(), withDefinedNames(names)));
             // 100,000 cells: the first name uses the whole budget, the others are kept as rectangles
-            expect(Object.keys(wb.definedNames.rangeMap)).to.deep.equal(["n1", "n2"]);
+            expect([...wb.definedNames.rangeMap.keys()]).to.deep.equal(["n1", "n2"]);
             expect(wb.getWorksheet("Sheet1").getCell("CV1000").names).to.deep.equal(["n0", "n1", "n2"]);
             expect(wb.definedNames.model).to.deep.equal(["n0", "n1", "n2"].map((name) => ({ name, ranges: ["Sheet1!$A$1:$CV$1000"] })));
         });
@@ -521,8 +521,37 @@ describe("hostile input", function () {
             expect(wb.definedNames.getRanges("big").ranges).to.deep.equal(["s!$A$1:$B$99998"]);
             ws.spliceRows(1, 0, [], []);
             expect(wb.definedNames.getRanges("big").ranges).to.deep.equal(["s!$A$3:$B$100000"]);
+            // removing a cell cuts the rectangle (the other cells of the range keep the name)
             ws.getCell("A50").removeName("big");
-            expect(wb.definedNames.getRanges("big").ranges).to.deep.equal([]);
+            expect(wb.definedNames.getRanges("big").ranges).to.deep.equal(["s!$A$3:$B$49", "s!$B$50", "s!$A$51:$B$100000"]);
+        });
+
+        it("keeps the other cells of a huge range named when the names of a cell are replaced", () => {
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet("s");
+            wb.definedNames.add("s!$A$1:$XFD$1048576", "everything");
+            ws.getCell("B2").names = ["mine"];
+            expect(ws.getCell("B2").names).to.deep.equal(["mine"]);
+            expect(ws.getCell("B3").names).to.deep.equal(["everything"]);
+            expect(wb.definedNames.getRanges("everything").ranges).to.deep.equal([
+                "s!$A$1:$XFD$1",
+                "s!$A$2",
+                "s!$C$2:$XFD$2",
+                "s!$A$3:$XFD$1048576",
+            ]);
+        });
+
+        it("removes a range from a huge range in constant time, and cells of the matrix in linear time", async () => {
+            const wb = new ExcelJS.Workbook();
+            wb.definedNames.add("s!$A$1:$CV$1000", "cells"); // 100,000 cells: expanded
+            wb.definedNames.add("s!$A$1:$XFD$1048576", "big");
+            const { ms } = await timed(() => {
+                wb.definedNames.remove("s!$A$1:$XFD$1048576", "cells");
+                wb.definedNames.remove("s!$B$2:$XFC$1048575", "big");
+            });
+            expect(ms).to.be.below(1000);
+            expect(wb.definedNames.getRanges("cells").ranges).to.deep.equal([]);
+            expect(wb.definedNames.getRanges("big").ranges).to.have.length(4);
         });
 
         it('does not pollute Object.prototype through a "__proto__" sheet name', async () => {

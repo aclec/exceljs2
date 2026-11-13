@@ -1,10 +1,11 @@
-# graphify code map scope = the library source (lib/) only.
+# graphify code map scope = the library source (src/) only.
 # Tests, tooling, docs and build output are excluded so the graph stays small and stable.
 /spec/
 /test/
 /scripts/
 /dist/
 /build/
+/lib/
 /node_modules/
 /graphify-out/
 /.github/

@@ -20,7 +20,7 @@ Reverse engineered from Excel spreadsheet files as a project.
 > - **Bug fixes:** about 90 fixes for files Excel reports as corrupt, data lost on read or write, and streaming issues — many of
 >   them reported in upstream issues and pull requests. Every fix was re-implemented here with a regression test; no upstream
 >   pull-request code was merged.
-> - **Runtimes:** browsers (ES2020 bundle), Node.js ≥ 22.12 and Bun ≥ 1.4, tested in CI on all three.
+> - **Runtimes:** browsers (Chrome / Edge 93, Firefox 92, Safari 15.4 or later), Node.js ≥ 22.12 and Bun ≥ 1.4, tested in CI on all three.
 >
 > See [CHANGELOG.md](CHANGELOG.md) for the full list and [UPGRADE-5.0.md](UPGRADE-5.0.md) for the breaking changes.
 
@@ -70,8 +70,8 @@ Upgrading from 4.x? Read [UPGRADE-5.0.md](UPGRADE-5.0.md) and the [CHANGELOG](CH
 | ----------- | ------------------ |
 | Node.js     | 22.12 or later |
 | Bun         | 1.4 or later |
-| Browsers    | Modern browsers with ES2020 support, through the prebuilt bundles in `dist/` |
-| TypeScript  | The typings are tested with TypeScript 5.9, 6.0 and 7.0 |
+| Browsers    | Chrome / Edge 93, Firefox 92, Safari 15.4 or later (ES2020 syntax, ES2022 built-ins such as `Object.hasOwn`), through the prebuilt bundles in `dist/` |
+| TypeScript  | The library is written in TypeScript; its typings are checked in CI with TypeScript 6.0 |
 
 Version 5 no longer ships an ES5 build: `exceljs/dist/es5` has been removed, and neither the
  package nor the browser bundles need polyfills. Applications that must run on older runtimes
@@ -107,8 +107,8 @@ ExcelJS is often used to parse files uploaded by users. Since 5.0 the parser bou
 * **Defined names.** Defined-name ranges larger than 100,000 cells, and the ranges read from a file
  once 100,000 cells have been expanded for all its names, are kept as a single rectangle
  instead of one entry per cell. They are listed by `definedNames.model` and `getRanges()`, follow row
- and column splices, but are not enumerated by `definedNames.forEach()`, and removing a name from any
- cell of such a range removes the whole range.
+ and column splices, but are not enumerated by `definedNames.forEach()`. Removing a name from a cell
+ or a range inside such a range cuts it into the rectangles that remain (at most four per removal).
 * **Formulas.** Formulas longer than Excel's limit of 8,192 characters are rejected with an error
  when ExcelJS has to analyse them (translating a shared formula to another cell, `cell.dependencies`)
  instead of being scanned with regular expressions.
@@ -763,7 +763,7 @@ const row = worksheet.getRow(5);
 const rows = worksheet.getRows(5, 2); // start, length (>0, else undefined is returned)
 
 // Get the last editable row in a worksheet (or undefined if there are none)
-const row = worksheet.lastRow;
+const lastRow = worksheet.lastRow;
 
 // Set a specific row height
 row.height = 42.5;
@@ -786,8 +786,8 @@ row.getCell('C').value = new Date(); // C5's value set to now
 
 // Get a row as a sparse array
 // Note: interface change: worksheet.getRow(4) ==> worksheet.getRow(4).values
-row = worksheet.getRow(4).values;
-expect(row[5]).toEqual('Kyle');
+const row4Values = worksheet.getRow(4).values;
+expect(row4Values[5]).toEqual('Kyle');
 
 // assign row values by contiguous array (where array element 0 has a value)
 row.values = [1,2,3];
@@ -891,7 +891,7 @@ const cell = worksheet.getCell('C3');
 cell.value = new Date(1968, 5, 1);
 
 // query a cell's type
-expect(cell.type).toEqual(Excel.ValueType.Date);
+expect(cell.type).toEqual(ExcelJS.ValueType.Date);
 
 // use string value of cell
 myInput.value = cell.text;
@@ -951,8 +951,8 @@ worksheet.insertRow(3, ['a', 'b']);           // 'b' in B3, no merge
 ## Insert Rows[⬆](#contents)<!-- Link generated with jump2header -->
 
 ```javascript
-insertRow(pos, value, style = 'n')
-insertRows(pos, values, style = 'n')
+// insertRow(pos, value, style = 'n')
+// insertRows(pos, values, style = 'n')
 
 // Insert a couple of Rows by key-value, shifting down rows every time
 worksheet.insertRow(1, {id: 1, name: 'John Doe', dob: new Date(1970,1,1)});
@@ -1032,7 +1032,7 @@ row.splice(4, 1, 'new value 1', 'new value 2');
 ## Duplicate a Row[⬆](#contents)<!-- Link generated with jump2header -->
 
 ```javascript
-duplicateRow(start, amount = 1, insert = true)
+// duplicateRow(start, amount = 1, insert = true)
 
 const wb = new ExcelJS.Workbook();
 const ws = wb.addWorksheet('duplicateTest');
@@ -1185,8 +1185,8 @@ ws.getCell('B1').note = {
     inset: [0.25, 0.25, 0.35, 0.35]
   },
   protection: {
-    locked: True,
-    lockText: False
+    locked: 'True',
+    lockText: 'False'
   },
   editAs: 'twoCells',
 };
@@ -1415,10 +1415,10 @@ const table = ws.getTable('MyTable');
 table.removeRows(0, 2);
 
 // insert new rows at index 5
-table.addRow([new Date('2019-08-05'), 5, 'Mid'], 5);
+table.addRow([new Date('2019-08-05'), 5], 5);
 
 // append new row to bottom of table
-table.addRow([new Date('2019-08-10'), 10, 'End']);
+table.addRow([new Date('2019-08-10'), 10]);
 
 // commit the table changes into the sheet
 table.commit();
@@ -1769,7 +1769,7 @@ ws.getCell('A1').value = {
 };
 
 expect(ws.getCell('A1').text).to.equal('This is a colorful text with in-cell format');
-expect(ws.getCell('A1').type).to.equal(Excel.ValueType.RichText);
+expect(ws.getCell('A1').type).to.equal(ExcelJS.ValueType.RichText);
 
 ```
 
@@ -1905,7 +1905,7 @@ worksheet.addConditionalFormatting({
 | ------------- | -------- | ------- | ----------- |
 | type          |          |         | 'iconSet' |
 | priority      | Y        | &lt;auto&gt;  | determines priority ordering of styles |
-| iconSet       | Y        | 3TrafficLights | name of icon set to use |
+| iconSet       | Y        | 3TrafficLights1 | name of icon set to use |
 | showValue     |          | true    | Specifies whether the cells in the applied range display the icon and cell value, or the icon only |
 | reverse       |          | false   | Specifies whether the icons in the icon set specified in iconSet are show in reserve order. If custom equals "true" this value must be ignored |
 | custom        |          |  false  | Specifies whether a custom set of icons is used |
@@ -2198,25 +2198,25 @@ Options supported when reading XLSX files.
 
 ```javascript
 // read from a file
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 await workbook.xlsx.readFile(filename);
 // ... use workbook
 
 
 // read from a stream
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 await workbook.xlsx.read(stream);
 // ... use workbook
 
 
 // load from buffer
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 await workbook.xlsx.load(data);
 // ... use workbook
 
 
 // using additional options
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 await workbook.xlsx.load(data, {
   ignoreNodes: [
     'dataValidations' // ignores the workbook's Data Validations
@@ -2254,19 +2254,19 @@ Options supported when reading CSV files.
 
 ```javascript
 // read from a file
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 const worksheet = await workbook.csv.readFile(filename);
 // ... use workbook or worksheet
 
 
 // read from a stream
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 const worksheet = await workbook.csv.read(stream);
 // ... use workbook or worksheet
 
 
 // read from a file with European Dates
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 const options = {
   dateFormats: ['DD/MM/YYYY']
 };
@@ -2275,7 +2275,7 @@ const worksheet = await workbook.csv.readFile(filename, options);
 
 
 // read from a file with custom value parsing
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 const options = {
   map(value, index) {
     switch(index) {
@@ -2296,7 +2296,7 @@ const options = {
   // https://c2fo.github.io/fast-csv/docs/parsing/options
   parserOptions: {
     delimiter: '\t',
-    quote: false,
+    quote: null,
   },
 };
 const worksheet = await workbook.csv.readFile(filename, options);
@@ -2350,7 +2350,7 @@ await workbook.csv.writeFile(filename);
 await workbook.csv.write(stream, { sheetName: 'Page name' });
 
 // write to a file with European Date-Times
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 const options = {
   dateFormat: 'DD/MM/YYYY HH:mm:ss',
   dateUTC: true, // use utc when rendering dates
@@ -2359,7 +2359,7 @@ await workbook.csv.writeFile(filename, options);
 
 
 // write to a file with custom value formatting
-const workbook = new Excel.Workbook();
+const workbook = new ExcelJS.Workbook();
 const options = {
   map(value, index) {
     switch(index) {
@@ -2447,7 +2447,7 @@ const options = {
   useStyles: true,
   useSharedStrings: true
 };
-const workbook = new Excel.stream.xlsx.WorkbookWriter(options);
+const workbook = new ExcelJS.stream.xlsx.WorkbookWriter(options);
 ```
 
 In general, the interface to the streaming XLSX writer is the same as the Document workbook (and worksheets)
@@ -2531,7 +2531,7 @@ The constructor takes a required input argument and an optional options argument
 | options (optional)    | Specifies how to handle the event types occuring during the read parsing. |
 | options.entries       | Specifies whether to emit entries (`'emit'`) or not (`'ignore'`). Default is `'ignore'`. |
 | options.sharedStrings | Specifies whether to cache shared strings (`'cache'`), which inserts them into the respective cell values, or whether to emit them (`'emit'`) or ignore them (`'ignore'`), in both of which case the cell value will be a reference to the shared string's index. Default is `'cache'`. |
-| options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which inserts them into their respective cells, whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
+| options.hyperlinks    | Specifies whether to cache hyperlinks (`'cache'`), which keeps the hyperlinks of each worksheet in `worksheetReader.hyperlinks` (keyed by cell reference, with the `target` of each external link, set once the worksheet's relationships part has been read), whether to emit them (`'emit'`) or whether to ignore them (`'ignore'`). The cells of the rows do not get them: a worksheet lists its hyperlinks after its rows. Default is `'ignore'`. |
 | options.styles        | Specifies whether to cache styles (`'cache'`), which inserts them into their respective rows and cells, or whether to ignore them (`'ignore'`). Default is `'ignore'`. |
 | options.worksheets    | Specifies whether to emit worksheets (`'emit'`) or not (`'ignore'`). Default is `'emit'`. |
 | options.maxEntrySize, options.maxUncompressedSize, options.maxCompressionRatio | Decompression limits, see [Security & limits](#security--limits). Defaults are 16 GiB, 32 GiB and 1000. Worksheets stored before the shared strings or `workbook.xml` are spooled to a temporary file, which these limits bound too. |
@@ -2626,7 +2626,8 @@ For example code using ExcelJS in the browser take a look at the <a href="https:
 ## Prebundled[⬆](#contents)<!-- Link generated with jump2header -->
 
 The following files are pre-bundled and included inside the dist folder.
- They target ES2020 and need no polyfills.
+ They use ES2020 syntax and ES2022 built-ins (`Object.hasOwn`), and need no polyfills on Chrome / Edge 93, Firefox 92, Safari 15.4
+ or later.
 
 * exceljs.js
 * exceljs.min.js
@@ -2637,7 +2638,7 @@ The following value types are supported.
 
 ## Null Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Null
+Enum: ExcelJS.ValueType.Null
 
 A null value indicates an absence of value and will typically not be stored when written to file (except for merged cells).
   It can be used to remove the value from a cell.
@@ -2650,14 +2651,14 @@ worksheet.getCell('A1').value = null;
 
 ## Merge Cell[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Merge
+Enum: ExcelJS.ValueType.Merge
 
 A merge cell is one that has its value bound to another 'master' cell.
   Assigning to a merge cell will cause the master's cell to be modified.
 
 ## Number Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Number
+Enum: ExcelJS.ValueType.Number
 
 A numeric value.
 
@@ -2670,7 +2671,7 @@ worksheet.getCell('A2').value = 3.14159;
 
 ## String Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.String
+Enum: ExcelJS.ValueType.String
 
 A simple text string.
 
@@ -2682,7 +2683,7 @@ worksheet.getCell('A1').value = 'Hello, World!';
 
 ## Date Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Date
+Enum: ExcelJS.ValueType.Date
 
 A date value, represented by the JavaScript Date type.
 
@@ -2694,7 +2695,7 @@ worksheet.getCell('A1').value = new Date(2017, 2, 15);
 
 ## Hyperlink Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Hyperlink
+Enum: ExcelJS.ValueType.Hyperlink
 
 A URL with both text and link value.
 
@@ -2713,7 +2714,7 @@ worksheet.getCell('A1').value = { text: 'Sheet2', hyperlink: '#\'Sheet2\'!A1' };
 
 ## Formula Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Formula
+Enum: ExcelJS.ValueType.Formula
 
 An Excel formula for calculating values on the fly.
   Note that while the cell type will be Formula, the cell may have an effectiveType value that will
@@ -2801,17 +2802,17 @@ worksheet.fillFormula('A2:A100', 'A1+1', (row, col) => row);
 To distinguish between real and translated formula cells, use the formulaType getter:
 
 ```javascript
-worksheet.getCell('A3').formulaType === Enums.FormulaType.Master;
-worksheet.getCell('B3').formulaType === Enums.FormulaType.Shared;
+worksheet.getCell('A3').formulaType === ExcelJS.FormulaType.Master;
+worksheet.getCell('B3').formulaType === ExcelJS.FormulaType.Shared;
 ```
 
-Formula type has the following values:
+Formula type has the following values (`formulaType` is `undefined` for a cell that holds no formula):
 
-| Name                       |  Value  |
-| -------------------------- | ------- |
-| Enums.FormulaType.None     |   0     |
-| Enums.FormulaType.Master   |   1     |
-| Enums.FormulaType.Shared   |   2     |
+| Name                         |  Value  |
+| ---------------------------- | ------- |
+| ExcelJS.FormulaType.None     |   0     |
+| ExcelJS.FormulaType.Master   |   1     |
+| ExcelJS.FormulaType.Shared   |   2     |
 
 ### Array Formula[⬆](#contents)<!-- Link generated with jump2header -->
 
@@ -2846,7 +2847,7 @@ worksheet.fillFormula('A2:B3', 'A1', [1,1,1,1], 'array');
 
 ## Rich Text Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.RichText
+Enum: ExcelJS.ValueType.RichText
 
 Rich, styled text.
 
@@ -2862,7 +2863,7 @@ worksheet.getCell('A1').value = {
 
 ## Boolean Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Boolean
+Enum: ExcelJS.ValueType.Boolean
 
 E.g.
 
@@ -2873,7 +2874,7 @@ worksheet.getCell('A2').value = false;
 
 ## Error Value[⬆](#contents)<!-- Link generated with jump2header -->
 
-Enum: Excel.ValueType.Error
+Enum: ExcelJS.ValueType.Error
 
 E.g.
 
@@ -2884,15 +2885,15 @@ worksheet.getCell('A2').value = { error: '#VALUE!' };
 
 The current valid Error text values are:
 
-| Name                           | Value       |
-| ------------------------------ | ----------- |
-| Excel.ErrorValue.NotApplicable | #N/A        |
-| Excel.ErrorValue.Ref           | #REF!       |
-| Excel.ErrorValue.Name          | #NAME?      |
-| Excel.ErrorValue.DivZero       | #DIV/0!     |
-| Excel.ErrorValue.Null          | #NULL!      |
-| Excel.ErrorValue.Value         | #VALUE!     |
-| Excel.ErrorValue.Num           | #NUM!       |
+| Name                             | Value       |
+| -------------------------------- | ----------- |
+| ExcelJS.ErrorValue.NotApplicable | #N/A        |
+| ExcelJS.ErrorValue.Ref           | #REF!       |
+| ExcelJS.ErrorValue.Name          | #NAME?      |
+| ExcelJS.ErrorValue.DivZero       | #DIV/0!     |
+| ExcelJS.ErrorValue.Null          | #NULL!      |
+| ExcelJS.ErrorValue.Value         | #VALUE!     |
+| ExcelJS.ErrorValue.Num           | #NUM!       |
 
 # Caveats[⬆](#contents)<!-- Link generated with jump2header -->
 

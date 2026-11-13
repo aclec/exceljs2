@@ -18,13 +18,33 @@ const expectations = [
         create() {
             return new TableColumnXform();
         },
-        preparedModel: { id: 1, name: "Foo", totalsRowFunction: "Baz" },
-        xml: '<tableColumn id="1" name="Foo" totalsRowFunction="Baz" />',
-        parsedModel: { name: "Foo", totalsRowFunction: "Baz" },
+        preparedModel: { id: 1, name: "Foo", totalsRowFunction: "sum" },
+        xml: '<tableColumn id="1" name="Foo" totalsRowFunction="sum" />',
+        parsedModel: { name: "Foo", totalsRowFunction: "sum" },
         tests: ["render", "renderIn", "parse"],
+    },
+    {
+        // not one of ST_TotalsRowFunction: absent (the default, none)
+        title: "invalid function",
+        create() {
+            return new TableColumnXform();
+        },
+        xml: '<tableColumn id="1" name="Foo" totalsRowFunction="Baz" />',
+        parsedModel: { name: "Foo" },
+        tests: ["parse"],
     },
 ];
 
 describe("TableColumnXform", () => {
     testXformHelper(expectations);
+
+    it("throws a clear Error for a column without name (CT_TableColumn requires it)", async () => {
+        const parseSax = verquire("utils/parse-sax");
+        const error = await new TableColumnXform().parse(parseSax(['<tableColumn id="1"/>'])).then(
+            () => undefined,
+            (e) => e
+        );
+        expect(error).to.be.an.instanceOf(Error);
+        expect(error.message).to.equal("Invalid table: <tableColumn> without name");
+    });
 });

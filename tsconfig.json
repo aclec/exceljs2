@@ -1,11 +1,9 @@
 {
+    // Type checking of the sources (bun run test:types). Also the project used by editors and typescript-eslint.
+    "extends": "./tsconfig.base.json",
     "compilerOptions": {
-        "target": "es2022",
-        "module": "nodenext",
-        "moduleResolution": "nodenext",
-        "strict": true,
         "noEmit": true,
         "types": ["node", "mocha"]
     },
-    "include": ["index.d.ts", "spec/typescript/**/*.ts"]
+    "include": ["src/**/*.ts"]
 }

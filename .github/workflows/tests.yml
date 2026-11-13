@@ -133,6 +133,8 @@ jobs:
                   bun-version: ${{ env.BUN_VERSION }}
             - run: bun install --frozen-lockfile
             - run: bun run lint
+            - run: bun run check:tsdoc
+            - run: bun run check:readme
             - run: bun run format:check
 
     audit:

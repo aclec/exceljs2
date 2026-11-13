@@ -1,7 +1,7 @@
 // Builds the self-contained browser bundles in dist/ with esbuild.
 //
-//   dist/exceljs.js       dist/exceljs.min.js       (+ .map)  from lib/exceljs.browser.js
-//   dist/exceljs.bare.js  dist/exceljs.bare.min.js  (+ .map)  from lib/exceljs.bare.js
+//   dist/exceljs.js       dist/exceljs.min.js       (+ .map)  from src/exceljs.browser.ts
+//   dist/exceljs.bare.js  dist/exceljs.bare.min.js  (+ .map)  from src/exceljs.bare.ts
 //   dist/LICENSE
 //
 // The bundles target ES2020 and expose the global `ExcelJS`; when loaded through a CommonJS or AMD
@@ -30,16 +30,16 @@ const ALIASES = {
     string_decoder: polyfill("string_decoder"),
     util: shim("util.js"),
     "util-deprecate": shim("util-deprecate.js"),
-    // lib/utils/deflate.js falls back to fflate when node:zlib is not there
+    // src/utils/deflate.ts falls back to fflate when node:zlib is not there
     zlib: shim("empty.js"),
 };
 
-// lib/ and its dependencies may use either the bare or the node: prefixed specifier
+// src/ and its dependencies may use either the bare or the node: prefixed specifier
 for (const name of Object.keys(ALIASES)) ALIASES[`node:${name}`] = ALIASES[name];
 
 const BUNDLES = [
-    { entry: "lib/exceljs.browser.js", name: "exceljs" },
-    { entry: "lib/exceljs.bare.js", name: "exceljs.bare" },
+    { entry: "src/exceljs.browser.ts", name: "exceljs" },
+    { entry: "src/exceljs.bare.ts", name: "exceljs.bare" },
 ];
 
 const banner = `/*! ExcelJS v${pkg.version} | ${pkg.license} License | https://github.com/aclec/exceljs2 (fork of exceljs/exceljs) */`;

@@ -11,7 +11,7 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 const { chromium } = require("playwright-core");
-const Encryptor = require("../../lib/utils/encryptor");
+const Encryptor = require("../../lib/utils/encryptor").default;
 
 const DIST = path.resolve(__dirname, "../../dist");
 const BUNDLES = ["exceljs.js", "exceljs.min.js", "exceljs.bare.js", "exceljs.bare.min.js"];

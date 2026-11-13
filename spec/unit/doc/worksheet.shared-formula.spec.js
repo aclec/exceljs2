@@ -165,5 +165,32 @@ describe("Worksheet", () => {
                 result: 4,
             });
         });
+
+        it("throws for a result that is not a formula result before filling any cell", () => {
+            const wb = new Excel.Workbook();
+            const ws = wb.addWorksheet();
+            ws.getCell("A1").value = "kept";
+            for (const shareType of ["shared", "array"]) {
+                expect(() => ws.fillFormula("A1:A3", "X", [1, { hyperlink: "x" }, 3], shareType), shareType).to.throw(
+                    "Cannot fill a formula: the result of A2 must be a string, a number, a boolean, a Date or an error value"
+                );
+                expect(
+                    [1, 2, 3].map((r) => ws.getCell(r, 1).value),
+                    shareType
+                ).to.deep.equal(["kept", null, null]);
+            }
+            // a recent error code, and an absent (null) result, are results
+            ws.fillFormula("A1:A3", "X", [1, { error: "#SPILL!" }, null]);
+            expect(ws.getCell("A2").result).to.deep.equal({ error: "#SPILL!" });
+            expect(ws.getCell("A3").result).to.equal(undefined);
+        });
+
+        it("Leaves the results of the rows missing from a 2D array undefined", () => {
+            const ws = new Excel.Workbook().addWorksheet();
+            ws.fillFormula("A1:B2", "ROW()+COLUMN()", [[2, 3]]);
+            expect(ws.getCell("B1").value).to.deep.equal({ sharedFormula: "A1", result: 3 });
+            expect(ws.getCell("A2").value).to.deep.equal({ sharedFormula: "A1" });
+            expect(ws.getCell("B2").value).to.deep.equal({ sharedFormula: "A1" });
+        });
     });
 });
